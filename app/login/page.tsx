@@ -42,44 +42,39 @@ export default function LoginPage() {
   const [session, setSession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // page.tsx - Update the handleLogin function
+  const handleLogin = async () => {
+    setError("");
+    setIsLoading(true);
 
-const handleLogin = async () => {
-  setError("");
-  setIsLoading(true);
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: email,
+          password: password,
+        }),
+      });
 
-  try {
-    // Create FormData object to match OAuth2PasswordRequestForm expectation
-    const formData = new FormData();
-    formData.append("username", email);
-    formData.append("password", password);
+      if (!response.ok) {
+        throw new Error("Invalid credentials");
+      }
 
-    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
-      method: "POST",
-      // Don't set Content-Type header - let browser set it with boundary
-      body: formData,
-    });
+      const data: LoginResponse = await response.json();
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.detail || "Invalid credentials");
+      if (data.mfa_required) {
+        setSession(data.session || "");
+        setShowMFA(true);
+      } else if (data.token) {
+        localStorage.setItem("token", data.token);
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      }
+    } catch (error: any) {
+      setError(error.message);
+    } finally {
+      setIsLoading(false);
     }
-
-    const data: LoginResponse = await response.json();
-
-    if (data.mfa_required) {
-      setSession(data.session || "");
-      setShowMFA(true);
-    } else if (data.token) {
-      localStorage.setItem("token", data.token);
-      router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
-    }
-  } catch (error: any) {
-    setError(error.message);
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   const handleMFASubmit = async () => {
     setError("");
