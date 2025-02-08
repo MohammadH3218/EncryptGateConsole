@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { Suspense, useState } from "react"
 import { DashboardHeader } from "@/components/dashboard-header"
 import { EmailsList } from "@/components/emails-list-component"
 import { FadeInSection } from "@/components/fade-in-section"
@@ -11,6 +11,15 @@ import { logout } from "@/lib/auth"
 export default function AdminAllEmailsPage() {
   useRequireAuth()
   const router = useRouter()
+
+  return (
+    <Suspense fallback={<div>Loading emails...</div>}>
+      <AllEmailsContent router={router} />
+    </Suspense>
+  )
+}
+
+function AllEmailsContent({ router }: { router: ReturnType<typeof useRouter> }) {
   const searchParams = useSearchParams()
   const [searchQuery, setSearchQuery] = useState("")
   const employeeFilter = searchParams.get("employee")
@@ -31,4 +40,3 @@ export default function AdminAllEmailsPage() {
     </div>
   )
 }
-
