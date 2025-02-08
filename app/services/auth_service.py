@@ -3,7 +3,7 @@ from jose import jwt
 from fastapi import HTTPException
 from datetime import datetime, timedelta
 import hmac, hashlib, base64, os
-
+import logging
 # Cognito configuration from environment variables
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -23,6 +23,7 @@ def generate_client_secret_hash(username: str) -> str:
 
 # Authenticate user with AWS Cognito
 def authenticate_user_with_cognito(username: str, password: str):
+    logging.info(f"Authenticating user {username} with Cognito")
     try:
         client_secret_hash = generate_client_secret_hash(username)
         response = cognito_client.initiate_auth(
@@ -34,16 +35,22 @@ def authenticate_user_with_cognito(username: str, password: str):
                 "SECRET_HASH": client_secret_hash,
             },
         )
+        logging.info(f"Cognito response: {response}")
+
         if "ChallengeName" in response and response["ChallengeName"] == "SOFTWARE_TOKEN_MFA":
+            logging.info("MFA challenge triggered")
             return {"mfa_required": True, "session": response["Session"]}
+
         return {
             "mfa_required": False,
             "authentication_result": response["AuthenticationResult"],
             "email": username,
-            "role": "user"  # Customize based on your app's user role logic
+            "role": "user",
         }
     except Exception as e:
+        logging.error(f"Error authenticating with Cognito: {e}")
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
 
 # Generate JWT access token
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=30)):

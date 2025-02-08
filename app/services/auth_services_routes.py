@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from app.services.auth_service import authenticate_user_with_cognito, verify_mfa_code, confirm_signup
 from pydantic import BaseModel
+import logging
 
 router = APIRouter()
 
@@ -23,17 +24,27 @@ class LoginResponse(BaseModel):
     session: str = None
 
 # User login route
+import logging
+
 @router.post("/login", response_model=LoginResponse)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    auth_response = authenticate_user_with_cognito(form_data.username, form_data.password)
-
-    if auth_response.get("mfa_required"):
-        return {"mfa_required": True, "session": auth_response["session"]}
-
-    authentication_result = auth_response.get("authentication_result")
-    if not authentication_result:
+    logging.info(f"Login attempt: username={form_data.username}")
+    try:
+        auth_response = authenticate_user_with_cognito(form_data.username, form_data.password)
+    except Exception as e:
+        logging.error(f"Error during authentication: {e}")
         raise HTTPException(status_code=401, detail="Authentication failed")
 
+    if auth_response.get("mfa_required"):
+        logging.info("MFA required for user")
+        return {"mfa_required": True, "session": auth_response["session"]}
+    
+    authentication_result = auth_response.get("authentication_result")
+    if not authentication_result:
+        logging.warning("Authentication result is missing")
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+    logging.info("User authenticated successfully")
     return {"token": authentication_result["IdToken"], "role": "employee", "email": form_data.username, "mfa_required": False}
 
 # Confirm signup and password change route
