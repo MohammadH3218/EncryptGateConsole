@@ -9,14 +9,13 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { LogoText } from "@/components/ui/logo-text"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { login } from "@/lib/auth"
 
 type UserType = "admin" | "employee"
 
-interface LoginCredentials {
-  email: string
-  password: string
-  userType: UserType
+interface LoginResponse {
+  token?: string
+  mfa_required: boolean
+  session?: string
 }
 
 export default function LoginPage() {
@@ -27,69 +26,65 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const [showMFA, setShowMFA] = useState(false)
   const [mfaCode, setMfaCode] = useState("")
+  const [session, setSession] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
-  const validateCredentials = async (credentials: LoginCredentials) => {
-    // TODO: Implement your backend validation here
-    // This is a mock implementation
-    return new Promise<boolean>((resolve) => {
-      setTimeout(() => {
-        resolve(true)
-      }, 1000)
-    })
-  }
-
-  const verifyMFACode = async (code: string) => {
-    // TODO: Implement your MFA verification here
-    // This is a mock implementation
-    return new Promise<boolean>((resolve) => {
-      setTimeout(() => {
-        resolve(code.length === 6)
-      }, 1000)
-    })
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleLogin = async () => {
     setError("")
     setIsLoading(true)
 
     try {
-      const credentials: LoginCredentials = {
-        email,
-        password,
-        userType,
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          username: email,
+          password: password,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error("Invalid credentials")
       }
 
-      const isValid = await validateCredentials(credentials)
+      const data: LoginResponse = await response.json()
 
-      if (isValid) {
+      if (data.mfa_required) {
+        setSession(data.session || "")
         setShowMFA(true)
-      } else {
-        setError("Invalid email or password")
+      } else if (data.token) {
+        localStorage.setItem("token", data.token)
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard")
       }
-    } catch (error) {
-      setError("An error occurred. Please try again.")
+    } catch (error: any) {
+      setError(error.message)
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleMFASubmit = async () => {
-    setIsLoading(true)
     setError("")
+    setIsLoading(true)
 
     try {
-      const isValid = await verifyMFACode(mfaCode)
+      const response = await fetch("/api/auth/verify-mfa", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code: mfaCode, session }),
+      })
 
-      if (isValid) {
-        login(email, userType)
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard")
-      } else {
-        setError("Invalid MFA code")
+      if (!response.ok) {
+        throw new Error("Invalid MFA code")
       }
-    } catch (error) {
-      setError("An error occurred. Please try again.")
+
+      const data = await response.json()
+      localStorage.setItem("token", data.token)
+      router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard")
+    } catch (error: any) {
+      setError(error.message)
     } finally {
       setIsLoading(false)
     }
@@ -107,7 +102,7 @@ export default function LoginPage() {
                   fill="currentColor"
                 />
                 <path
-                  d="M16 7.6c-4.632 0-8.4 3.768-8.4 8.4s3.768 8.4 8.4 8.4 8.4-3.768 8.4-8.4-3.768-8.4-8.4-8.4zm0 14c-3.08 0-5.6-2.52-5.6-5.6s2.52-5.6 5.6-5.6 5.6 2.52 5.6 5.6-2.52 5.6-5.6 5.6z"
+                  d="M16 7.6c-4.632 0-8.4 3.768-8.4 8.4s3.768 8.4 8.4 8.4 8.4-3.768 8.4-8.4-3.768-8.4-8.4-8.4zm0 14c-3.08 0-5.6-2.52-5.6-5.6s2.52-5.6 5.6-5.6 5.6 2.52 5.6 5.6-2.52 5.6-5.6-5.6z"
                   fill="currentColor"
                 />
                 <path
@@ -123,7 +118,7 @@ export default function LoginPage() {
             Choose your account type to access the security dashboard
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={(e) => { e.preventDefault(); handleLogin() }}>
           <CardContent className="space-y-6">
             <RadioGroup value={userType} onValueChange={(value: UserType) => setUserType(value)} className="grid gap-4">
               <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
@@ -147,23 +142,11 @@ export default function LoginPage() {
             </RadioGroup>
             <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="name@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+              <Input id="email" type="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+              <Input id="password" type="password" placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
@@ -206,4 +189,3 @@ export default function LoginPage() {
     </div>
   )
 }
-
