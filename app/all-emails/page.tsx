@@ -26,7 +26,7 @@ export default function AllEmailsPage() {
           <EmailsList searchQuery={searchQuery} employeeFilter={null} />
         </FadeInSection>
       </main>
-    </div> /* test */
+    </div> 
   )
 }
 
