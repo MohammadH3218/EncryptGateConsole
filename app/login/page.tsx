@@ -45,35 +45,22 @@ export default function LoginPage() {
   const handleLogin = async () => {
     setError("");
     setIsLoading(true);
-// hellos
+
     try {
-      const formData = new URLSearchParams();
-      formData.append("username", email);
-      formData.append("password", password);
-
-      console.log("Sending login request:", {
-        url: `${process.env.NEXT_PUBLIC_API_URL}/auth/login`,
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString(),
-      });
-
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString(),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: email,
+          password: password,
+        }),
       });
 
-      console.log("Login response status:", response.status);
-
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("Error response:", errorText);
         throw new Error("Invalid credentials");
       }
 
       const data: LoginResponse = await response.json();
-      console.log("Login response data:", data);
 
       if (data.mfa_required) {
         setSession(data.session || "");
@@ -83,8 +70,7 @@ export default function LoginPage() {
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       }
     } catch (error: any) {
-      console.error("Login error:", error);
-      setError(error.message || "An unknown error occurred");
+      setError(error.message);
     } finally {
       setIsLoading(false);
     }
@@ -95,13 +81,6 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      console.log("Sending MFA verification request:", {
-        url: `${process.env.NEXT_PUBLIC_API_URL}/auth/verify-totp`,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: mfaCode, session }),
-      });
-
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/verify-totp`, {
         method: "POST",
         headers: {
@@ -110,22 +89,15 @@ export default function LoginPage() {
         body: JSON.stringify({ code: mfaCode, session }),
       });
 
-      console.log("MFA response status:", response.status);
-
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("MFA error response:", errorText);
         throw new Error("Invalid MFA code");
       }
 
       const data = await response.json();
-      console.log("MFA verification response data:", data);
-
       localStorage.setItem("token", data.token);
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
-      console.error("MFA verification error:", error);
-      setError(error.message || "An unknown error occurred");
+      setError(error.message);
     } finally {
       setIsLoading(false);
     }
