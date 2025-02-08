@@ -34,7 +34,7 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -68,7 +68,7 @@ export default function LoginPage() {
     setIsLoading(true)
 
     try {
-      const response = await fetch("/api/auth/verify-mfa", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/verify-totp`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

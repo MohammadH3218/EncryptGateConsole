@@ -1,13 +1,15 @@
 import boto3
 from jose import jwt
 from fastapi import HTTPException
+from datetime import datetime, timedelta
 import hmac, hashlib, base64, os
 
 # Cognito configuration from environment variables
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_PRIVATE_KEY = os.getenv("JWT_PRIVATE_KEY")
+JWT_PUBLIC_KEY = os.getenv("JWT_PUBLIC_KEY")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "RS256")
 
 # Initialize the Cognito client
@@ -16,8 +18,8 @@ cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
 # Generate client secret hash
 def generate_client_secret_hash(username: str) -> str:
     message = username + CLIENT_ID
-    secret = CLIENT_SECRET.encode('utf-8')
-    return base64.b64encode(hmac.new(secret, message.encode('utf-8'), hashlib.sha256).digest()).decode()
+    secret = CLIENT_SECRET.encode("utf-8")
+    return base64.b64encode(hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()).decode()
 
 # Authenticate user with AWS Cognito
 def authenticate_user_with_cognito(username: str, password: str):
@@ -34,9 +36,28 @@ def authenticate_user_with_cognito(username: str, password: str):
         )
         if "ChallengeName" in response and response["ChallengeName"] == "SOFTWARE_TOKEN_MFA":
             return {"mfa_required": True, "session": response["Session"]}
-        return {"mfa_required": False, "authentication_result": response["AuthenticationResult"]}
+        return {
+            "mfa_required": False,
+            "authentication_result": response["AuthenticationResult"],
+            "email": username,
+            "role": "user"  # Customize based on your app's user role logic
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Authentication service error: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+# Generate JWT access token
+def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=30)):
+    payload = data.copy()
+    payload.update({"exp": datetime.utcnow() + expires_delta})
+    return jwt.encode(payload, JWT_PRIVATE_KEY, algorithm=JWT_ALGORITHM)
+
+# Verify JWT access token
+def verify_access_token(token: str):
+    try:
+        payload = jwt.decode(token, JWT_PUBLIC_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.JWTError as e:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # Complete the MFA challenge
 def verify_mfa_code(session: str, code: str):

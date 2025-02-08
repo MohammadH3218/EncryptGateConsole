@@ -1,10 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import OAuth2PasswordRequestForm
-from app.services.auth_service import authenticate_user_with_cognito, verify_totp
-from app.dependencies.auth import get_current_user
 from pydantic import BaseModel
+from app.services.auth_service import authenticate_user_with_cognito, verify_mfa_code, create_access_token
+from app.dependencies.auth import get_current_user
 
-router = APIRouter() #test
+router = APIRouter()
 
 # Request/Response models
 class MFARequest(BaseModel):
@@ -15,28 +15,50 @@ class LoginResponse(BaseModel):
     role: str
     email: str
 
+class MFAResponse(BaseModel):
+    message: str
+
 # User login route
 @router.post("/login", response_model=LoginResponse)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    # Authenticate the user with Cognito
-    user = authenticate_user_with_cognito(form_data.username, form_data.password)
-    
-    if not user:
+    print(f"Login attempt for: {form_data.username}")
+
+    # Authenticate the user with AWS Cognito
+    auth_response = authenticate_user_with_cognito(form_data.username, form_data.password)
+
+    if auth_response["mfa_required"]:
+        raise HTTPException(status_code=403, detail="MFA required. Use /verify-totp to continue.", headers={"session": auth_response["session"]})
+
+    if not auth_response.get("authentication_result"):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    # Return token and user details if authentication is successful
-    return {"token": user["AccessToken"], "role": user["role"], "email": user["email"]}
+    # Generate JWT access token
+    access_token = create_access_token({
+        "sub": form_data.username,
+        "role": auth_response["role"],
+        "email": auth_response["email"]
+    })
+
+    return {
+        "token": access_token,
+        "role": auth_response["role"],
+        "email": auth_response["email"]
+    }
 
 # MFA verification route
-@router.post("/verify-totp")
+@router.post("/verify-totp", response_model=MFAResponse)
 async def verify_totp_endpoint(request: Request, mfa_request: MFARequest):
-    # Extract the JWT token from the request headers
-    token = request.headers.get("Authorization", "").replace("Bearer ", "")
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token")
+    session = request.headers.get("Session")
+    if not session:
+        raise HTTPException(status_code=401, detail="Missing session token for MFA verification")
 
-    # Verify the TOTP code (function implementation could validate against Cognito if required)
-    if not verify_totp(token, mfa_request.code):
-        raise HTTPException(status_code=401, detail="Invalid MFA code")
+    # Verify the MFA code and complete the challenge
+    auth_result = verify_mfa_code(session, mfa_request.code)
 
-    return {"message": "MFA verified successfully"}
+    # Generate JWT access token after MFA verification
+    access_token = create_access_token({
+        "sub": "username-placeholder",  # Replace with actual username or email after lookup
+        "role": "user"
+    })
+
+    return {"message": "MFA verified successfully", "token": access_token}
