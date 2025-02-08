@@ -43,38 +43,50 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async () => {
-    setError("");
-    setIsLoading(true);
-
+    console.log("Attempting login...");
+  
     try {
+      const formData = new URLSearchParams();
+      formData.append("username", email);
+      formData.append("password", password);
+  
+      console.log("Sending request to:", `${process.env.NEXT_PUBLIC_API_URL}/auth/login`);
+      console.log("Form data:", Object.fromEntries(formData.entries()));
+  
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: email,
-          password: password,
-        }),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
       });
-
+  
+      console.log("Response status:", response.status);
+      
+      const responseData = await response.json();
+      console.log("Response data:", responseData);
+  
       if (!response.ok) {
-        throw new Error("Invalid credentials");
+        throw new Error(responseData.detail || "Invalid credentials");
       }
-
-      const data: LoginResponse = await response.json();
-
-      if (data.mfa_required) {
-        setSession(data.session || "");
+  
+      if (responseData.mfa_required) {
+        setSession(responseData.session || "");
         setShowMFA(true);
-      } else if (data.token) {
-        localStorage.setItem("token", data.token);
+        console.log("MFA required. Session:", responseData.session);
+      } else if (responseData.token) {
+        console.log("Login successful. Token:", responseData.token);
+        localStorage.setItem("token", responseData.token);
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       }
     } catch (error: any) {
+      console.error("Login error:", error.message);
       setError(error.message);
     } finally {
       setIsLoading(false);
     }
   };
+  
 
   const handleMFASubmit = async () => {
     setError("");
