@@ -1,71 +1,84 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { LogoText } from "@/components/ui/logo-text"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { LogoText } from "@/components/ui/logo-text";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
-type UserType = "admin" | "employee"
+type UserType = "admin" | "employee";
 
 interface LoginResponse {
-  token?: string
-  mfa_required: boolean
-  session?: string
+  token?: string;
+  mfa_required: boolean;
+  session?: string;
 }
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [userType, setUserType] = useState<UserType>("admin")
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState("")
-  const [showMFA, setShowMFA] = useState(false)
-  const [mfaCode, setMfaCode] = useState("")
-  const [session, setSession] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
+  const router = useRouter();
+  const [userType, setUserType] = useState<UserType>("admin");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [showMFA, setShowMFA] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
+  const [session, setSession] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async () => {
-    setError("")
-    setIsLoading(true)
+    setError("");
+    setIsLoading(true);
 
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
-        method: "GET",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           username: email,
           password: password,
         }),
-      })
+      });
 
       if (!response.ok) {
-        throw new Error("Invalid credentials")
+        throw new Error("Invalid credentials");
       }
 
-      const data: LoginResponse = await response.json()
+      const data: LoginResponse = await response.json();
 
       if (data.mfa_required) {
-        setSession(data.session || "")
-        setShowMFA(true)
+        setSession(data.session || "");
+        setShowMFA(true);
       } else if (data.token) {
-        localStorage.setItem("token", data.token)
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard")
+        localStorage.setItem("token", data.token);
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       }
     } catch (error: any) {
-      setError(error.message)
+      setError(error.message);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   const handleMFASubmit = async () => {
-    setError("")
-    setIsLoading(true)
+    setError("");
+    setIsLoading(true);
 
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/verify-totp`, {
@@ -74,21 +87,21 @@ export default function LoginPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ code: mfaCode, session }),
-      })
+      });
 
       if (!response.ok) {
-        throw new Error("Invalid MFA code")
+        throw new Error("Invalid MFA code");
       }
 
-      const data = await response.json()
-      localStorage.setItem("token", data.token)
-      router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard")
+      const data = await response.json();
+      localStorage.setItem("token", data.token);
+      router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
-      setError(error.message)
+      setError(error.message);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -118,7 +131,7 @@ export default function LoginPage() {
             Choose your account type to access the security dashboard
           </CardDescription>
         </CardHeader>
-        <form onSubmit={(e) => { e.preventDefault(); handleLogin() }}>
+        <form onSubmit={(e) => { e.preventDefault(); handleLogin(); }}>
           <CardContent className="space-y-6">
             <RadioGroup value={userType} onValueChange={(value: UserType) => setUserType(value)} className="grid gap-4">
               <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
@@ -187,5 +200,5 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }
