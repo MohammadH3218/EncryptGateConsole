@@ -4,7 +4,7 @@ from app.services.auth_service import authenticate_user_with_cognito, verify_tot
 from app.dependencies.auth import get_current_user
 from pydantic import BaseModel
 
-router = APIRouter()
+router = APIRouter() #test
 
 # Request/Response models
 class MFARequest(BaseModel):
