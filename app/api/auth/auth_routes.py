@@ -57,7 +57,7 @@ async def verify_totp_endpoint(request: Request, mfa_request: MFARequest):
 
     # Generate JWT access token after MFA verification
     access_token = create_access_token({
-        "sub": "username-placeholder",  # Replace with actual username or email after lookup
+        "sub": "username-placeholder",  # Replace w/ actual username or email after lookup
         "role": "user"
     })
 
