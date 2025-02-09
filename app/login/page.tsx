@@ -45,35 +45,36 @@ export default function LoginPage() {
   const handleLogin = async () => {
     setIsLoading(true);
     setError("");
-    console.log("Attempting login...");
 
     try {
-      const formData = new URLSearchParams();
-      formData.append("username", email);
-      formData.append("password", password);
-
-      console.log("Sending request to:", `${process.env.NEXT_PUBLIC_API_URL}/auth/login`);
-
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/json",
         },
-        body: formData.toString(),
+        body: JSON.stringify({
+          username: email,
+          password,
+        }),
       });
 
-      const responseData: LoginResponse = await response.json();
-
       if (!response.ok) {
-        throw new Error(responseData?.mfa_required ? "MFA required" : "Invalid credentials");
+        // Attempt to parse JSON error if available
+        const errorText = await response.text();
+        try {
+          const errorData = JSON.parse(errorText);
+          throw new Error(errorData.detail || "Invalid credentials");
+        } catch {
+          throw new Error("Unexpected server error. Please try again later.");
+        }
       }
+
+      const responseData: LoginResponse = await response.json();
 
       if (responseData.mfa_required) {
         setSession(responseData.session || "");
         setShowMFA(true);
-        console.log("MFA required. Session:", responseData.session);
       } else if (responseData.token) {
-        console.log("Login successful. Token:", responseData.token);
         localStorage.setItem("token", responseData.token);
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       }
