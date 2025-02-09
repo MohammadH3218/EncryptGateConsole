@@ -4,7 +4,6 @@ from fastapi import HTTPException
 from datetime import datetime, timedelta
 import hmac, hashlib, base64, os
 import logging
-
 # Cognito configuration from environment variables
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -40,20 +39,14 @@ def authenticate_user_with_cognito(username: str, password: str):
 
         if "ChallengeName" in response and response["ChallengeName"] == "SOFTWARE_TOKEN_MFA":
             logging.info("MFA challenge triggered")
-            return {"mfa_required": True, "session": response["Session"], "email": username, "role": "user"}  # Added email and role
+            return {"mfa_required": True, "session": response["Session"]}
 
-        authentication_result = response.get("AuthenticationResult")
-        if authentication_result:
-            return {
-                "mfa_required": False,
-                "authentication_result": authentication_result,
-                "email": username,
-                "role": "user",
-            }
-        else:  # Handle missing AuthenticationResult
-            logging.error("Authentication failed: AuthenticationResult missing")
-            raise HTTPException(status_code=401, detail="Authentication failed: Check credentials")
-
+        return {
+            "mfa_required": False,
+            "authentication_result": response["AuthenticationResult"],
+            "email": username,
+            "role": "user",
+        }
     except Exception as e:
         logging.error(f"Error authenticating with Cognito: {e}")
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
