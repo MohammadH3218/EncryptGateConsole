@@ -29,6 +29,8 @@ interface LoginResponse {
   token?: string;
   mfa_required: boolean;
   session?: string;
+  email?: string;
+  role?: string;
 }
 
 export default function LoginPage() {
@@ -59,7 +61,6 @@ export default function LoginPage() {
       });
 
       if (!response.ok) {
-        // Attempt to parse JSON error if available
         const errorText = await response.text();
         try {
           const errorData = JSON.parse(errorText);
@@ -103,8 +104,8 @@ export default function LoginPage() {
         throw new Error("Invalid MFA code");
       }
 
-      const data = await response.json();
-      localStorage.setItem("token", data.token);
+      const data: LoginResponse = await response.json();
+      localStorage.setItem("token", data.token || "");
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
       console.error("MFA verification error:", error.message);
