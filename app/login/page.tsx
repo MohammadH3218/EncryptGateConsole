@@ -43,16 +43,17 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleLogin = async () => {
+    setIsLoading(true);
+    setError("");
     console.log("Attempting login...");
-  
+
     try {
       const formData = new URLSearchParams();
       formData.append("username", email);
       formData.append("password", password);
-  
+
       console.log("Sending request to:", `${process.env.NEXT_PUBLIC_API_URL}/auth/login`);
-      console.log("Form data:", Object.fromEntries(formData.entries()));
-  
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
         method: "POST",
         headers: {
@@ -60,16 +61,13 @@ export default function LoginPage() {
         },
         body: formData.toString(),
       });
-  
-      console.log("Response status:", response.status);
-      
-      const responseData = await response.json();
-      console.log("Response data:", responseData);
-  
+
+      const responseData: LoginResponse = await response.json();
+
       if (!response.ok) {
-        throw new Error(responseData.detail || "Invalid credentials");
+        throw new Error(responseData?.mfa_required ? "MFA required" : "Invalid credentials");
       }
-  
+
       if (responseData.mfa_required) {
         setSession(responseData.session || "");
         setShowMFA(true);
@@ -86,14 +84,13 @@ export default function LoginPage() {
       setIsLoading(false);
     }
   };
-  
 
   const handleMFASubmit = async () => {
     setError("");
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/verify-totp`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/verify-mfa`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -109,6 +106,7 @@ export default function LoginPage() {
       localStorage.setItem("token", data.token);
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
+      console.error("MFA verification error:", error.message);
       setError(error.message);
     } finally {
       setIsLoading(false);

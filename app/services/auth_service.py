@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from datetime import datetime, timedelta
 import hmac, hashlib, base64, os
 import logging
+
 # Cognito configuration from environment variables
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 CLIENT_ID = os.getenv("CLIENT_ID")
@@ -43,14 +44,13 @@ def authenticate_user_with_cognito(username: str, password: str):
 
         return {
             "mfa_required": False,
-            "authentication_result": response["AuthenticationResult"],
+            "authentication_result": response.get("AuthenticationResult"),
             "email": username,
             "role": "user",
         }
     except Exception as e:
         logging.error(f"Error authenticating with Cognito: {e}")
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
-
 
 # Generate JWT access token
 def create_access_token(data: dict, expires_delta: timedelta = timedelta(minutes=30)):
@@ -75,7 +75,7 @@ def verify_mfa_code(session: str, code: str):
             Session=session,
             ChallengeResponses={"USERNAME": "username-placeholder", "SOFTWARE_TOKEN_MFA_CODE": code},
         )
-        return response["AuthenticationResult"]
+        return response.get("AuthenticationResult")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"MFA verification error: {str(e)}")
 

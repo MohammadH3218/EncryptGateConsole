@@ -17,16 +17,14 @@ class SignupConfirmationRequest(BaseModel):
     new_password: str
 
 class LoginResponse(BaseModel):
-    token: str
-    role: str
-    email: str
-    mfa_required: bool
+    token: str = None
+    role: str = None
+    email: str = None
+    mfa_required: bool = False
     session: str = None
 
 # User login route
-import logging
-
-@router.post("/login", response_model=LoginResponse)
+@router.post("/auth/login", response_model=LoginResponse)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     logging.info(f"Login attempt: username={form_data.username}")
     try:
@@ -37,7 +35,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     if auth_response.get("mfa_required"):
         logging.info("MFA required for user")
-        return {"mfa_required": True, "session": auth_response["session"]}
+        return LoginResponse(mfa_required=True, session=auth_response["session"])
     
     authentication_result = auth_response.get("authentication_result")
     if not authentication_result:
@@ -45,10 +43,10 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         raise HTTPException(status_code=401, detail="Authentication failed")
 
     logging.info("User authenticated successfully")
-    return {"token": authentication_result["IdToken"], "role": "employee", "email": form_data.username, "mfa_required": False}
+    return LoginResponse(token=authentication_result["IdToken"], role="employee", email=form_data.username)
 
 # Confirm signup and password change route
-@router.post("/confirm-signup")
+@router.post("/auth/confirm-signup")
 async def confirm_signup_endpoint(request: SignupConfirmationRequest):
     success = confirm_signup(request.email, request.temporary_password, request.new_password)
     if not success:
@@ -56,7 +54,7 @@ async def confirm_signup_endpoint(request: SignupConfirmationRequest):
     return {"message": "Password changed successfully"}
 
 # MFA verification route
-@router.post("/verify-mfa")
+@router.post("/auth/verify-mfa")
 async def verify_mfa_endpoint(request: Request, mfa_request: MFARequest):
     try:
         auth_result = verify_mfa_code(mfa_request.session, mfa_request.code)
