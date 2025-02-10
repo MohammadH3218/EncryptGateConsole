@@ -49,7 +49,7 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/authenticate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -97,7 +97,7 @@ export default function LoginPage() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ code: mfaCode, session }),
+        body: JSON.stringify({ code: mfaCode, session, username: email }),
       });
 
       if (!response.ok) {
