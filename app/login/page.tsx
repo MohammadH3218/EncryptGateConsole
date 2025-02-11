@@ -44,12 +44,14 @@ export default function LoginPage() {
   const [session, setSession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+
   const handleLogin = async () => {
     setIsLoading(true);
     setError("");
 
     try {
-      const response = await fetch("/api/auth/authenticate", {
+      const response = await fetch(`${apiBaseUrl}/api/auth/authenticate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -92,7 +94,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/auth/verify-mfa", {
+      const response = await fetch(`${apiBaseUrl}/api/auth/verify-mfa`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
