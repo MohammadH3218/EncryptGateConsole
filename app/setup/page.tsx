@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Card,
@@ -16,6 +16,93 @@ import { Label } from "@/components/ui/label";
 import { LogoText } from "@/components/ui/logo-text";
 import { Progress } from "@/components/ui/progress";
 import { QrCode, KeyRound, ShieldCheck } from "lucide-react";
+
+// Suspense wrapper for SetupPage
+export default function SetupPage() {
+  return (
+    <Suspense fallback={<div>Loading setup page...</div>}>
+      <SetupContent />
+    </Suspense>
+  );
+}
+
+function SetupContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [currentStep, setCurrentStep] = useState(0);
+  const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [session, setSession] = useState("");
+
+  useEffect(() => {
+    const emailParam = searchParams.get("email");
+    const sessionParam = searchParams.get("session");
+
+    if (!emailParam || !sessionParam) {
+      router.push("/login");
+    } else {
+      setEmail(emailParam);
+      setSession(sessionParam);
+    }
+  }, [searchParams, router]);
+
+  const steps = [
+    { title: "Create Password", description: "Set up your new password", icon: KeyRound, component: PasswordStep },
+    { title: "Set up MFA", description: "Configure your authenticator app", icon: QrCode, component: MFASetupStep },
+    { title: "Verify MFA", description: "Verify your authenticator setup", icon: ShieldCheck, component: MFAVerificationStep },
+  ];
+
+  const handleNext = () => {
+    if (currentStep === steps.length - 1) {
+      router.push("/login");
+    } else {
+      setCurrentStep((prev) => prev + 1);
+    }
+  };
+
+  const CurrentStepComponent = steps[currentStep].component;
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-4">
+          <div className="flex justify-center items-center gap-2">
+            <div className="w-8 h-8">
+              {/* Your SVG icon */}
+            </div>
+            <LogoText>EncryptGate</LogoText>
+          </div>
+          <CardTitle className="text-2xl font-bold text-center">{steps[currentStep].title}</CardTitle>
+          <CardDescription className="text-center">{steps[currentStep].description}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-6">
+            <Progress value={(currentStep + 1) * (100 / steps.length)} className="h-2" />
+            <div className="flex justify-between mt-2">
+              {steps.map((step, index) => (
+                <div
+                  key={index}
+                  className={`flex items-center ${index <= currentStep ? "text-primary" : "text-muted-foreground"}`}
+                >
+                  <step.icon className="w-4 h-4" />
+                </div>
+              ))}
+            </div>
+          </div>
+          {error && <div className="mb-4 p-2 bg-destructive/10 text-destructive text-sm rounded">{error}</div>}
+          {email && session && (
+            <CurrentStepComponent onNext={handleNext} onError={setError} email={email} session={session} />
+          )}
+        </CardContent>
+        <CardFooter>
+          <p className="text-sm text-muted-foreground text-center w-full">
+            Step {currentStep + 1} of {steps.length}
+          </p>
+        </CardFooter>
+      </Card>
+    </div>
+  );
+}
 
 interface SetupStepProps {
   onNext: () => void;
@@ -205,81 +292,3 @@ const MFAVerificationStep = ({ onNext, onError, email, session }: SetupStepProps
     </form>
   );
 };
-
-export default function SetupPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [currentStep, setCurrentStep] = useState(0);
-  const [error, setError] = useState("");
-  const [email, setEmail] = useState("");
-  const [session, setSession] = useState("");
-
-  useEffect(() => {
-    const emailParam = searchParams.get("email");
-    const sessionParam = searchParams.get("session");
-
-    if (!emailParam || !sessionParam) {
-      router.push("/login");
-    } else {
-      setEmail(emailParam);
-      setSession(sessionParam);
-    }
-  }, [searchParams, router]);
-
-  const steps = [
-    { title: "Create Password", description: "Set up your new password", icon: KeyRound, component: PasswordStep },
-    { title: "Set up MFA", description: "Configure your authenticator app", icon: QrCode, component: MFASetupStep },
-    { title: "Verify MFA", description: "Verify your authenticator setup", icon: ShieldCheck, component: MFAVerificationStep },
-  ];
-
-  const handleNext = () => {
-    if (currentStep === steps.length - 1) {
-      router.push("/login");
-    } else {
-      setCurrentStep((prev) => prev + 1);
-    }
-  };
-
-  const CurrentStepComponent = steps[currentStep].component;
-
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-4">
-          <div className="flex justify-center items-center gap-2">
-            <div className="w-8 h-8">
-              {/* Your SVG icon */}
-            </div>
-            <LogoText>EncryptGate</LogoText>
-          </div>
-          <CardTitle className="text-2xl font-bold text-center">{steps[currentStep].title}</CardTitle>
-          <CardDescription className="text-center">{steps[currentStep].description}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-6">
-            <Progress value={(currentStep + 1) * (100 / steps.length)} className="h-2" />
-            <div className="flex justify-between mt-2">
-              {steps.map((step, index) => (
-                <div
-                  key={index}
-                  className={`flex items-center ${index <= currentStep ? "text-primary" : "text-muted-foreground"}`}
-                >
-                  <step.icon className="w-4 h-4" />
-                </div>
-              ))}
-            </div>
-          </div>
-          {error && <div className="mb-4 p-2 bg-destructive/10 text-destructive text-sm rounded">{error}</div>}
-          {email && session && (
-            <CurrentStepComponent onNext={handleNext} onError={setError} email={email} session={session} />
-          )}
-        </CardContent>
-        <CardFooter>
-          <p className="text-sm text-muted-foreground text-center w-full">
-            Step {currentStep + 1} of {steps.length}
-          </p>
-        </CardFooter>
-      </Card>
-    </div>
-  );
-}
