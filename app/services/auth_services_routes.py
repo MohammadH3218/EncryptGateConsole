@@ -6,7 +6,7 @@ import base64
 import logging
 import os
 from datetime import datetime, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, make_response
 from dotenv import load_dotenv
 import pyotp
 import qrcode
@@ -35,8 +35,19 @@ def generate_client_secret_hash(username: str) -> str:
     return hash_result
 
 
-@auth_services_routes.route("/authenticate", methods=["POST"])
+def handle_cors_preflight():
+    response = make_response()
+    response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+    response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
+    response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+    return response, 204
+
+
+@auth_services_routes.route("/authenticate", methods=["OPTIONS", "POST"])
 def authenticate_user():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     data = request.json
     username = data.get('username')
     password = data.get('password')
@@ -73,8 +84,11 @@ def authenticate_user():
         return jsonify({"detail": "Authentication failed"}), 500
 
 
-@auth_services_routes.route("/change-password", methods=["POST"])
+@auth_services_routes.route("/change-password", methods=["OPTIONS", "POST"])
 def change_password():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     data = request.json
     session = data.get('session')
     new_password = data.get('new_password')
@@ -104,8 +118,11 @@ def change_password():
         return jsonify({"detail": "Password change failed"}), 500
 
 
-@auth_services_routes.route("/mfa-setup-details", methods=["GET"])
+@auth_services_routes.route("/mfa-setup-details", methods=["OPTIONS", "GET"])
 def get_mfa_setup_details():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     username = request.args.get('username', 'user@example.com')
     secret = pyotp.random_base32()
     issuer = "EncryptGate"
@@ -124,8 +141,11 @@ def get_mfa_setup_details():
     })
 
 
-@auth_services_routes.route("/verify-mfa", methods=["POST"])
+@auth_services_routes.route("/verify-mfa", methods=["OPTIONS", "POST"])
 def verify_mfa():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
     data = request.json
     session = data.get('session')
     code = data.get('code')

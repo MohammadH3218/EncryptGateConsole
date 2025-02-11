@@ -1,6 +1,6 @@
 import logging
 import os
-from flask import Flask
+from flask import Flask, make_response, request
 from flask_cors import CORS
 from services.auth_services_routes import auth_services_routes
 from dotenv import load_dotenv
@@ -20,8 +20,21 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enable CORS with configurable origins
-cors_origins = os.getenv("CORS_ORIGINS", "*")  # Default to allow all origins
-CORS(app, resources={r"/api/*": {"origins": cors_origins.split(",")}})
+cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net,https://console-encrypt-gate-git-main-encrypt-gate-team.vercel.app")
+allowed_origins = cors_origins.split(",")
+
+CORS(app, resources={r"/api/*": {"origins": allowed_origins}}, supports_credentials=True)
+
+# Handle preflight OPTIONS requests globally
+@app.before_request
+def handle_preflight():
+    if request.method == "OPTIONS":
+        response = make_response()
+        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response, 204
 
 # Register blueprint with the correct prefix
 try:
