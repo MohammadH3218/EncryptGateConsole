@@ -28,13 +28,22 @@ CORS(app, resources={r"/api/*": {"origins": allowed_origins}}, supports_credenti
 # Handle preflight OPTIONS requests globally
 @app.before_request
 def handle_preflight():
+    logger.info(f"Handling request for path: {request.path}, method: {request.method}, origin: {request.headers.get('Origin')}")
     if request.method == "OPTIONS":
-        response = make_response()
-        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
-        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-        response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
-        response.headers.add("Access-Control-Allow-Credentials", "true")
-        return response, 204
+        origin = request.headers.get("Origin", "*")
+        logger.info(f"Preflight request from origin: {origin}")
+        if origin in allowed_origins:
+            response = make_response()
+            response.headers.add("Access-Control-Allow-Origin", origin)
+            response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+            response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
+            response.headers.add("Access-Control-Allow-Credentials", "true")
+            return response, 204
+
+# Simple test route to verify server status
+@app.route("/api/test", methods=["GET"])
+def test_route():
+    return {"message": "API is running"}, 200
 
 # Register blueprint with the correct prefix
 try:
