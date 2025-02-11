@@ -211,15 +211,20 @@ export default function SetupPage() {
   const searchParams = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
   const [error, setError] = useState("");
-
-  const email = searchParams?.get("email") || "";
-  const session = searchParams?.get("session") || "";
+  const [email, setEmail] = useState("");
+  const [session, setSession] = useState("");
 
   useEffect(() => {
-    if (!email || !session) {
+    const emailParam = searchParams.get("email");
+    const sessionParam = searchParams.get("session");
+
+    if (!emailParam || !sessionParam) {
       router.push("/login");
+    } else {
+      setEmail(emailParam);
+      setSession(sessionParam);
     }
-  }, [email, session, router]);
+  }, [searchParams, router]);
 
   const steps = [
     { title: "Create Password", description: "Set up your new password", icon: KeyRound, component: PasswordStep },
@@ -243,20 +248,7 @@ export default function SetupPage() {
         <CardHeader className="space-y-4">
           <div className="flex justify-center items-center gap-2">
             <div className="w-8 h-8">
-              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                <path
-                  d="M16 2C8.268 2 2 8.268 2 16s6.268 14 14 14 14-6.268 14-14S23.732 2 16 2zm0 25.2c-6.188 0-11.2-5.012-11.2-11.2S9.812 4.8 16 4.8 27.2 9.812 27.2 16 22.188 27.2 16 27.2z"
-                  fill="currentColor"
-                />
-                <path
-                  d="M16 7.6c-4.632 0-8.4 3.768-8.4 8.4s3.768 8.4 8.4 8.4 8.4-3.768 8.4-8.4-3.768-8.4-8.4-8.4zm0 14c-3.08 0-5.6-2.52-5.6-5.6s2.52-5.6 5.6-5.6 5.6 2.52 5.6 5.6-2.52 5.6-5.6-5.6z"
-                  fill="currentColor"
-                />
-                <path
-                  d="M16 12.8c-1.76 0-3.2 1.44-3.2 3.2s1.44 3.2 3.2 3.2 3.2-1.44 3.2-3.2-1.44-3.2-3.2-3.2z"
-                  fill="currentColor"
-                />
-              </svg>
+              {/* Your SVG icon */}
             </div>
             <LogoText>EncryptGate</LogoText>
           </div>
@@ -278,7 +270,9 @@ export default function SetupPage() {
             </div>
           </div>
           {error && <div className="mb-4 p-2 bg-destructive/10 text-destructive text-sm rounded">{error}</div>}
-          <CurrentStepComponent onNext={handleNext} onError={setError} email={email} session={session} />
+          {email && session && (
+            <CurrentStepComponent onNext={handleNext} onError={setError} email={email} session={session} />
+          )}
         </CardContent>
         <CardFooter>
           <p className="text-sm text-muted-foreground text-center w-full">
