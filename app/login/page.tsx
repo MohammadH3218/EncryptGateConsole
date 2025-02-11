@@ -49,7 +49,7 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const response = await fetch("/api/auth/login", {
+      const response = await fetch("/api/auth/authenticate", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -81,7 +81,7 @@ export default function LoginPage() {
       }
     } catch (error: any) {
       console.error("Login error:", error.message);
-      setError(error.message);
+      setError(error.message || "An error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -109,7 +109,7 @@ export default function LoginPage() {
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
       console.error("MFA verification error:", error.message);
-      setError(error.message);
+      setError(error.message || "MFA verification failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
