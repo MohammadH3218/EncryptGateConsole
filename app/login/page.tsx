@@ -49,10 +49,10 @@ export default function LoginPage() {
 
   // Fetch API URL from the backend
   useEffect(() => {
-    const apiUrl = process.env.API_URL;  // Use environment variable API_URL directly
-
-    if (apiUrl) {
-      setApiBaseUrl(apiUrl);
+    const apiBaseUrl = process.env.API_URL; 
+    console.log("Frontend API URL:", apiBaseUrl); 
+    if (apiBaseUrl) {
+      setApiBaseUrl(apiBaseUrl);
     } else {
       setError("API URL is not configured correctly.");
     }
