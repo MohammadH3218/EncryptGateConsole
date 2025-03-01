@@ -49,20 +49,13 @@ export default function LoginPage() {
 
   // Fetch API URL from the backend
   useEffect(() => {
-    const fetchApiUrl = async () => {
-      try {
-        const response = await fetch("/api/config");
-        const data = await response.json();
-        if (data.apiUrl) {
-          setApiBaseUrl(data.apiUrl);
-        } else {
-          setError("API URL is not configured correctly.");
-        }
-      } catch (error) {
-        setError("Failed to fetch API URL.");
-      }
-    };
-    fetchApiUrl();
+    const apiUrl = process.env.API_URL;  // Use environment variable API_URL directly
+
+    if (apiUrl) {
+      setApiBaseUrl(apiUrl);
+    } else {
+      setError("API URL is not configured correctly.");
+    }
   }, []);
 
   const handleLogin = async () => {
