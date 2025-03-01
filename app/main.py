@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enable CORS with configurable origins
-cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net,https://console-encrypt-gate-git-main-encrypt-gate-team.vercel.app")
+cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")  # Updated to match the current domain
 allowed_origins = cors_origins.split(",")
 
 CORS(app, resources={r"/api/*": {"origins": allowed_origins}}, supports_credentials=True)
