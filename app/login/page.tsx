@@ -51,43 +51,43 @@ export default function LoginPage() {
     setError("");
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/auth/authenticate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          username: email,
-          password,
-        }),
-      });
+        const response = await fetch(`${apiBaseUrl}/api/auth/authenticate`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                username: email,
+                password,
+            }),
+        });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        try {
-          const errorData = JSON.parse(errorText);
-          throw new Error(errorData.detail || "Invalid credentials");
-        } catch {
-          throw new Error("Unexpected server error. Please try again later.");
+        if (!response.ok) {
+            const errorText = await response.text();
+            try {
+                const errorData = JSON.parse(errorText);
+                throw new Error(errorData.detail || "Invalid credentials");
+            } catch {
+                throw new Error("Unexpected server error. Please try again later.");
+            }
         }
-      }
 
-      const responseData: LoginResponse = await response.json();
+        const responseData: LoginResponse = await response.json();
 
-      if (responseData.mfa_required) {
-        setSession(responseData.session || "");
-        setShowMFA(true);
-      } else if (responseData.token) {
-        localStorage.setItem("token", responseData.token);
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
-      }
+        if (responseData.mfa_required) {
+            setSession(responseData.session || "");
+            setShowMFA(true);
+        } else if (responseData.id_token) {
+            localStorage.setItem("token", responseData.id_token);
+            router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+        }
     } catch (error: any) {
-      console.error("Login error:", error.message);
-      setError(error.message || "An error occurred. Please try again.");
+        console.error("Login error:", error.message);
+        setError(error.message || "An error occurred. Please try again.");
     } finally {
-      setIsLoading(false);
+        setIsLoading(false);
     }
-  };
+};
 
   const handleMFASubmit = async () => {
     setError("");

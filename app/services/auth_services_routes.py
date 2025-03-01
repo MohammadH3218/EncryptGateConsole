@@ -75,7 +75,14 @@ def authenticate_user():
         if challenge_name == "SOFTWARE_TOKEN_MFA":
             return jsonify({"mfa_required": True, "session": session})
 
-        return jsonify({"authentication_result": response.get("AuthenticationResult")})
+        auth_result = response.get("AuthenticationResult")
+        return jsonify({
+            "id_token": auth_result.get("IdToken"),
+            "access_token": auth_result.get("AccessToken"),
+            "refresh_token": auth_result.get("RefreshToken"),
+            "token_type": auth_result.get("TokenType"),
+            "expires_in": auth_result.get("ExpiresIn"),
+        })
 
     except cognito_client.exceptions.NotAuthorizedException:
         return jsonify({"detail": "Invalid username or password."}), 401
