@@ -1,9 +1,8 @@
 from flask import Blueprint, request, jsonify
-from app.services.auth_services_routes import (
-    authenticate_user_with_cognito,
-    verify_mfa_code,
-    confirm_signup,
-    create_access_token
+from services.auth_services_routes import (
+    authenticate_user,
+    verify_mfa,
+    confirm_signup
 )
 import logging
 
@@ -28,7 +27,7 @@ def login():
         return jsonify({"detail": "Username and password are required"}), 400
 
     try:
-        auth_response = authenticate_user_with_cognito(username, password)
+        auth_response = authenticate_user()
     except Exception as e:
         logger.error(f"Error during authentication: {e}")
         return jsonify({"detail": "Authentication failed"}), 401
@@ -36,8 +35,14 @@ def login():
     if auth_response.get("mfa_required"):
         return jsonify({"mfa_required": True, "session": auth_response["session"]})
 
-    access_token = create_access_token({"sub": username, "role": "employee", "email": username})
-    return jsonify({"token": access_token, "role": "employee", "email": username, "mfa_required": False})
+    return jsonify({
+        "id_token": auth_response.get("id_token"),
+        "access_token": auth_response.get("access_token"),
+        "refresh_token": auth_response.get("refresh_token"),
+        "token_type": auth_response.get("token_type"),
+        "expires_in": auth_response.get("expires_in"),
+        "email": username,
+    })
 
 @auth_routes.route("/confirm-signup", methods=["POST"])
 def confirm_signup_endpoint():
@@ -50,9 +55,11 @@ def confirm_signup_endpoint():
         return jsonify({"detail": "All fields are required"}), 400
 
     try:
-        if not confirm_signup(email, temp_password, new_password):
+        signup_response = confirm_signup(email, temp_password, new_password)
+        if not signup_response:
             return jsonify({"detail": "Failed to confirm sign-up"}), 400
     except Exception as e:
+        logger.error(f"Signup confirmation failed: {e}")
         return jsonify({"detail": f"Signup confirmation failed: {e}"}), 400
 
     return jsonify({"message": "Password changed successfully"})
@@ -62,13 +69,21 @@ def verify_mfa_endpoint():
     data = request.json
     session = data.get('session')
     code = data.get('code')
+    username = data.get('username')
 
-    if not (session and code):
-        return jsonify({"detail": "Session and code are required"}), 400
+    if not (session and code and username):
+        return jsonify({"detail": "Session, username, and code are required"}), 400
 
     try:
-        auth_result = verify_mfa_code(session, code)
-        access_token = create_access_token({"sub": "username-placeholder", "role": "employee"})
-        return jsonify({"token": access_token, "role": "employee", "email": "username-placeholder", "mfa_required": False})
+        auth_result = verify_mfa()
+        return jsonify({
+            "id_token": auth_result.get("id_token"),
+            "access_token": auth_result.get("access_token"),
+            "refresh_token": auth_result.get("refresh_token"),
+            "token_type": auth_result.get("token_type"),
+            "expires_in": auth_result.get("expires_in"),
+            "email": username,
+        })
     except Exception as e:
+        logger.error(f"MFA verification failed: {e}")
         return jsonify({"detail": f"MFA verification failed: {e}"}), 401
