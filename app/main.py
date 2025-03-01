@@ -10,6 +10,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Fetch the API URL from environment variables
+API_URL = os.getenv("API_URL")  # No default, it must be set in environment variables
+
 # Initialize logger
 logging.basicConfig(
     level=logging.INFO,
