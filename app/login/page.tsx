@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Card,
@@ -45,10 +45,32 @@ export default function LoginPage() {
   const [mfaCode, setMfaCode] = useState("");
   const [session, setSession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null);
 
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+  // Fetch API URL from the backend
+  useEffect(() => {
+    const fetchApiUrl = async () => {
+      try {
+        const response = await fetch("/api/config");
+        const data = await response.json();
+        if (data.apiUrl) {
+          setApiBaseUrl(data.apiUrl);
+        } else {
+          setError("API URL is not configured correctly.");
+        }
+      } catch (error) {
+        setError("Failed to fetch API URL.");
+      }
+    };
+    fetchApiUrl();
+  }, []);
 
   const handleLogin = async () => {
+    if (!apiBaseUrl) {
+      setError("API URL is not available.");
+      return;
+    }
+
     setIsLoading(true);
     setError("");
 
@@ -90,6 +112,11 @@ export default function LoginPage() {
   };
 
   const handleMFASubmit = async () => {
+    if (!apiBaseUrl) {
+      setError("API URL is not available.");
+      return;
+    }
+
     setError("");
     setIsLoading(true);
 
@@ -170,26 +197,6 @@ export default function LoginPage() {
           </CardFooter>
         </form>
       </Card>
-
-      <Dialog open={showMFA} onOpenChange={setShowMFA}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Enter Authentication Code</DialogTitle>
-            <DialogDescription>Please enter the 6-digit code from your authenticator app</DialogDescription>
-          </DialogHeader>
-          <Input
-            id="mfa-code"
-            placeholder="000000"
-            value={mfaCode}
-            onChange={(e) => setMfaCode(e.target.value.slice(0, 6))}
-            maxLength={6}
-            className="text-center text-2xl tracking-widest"
-          />
-          <Button onClick={handleMFASubmit} disabled={mfaCode.length !== 6 || isLoading}>
-            {isLoading ? "Verifying..." : "Verify"}
-          </Button>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
