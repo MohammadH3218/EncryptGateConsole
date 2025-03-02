@@ -49,8 +49,8 @@ export default function LoginPage() {
 
   // Fetch API URL from the backend
   useEffect(() => {
-    const apiBaseUrl = process.env.API_URL; 
-    console.log("Frontend API URL:", apiBaseUrl); 
+    const apiBaseUrl = process.env.API_URL;
+    console.log("Frontend API URL:", apiBaseUrl);
     if (apiBaseUrl) {
       setApiBaseUrl(apiBaseUrl);
     } else {
@@ -147,7 +147,12 @@ export default function LoginPage() {
         <CardHeader className="space-y-4">
           <div className="flex justify-center items-center gap-2">
             <div className="w-8 h-8">
-              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
+              <svg
+                viewBox="0 0 32 32"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-full h-full"
+              >
                 <path
                   d="M16 2C8.268 2 2 8.268 2 16s6.268 14 14 14 14-6.268 14-14S23.732 2 16 2zm0 25.2c-6.188 0-11.2-5.012-11.2-11.2S9.812 4.8 16 4.8 27.2 9.812 27.2 16 22.188 27.2 16 27.2z"
                   fill="currentColor"
@@ -163,7 +168,11 @@ export default function LoginPage() {
         </CardHeader>
         <form onSubmit={(e) => { e.preventDefault(); handleLogin(); }}>
           <CardContent className="space-y-6">
-            <RadioGroup value={userType} onValueChange={(value: UserType) => setUserType(value)} className="grid gap-4">
+            <RadioGroup
+              value={userType}
+              onValueChange={(value: UserType) => setUserType(value)}
+              className="grid gap-4"
+            >
               <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
                 <RadioGroupItem value="admin" id="admin" />
                 <Label htmlFor="admin" className="flex-1 cursor-pointer">Admin</Label>
@@ -175,11 +184,23 @@ export default function LoginPage() {
             </RadioGroup>
             <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
-              <Input id="email" type="email" placeholder="name@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+              <Input
+                id="email"
+                type="email"
+                placeholder="name@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} />
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </CardContent>
@@ -190,6 +211,34 @@ export default function LoginPage() {
           </CardFooter>
         </form>
       </Card>
+
+      <Dialog open={showMFA} onOpenChange={setShowMFA}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Authentication Code</DialogTitle>
+            <DialogDescription>
+              Please enter the 6-digit code sent to your authenticator app
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="mfa-code">Authentication Code</Label>
+              <Input
+                id="mfa-code"
+                placeholder="000000"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.slice(0, 6))}
+                maxLength={6}
+                className="text-center text-2xl tracking-widest"
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Button onClick={handleMFASubmit} disabled={mfaCode.length !== 6 || isLoading}>
+              {isLoading ? "Verifying..." : "Verify"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
