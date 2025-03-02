@@ -39,12 +39,20 @@ def generate_client_secret_hash(username: str) -> str:
     hash_result = base64.b64encode(hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()).decode()
     return hash_result
 
-# Handle CORS for preflight requests
+# Enhanced CORS handler for preflight requests
 def handle_cors_preflight():
     response = make_response()
-    response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
-    response.headers.add("Access-Control-Allow-Methods", "POST, OPTIONS")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    origin = request.headers.get("Origin", "")
+    
+    # Log received headers for debugging
+    logger.info(f"Preflight request received. Origin: {origin}")
+    
+    # Set CORS headers to allow the frontend domain
+    response.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+    response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
+    response.headers.add("Access-Control-Allow-Credentials", "true")
+    response.headers.add("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
     return response, 204
 
 # Authenticate User Route
@@ -81,13 +89,18 @@ def authenticate_user():
             return jsonify({"mfa_required": True, "session": session})
 
         auth_result = response.get("AuthenticationResult")
-        return jsonify({
+        
+        # Set CORS headers for the response
+        resp = jsonify({
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
             "refresh_token": auth_result.get("RefreshToken"),
             "token_type": auth_result.get("TokenType"),
             "expires_in": auth_result.get("ExpiresIn"),
         })
+        resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        resp.headers.add("Access-Control-Allow-Credentials", "true")
+        return resp
 
     except cognito_client.exceptions.NotAuthorizedException:
         return jsonify({"detail": "Invalid username or password."}), 401
@@ -124,7 +137,11 @@ def change_password():
         if response.get("ChallengeName") == "MFA_SETUP":
             return jsonify({"message": "MFA setup required", "session": response["Session"]})
 
-        return jsonify({"message": "Password changed successfully"})
+        # Set CORS headers for the response
+        resp = jsonify({"message": "Password changed successfully"})
+        resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        resp.headers.add("Access-Control-Allow-Credentials", "true")
+        return resp
 
     except Exception as e:
         logger.error(f"Error changing password: {e}")
@@ -150,11 +167,15 @@ def get_mfa_setup_details():
     buffer.seek(0)
     qr_code_base64 = b64encode(buffer.getvalue()).decode()
 
-    return jsonify({
+    # Set CORS headers for the response
+    resp = jsonify({
         "mfa_secret": secret,
         "otpauth_url": otpauth_url,
         "qr_code_base64": qr_code_base64,
     })
+    resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+    resp.headers.add("Access-Control-Allow-Credentials", "true")
+    return resp
 
 # Verify MFA Route
 @auth_services_routes.route("/verify-mfa", methods=["OPTIONS", "POST"])
@@ -183,13 +204,17 @@ def verify_mfa():
         )
 
         auth_result = response.get("AuthenticationResult", {})
-        return jsonify({
+        # Set CORS headers for the response
+        resp = jsonify({
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
             "refresh_token": auth_result.get("RefreshToken"),
             "token_type": auth_result.get("TokenType"),
             "expires_in": auth_result.get("ExpiresIn"),
         })
+        resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        resp.headers.add("Access-Control-Allow-Credentials", "true")
+        return resp
 
     except cognito_client.exceptions.CodeMismatchException:
         return jsonify({"detail": "Invalid MFA code"}), 401
@@ -217,11 +242,15 @@ def refresh_token():
         )
 
         auth_result = response.get("AuthenticationResult")
-        return jsonify({
+        # Set CORS headers for the response
+        resp = jsonify({
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
             "expires_in": auth_result.get("ExpiresIn"),
         })
+        resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        resp.headers.add("Access-Control-Allow-Credentials", "true")
+        return resp
 
     except Exception as e:
         logger.error(f"Token refresh failed: {e}")

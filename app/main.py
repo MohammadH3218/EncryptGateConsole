@@ -15,7 +15,7 @@ API_URL = os.getenv("API_URL")  # No default, it must be set in environment vari
 
 # Initialize logger
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG for more detailed logs
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -25,10 +25,18 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Enable CORS with configurable origins
-cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")  # Updated to match the current domain
+cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")
 allowed_origins = cors_origins.split(",")
 
-CORS(app, resources={r"/api/*": {"origins": allowed_origins}}, supports_credentials=True)
+# Create a directory for PID files if it doesn't exist
+os.makedirs('/var/pids', exist_ok=True)
+
+# Configure CORS with expanded options
+CORS(app, 
+     resources={r"/api/*": {"origins": allowed_origins}},
+     supports_credentials=True,
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
 
 # AWS Cognito Configuration (Updated to match AWS Amplify variable naming)
 COGNITO_REGION = os.getenv("REGION", "us-east-1")
@@ -67,20 +75,47 @@ def check_auth():
         if isinstance(user_data, str):  # If an error occurred
             return jsonify({"error": user_data}), 401
 
-# Handle preflight OPTIONS requests globally
+# Enhanced preflight handler
 @app.before_request
 def handle_preflight():
     logger.info(f"Handling request for path: {request.path}, method: {request.method}, origin: {request.headers.get('Origin')}")
+    
     if request.method == "OPTIONS":
-        origin = request.headers.get("Origin", "*")
+        origin = request.headers.get("Origin", "")
+        
         logger.info(f"Preflight request from origin: {origin}")
-        if origin in allowed_origins:
-            response = make_response()
+        logger.info(f"Allowed origins: {allowed_origins}")
+        
+        # Always respond to preflight requests
+        response = make_response()
+        
+        # Check if origin is in allowed list or use wildcard if allowed
+        if origin in allowed_origins or "*" in allowed_origins:
             response.headers.add("Access-Control-Allow-Origin", origin)
             response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
             response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
             response.headers.add("Access-Control-Allow-Credentials", "true")
+            response.headers.add("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
+            
+            logger.info(f"CORS headers set for origin: {origin}")
             return response, 204
+        
+        logger.warning(f"Origin not allowed: {origin}")
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin', '')
+    
+    if origin in allowed_origins or "*" in allowed_origins:
+        response.headers.add('Access-Control-Allow-Origin', origin)
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        
+        # If this is a regular response (not preflight)
+        if request.method != 'OPTIONS':
+            response.headers.add('Access-Control-Expose-Headers', 'Content-Type')
+            
+    return response
 
 # Simple test route to verify server status
 @app.route("/api/test", methods=["GET"])
@@ -103,6 +138,10 @@ except Exception as e:
 # Main entry point to run the server
 if __name__ == "__main__":
     try:
+        # Create PID file for health monitoring
+        with open('/var/pids/web.pid', 'w') as f:
+            f.write(str(os.getpid()))
+            
         debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
         port = int(os.getenv("PORT", 5000))
         logger.info("Starting Flask server...")
