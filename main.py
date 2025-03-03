@@ -60,6 +60,12 @@ def log_environment_details():
 
 log_environment_details()
 
+# Ensure PID directory exists for Gunicorn
+pid_dir = "/tmp"
+if not os.path.exists(pid_dir):
+    os.makedirs(pid_dir, exist_ok=True)
+logger.info(f"PID directory set: {pid_dir}")
+
 # Fetch the API URL from environment variables
 API_URL = os.getenv("API_URL")
 logger.info(f"API URL: {API_URL}")
