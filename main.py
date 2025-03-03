@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Fetch the API URL from environment variables
-API_URL = os.getenv("API_URL", "http://localhost:5000")  # Add default for local development
+API_URL = os.getenv("API_URL")  
 
 # Initialize logger
 logging.basicConfig(
