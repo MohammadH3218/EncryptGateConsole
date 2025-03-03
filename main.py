@@ -4,18 +4,18 @@ import requests
 import jwt
 from flask import Flask, make_response, request, jsonify
 from flask_cors import CORS
-from services.auth_services_routes import auth_services_routes
+from app.services.auth_services_routes import auth_services_routes
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 # Fetch the API URL from environment variables
-API_URL = os.getenv("API_URL")  # No default, it must be set in environment variables
+API_URL = os.getenv("API_URL", "http://localhost:5000")  # Add default for local development
 
 # Initialize logger
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG for more detailed logs
+    level=logging.INFO,  # Changed to INFO for production
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -28,7 +28,7 @@ app = Flask(__name__)
 cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")
 allowed_origins = cors_origins.split(",")
 
-# Create a directory for PID files if it doesn't exist
+# Directory for PID files - let Gunicorn handle this
 os.makedirs('/var/pids', exist_ok=True)
 
 # Configure CORS with expanded options
@@ -45,21 +45,56 @@ COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
 
 # Fetch AWS Cognito Public Keys
 def get_cognito_public_keys():
-    url = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USERPOOL_ID}/.well-known/jwks.json"
-    response = requests.get(url)
-    return response.json()
+    try:
+        url = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USERPOOL_ID}/.well-known/jwks.json"
+        response = requests.get(url)
+        return response.json()
+    except Exception as e:
+        logger.error(f"Failed to fetch Cognito public keys: {e}")
+        return {"keys": []}  # Return empty keys as fallback
 
+# Function to find the right key for token verification
+def get_key_for_token(token, keys):
+    try:
+        # Get the Key ID from the token header
+        kid = jwt.get_unverified_header(token).get('kid')
+        # Find the matching key in the JWKS
+        for key in keys.get('keys', []):
+            if key.get('kid') == kid:
+                return jwt.algorithms.RSAAlgorithm.from_jwk(key)
+        return None
+    except Exception as e:
+        logger.error(f"Error finding key for token: {e}")
+        return None
+
+# Cache public keys
 public_keys = get_cognito_public_keys()
 
 # Function to verify JWT
 def verify_jwt(token):
     try:
-        decoded_token = jwt.decode(token, public_keys, algorithms=["RS256"], audience=COGNITO_CLIENT_ID)
+        # Get the appropriate key for this token
+        key = get_key_for_token(token, public_keys)
+        if not key:
+            return "Invalid token: Key not found"
+            
+        # Decode the token
+        decoded_token = jwt.decode(
+            token, 
+            key, 
+            algorithms=["RS256"],
+            audience=COGNITO_CLIENT_ID,
+            options={"verify_exp": True}
+        )
         return decoded_token  # Return user data if valid
     except jwt.ExpiredSignatureError:
         return "Token expired"
-    except jwt.InvalidTokenError:
-        return "Invalid token"
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {e}")
+        return f"Invalid token: {e}"
+    except Exception as e:
+        logger.error(f"Unexpected error verifying token: {e}")
+        return f"Error verifying token: {str(e)}"
 
 # Middleware to check authentication
 @app.before_request
@@ -74,33 +109,36 @@ def check_auth():
 
         if isinstance(user_data, str):  # If an error occurred
             return jsonify({"error": user_data}), 401
+        
+        # Store user data for the route to use
+        request.user_data = user_data
 
 # Enhanced preflight handler
 @app.before_request
 def handle_preflight():
-    logger.info(f"Handling request for path: {request.path}, method: {request.method}, origin: {request.headers.get('Origin')}")
+    if request.method != "OPTIONS":
+        return  # Only process OPTIONS requests
+        
+    logger.debug(f"Handling preflight for path: {request.path}, origin: {request.headers.get('Origin')}")
     
-    if request.method == "OPTIONS":
-        origin = request.headers.get("Origin", "")
+    origin = request.headers.get("Origin", "")
+    
+    # Always respond to preflight requests
+    response = make_response()
+    
+    # Check if origin is in allowed list or use wildcard if allowed
+    if origin in allowed_origins or "*" in allowed_origins:
+        response.headers.add("Access-Control-Allow-Origin", origin)
+        response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        response.headers.add("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
         
-        logger.info(f"Preflight request from origin: {origin}")
-        logger.info(f"Allowed origins: {allowed_origins}")
-        
-        # Always respond to preflight requests
-        response = make_response()
-        
-        # Check if origin is in allowed list or use wildcard if allowed
-        if origin in allowed_origins or "*" in allowed_origins:
-            response.headers.add("Access-Control-Allow-Origin", origin)
-            response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
-            response.headers.add("Access-Control-Allow-Credentials", "true")
-            response.headers.add("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
-            
-            logger.info(f"CORS headers set for origin: {origin}")
-            return response, 204
-        
-        logger.warning(f"Origin not allowed: {origin}")
+        logger.debug(f"CORS headers set for origin: {origin}")
+        return response, 204
+    
+    logger.warning(f"Origin not allowed: {origin}")
+    return response, 204  # Return 204 even if not allowed
 
 # Add CORS headers to all responses
 @app.after_request
@@ -125,7 +163,17 @@ def test_route():
 # Protected route (only accessible with valid JWT)
 @app.route("/api/protected", methods=["GET"])
 def protected_route():
-    return jsonify({"message": "You have accessed a protected route!"}), 200
+    # User data is available from the check_auth middleware
+    user_data = getattr(request, 'user_data', {})
+    return jsonify({
+        "message": "You have accessed a protected route!",
+        "user": user_data
+    }), 200
+
+# Health check endpoint for AWS
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "healthy"}), 200
 
 # Register blueprint with the correct prefix
 try:
@@ -133,20 +181,15 @@ try:
     logger.info("Blueprint 'auth_services_routes' registered successfully.")
 except Exception as e:
     logger.error(f"Error registering blueprint: {e}")
-    exit(1)  # Exit application if blueprint registration fails
+    # Don't exit here, just log the error
 
 # Main entry point to run the server
 if __name__ == "__main__":
     try:
-        # Create PID file for health monitoring
-        with open('/var/pids/web.pid', 'w') as f:
-            f.write(str(os.getpid()))
-            
         debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
         port = int(os.getenv("PORT", 5000))
-        logger.info("Starting Flask server...")
-        logger.info(f"Server running on http://0.0.0.0:{port}")
+        logger.info(f"Starting Flask server on http://0.0.0.0:{port}")
         app.run(debug=debug_mode, host="0.0.0.0", port=port)
     except Exception as e:
         logger.error(f"Failed to start Flask server: {e}")
-        exit(1)  # Exit the application on failure
+        # Log error but don't force exit
