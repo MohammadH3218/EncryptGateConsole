@@ -88,8 +88,9 @@ try:
         logger.info(f"Added {current_dir} to Python path")
     
     # Import the authentication route blueprints
-    from app.services.auth_services_routes import auth_services_routes
-    from app.services.auth_routes import auth_routes
+    # Updated imports to match the deployed directory structure
+    from auth_services_routes import auth_services_routes
+    from auth_routes import auth_routes
     
     # Register the blueprints with appropriate URL prefixes
     app.register_blueprint(auth_services_routes, url_prefix="/api/auth")
