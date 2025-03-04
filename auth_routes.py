@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response
-from services.auth_services_routes import (
+from auth_services_routes import (
     authenticate_user,
     verify_mfa,
     confirm_signup,
