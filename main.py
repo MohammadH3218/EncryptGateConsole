@@ -4,30 +4,28 @@ import sys
 import traceback
 import requests
 import jwt
-from flask import Flask, make_response, request, jsonify
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Initialize the Flask app (Ensure this is global for Gunicorn)
+# Initialize the Flask app (Global for Gunicorn)
 app = Flask(__name__)
 
-# Setup Logging
+# === Logging Setup ===
 def setup_comprehensive_logging():
-    # Use a writable directory in AWS Elastic Beanstalk
     log_dir = "/var/log/encryptgate"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)  # Ensure the log directory exists
 
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s [%(levelname)s] %(pathname)s:%(lineno)d - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
-            logging.StreamHandler(sys.stdout),  # Console logging
-            logging.FileHandler(os.path.join(log_dir, "application_debug.log"), mode='a')  # File logging
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(os.path.join(log_dir, "application_debug.log"), mode='a')
         ]
     )
 
@@ -43,16 +41,17 @@ def setup_comprehensive_logging():
 setup_comprehensive_logging()
 logger = logging.getLogger(__name__)
 
-# Log environment details
+# === Log Environment Details ===
 def log_environment_details():
     logger.info("=== Environment and System Details ===")
     logger.info(f"Python Executable: {sys.executable}")
     logger.info(f"Python Version: {sys.version}")
     logger.info(f"Current Working Directory: {os.getcwd()}")
-    logger.info("Python Path (sys.path):")
+
+    logger.info("Python Path:")
     for path in sys.path:
         logger.info(f"  {path}")
-    
+
     logger.info("Environment Variables:")
     for key, value in os.environ.items():
         if key.lower() not in ['password', 'secret', 'token', 'aws_secret_access_key']:
@@ -60,17 +59,16 @@ def log_environment_details():
 
 log_environment_details()
 
-# Ensure PID directory exists for Gunicorn
-pid_dir = "/tmp"
-if not os.path.exists(pid_dir):
-    os.makedirs(pid_dir, exist_ok=True)
+# === Ensure Required Directories Exist ===
+pid_dir = "/var/pids"
+os.makedirs(pid_dir, exist_ok=True)
 logger.info(f"PID directory set: {pid_dir}")
 
-# Fetch the API URL from environment variables
-API_URL = os.getenv("API_URL")
+# === API URL Configuration ===
+API_URL = os.getenv("API_URL", "http://localhost:8080")
 logger.info(f"API URL: {API_URL}")
 
-# Configure CORS with allowed origins
+# === CORS Configuration ===
 cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")
 allowed_origins = cors_origins.split(",")
 logger.info(f"CORS Origins: {allowed_origins}")
@@ -81,7 +79,7 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
 
-# AWS Cognito Configuration
+# === AWS Cognito Configuration ===
 COGNITO_REGION = os.getenv("REGION", "us-east-1")
 COGNITO_USERPOOL_ID = os.getenv("COGNITO_USERPOOL_ID")
 COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
@@ -89,7 +87,7 @@ COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
 logger.info(f"Cognito Region: {COGNITO_REGION}")
 logger.info(f"Cognito UserPool ID: {COGNITO_USERPOOL_ID}")
 
-# Fetch AWS Cognito Public Keys
+# === Fetch AWS Cognito Public Keys ===
 def get_cognito_public_keys():
     try:
         url = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USERPOOL_ID}/.well-known/jwks.json"
@@ -108,7 +106,7 @@ def get_cognito_public_keys():
 public_keys = get_cognito_public_keys()
 logger.info(f"Retrieved {len(public_keys.get('keys', []))} Cognito public keys")
 
-# Debug Route
+# === Debug Route ===
 @app.route("/api/debug", methods=["GET"])
 def debug_route():
     debug_info = {
@@ -125,7 +123,7 @@ def debug_route():
     }
     return jsonify(debug_info), 200
 
-# Main Entry Point (Ensure Elastic Beanstalk Uses Port 8080)
+# === Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ===
 if __name__ == "__main__":
     try:
         debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
