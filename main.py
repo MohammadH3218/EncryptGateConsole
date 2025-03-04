@@ -106,7 +106,12 @@ def get_cognito_public_keys():
 public_keys = get_cognito_public_keys()
 logger.info(f"Retrieved {len(public_keys.get('keys', []))} Cognito public keys")
 
-# === Debug Route ===
+# === Basic Health Check Route ===
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"status": "success", "message": "EncryptGate API is Running!"}), 200
+
+# === Improved Debug Route ===
 @app.route("/api/debug", methods=["GET"])
 def debug_route():
     debug_info = {
@@ -119,9 +124,15 @@ def debug_route():
         "python_path": sys.path,
         "flask_debug": app.debug,
         "cors_origins": allowed_origins,
-        "api_url": API_URL
+        "api_url": API_URL,
+        "running_processes": os.popen("ps aux | grep gunicorn").read().strip()
     }
     return jsonify(debug_info), 200
+
+# === Example API Route to Verify Functionality ===
+@app.route("/api/hello", methods=["GET"])
+def hello_world():
+    return jsonify({"message": "Hello from EncryptGate API!"}), 200
 
 # == Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ==
 if __name__ == "__main__":
