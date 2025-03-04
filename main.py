@@ -152,26 +152,58 @@ def debug_route():
     return jsonify(debug_info), 200
 
 # === Fallback Authentication Route (in case blueprint registration fails) ===
-@app.route("/api/auth/authenticate", methods=["POST"])
+@app.route("/api/auth/authenticate", methods=["POST", "OPTIONS"])
 def fallback_authenticate():
+    # Handle CORS preflight request
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "success"})
+        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,Accept,Origin")
+        response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response
+        
     logger.info("Fallback authentication route accessed")
     try:
         data = request.json
         logger.info(f"Received auth data: {data}")
         
-        return jsonify({
+        response = jsonify({
             "status": "success",
             "message": "This is the fallback authentication endpoint. Blueprint registration might have failed.",
             "received_data": data
-        }), 200
+        })
+        
+        # Add CORS headers to response
+        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response, 200
     except Exception as e:
         logger.error(f"Error in fallback_authenticate: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        
+        response = jsonify({"status": "error", "message": str(e)})
+        # Add CORS headers to error response
+        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response, 500
 
 # === Example API Route to Verify Functionality ===
-@app.route("/api/hello", methods=["GET"])
+@app.route("/api/hello", methods=["GET", "OPTIONS"])
 def hello_world():
-    return jsonify({"message": "Hello from EncryptGate API!"}), 200
+    # Handle CORS preflight request
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "success"})
+        response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization,Accept,Origin")
+        response.headers.add("Access-Control-Allow-Methods", "GET,OPTIONS")
+        response.headers.add("Access-Control-Allow-Credentials", "true")
+        return response
+        
+    response = jsonify({"message": "Hello from EncryptGate API!"})
+    # Add CORS headers directly to response
+    response.headers.add("Access-Control-Allow-Origin", request.headers.get("Origin", "*"))
+    response.headers.add("Access-Control-Allow-Credentials", "true")
+    return response, 200
 
 # == Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ==
 if __name__ == "__main__":
