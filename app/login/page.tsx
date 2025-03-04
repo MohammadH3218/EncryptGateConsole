@@ -47,14 +47,19 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null);
 
-  // Fetch API URL from the backend
+  // Fetch API URL from the backend with fallback
   useEffect(() => {
-    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
-    console.log("Frontend API URL:", apiBaseUrl);
-    if (apiBaseUrl) {
-      setApiBaseUrl(apiBaseUrl);
-    } else {
-      setError("API URL is not configured correctly.");
+    const configuredUrl = process.env.NEXT_PUBLIC_API_URL;
+    console.log("Frontend API URL from env:", configuredUrl);
+    
+    // Use the configured URL or fall back to the Elastic Beanstalk URL
+    const fallbackUrl = "https://encryptgateconsole-env.eba-r2es7hns.us-east-1.elasticbeanstalk.com";
+    const finalUrl = configuredUrl || fallbackUrl;
+    
+    setApiBaseUrl(finalUrl);
+    
+    if (!configuredUrl) {
+      console.warn("Using fallback API URL:", fallbackUrl);
     }
   }, []);
 
@@ -66,17 +71,25 @@ export default function LoginPage() {
 
     setIsLoading(true);
     setError("");
+    console.log(`Attempting to authenticate with: ${apiBaseUrl}/api/auth/authenticate`);
 
     try {
+      // Enhanced fetch with better error handling
       const response = await fetch(`${apiBaseUrl}/api/auth/authenticate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
         },
         body: JSON.stringify({
           username: email,
           password,
         }),
+        mode: "cors",
+      }).catch(fetchError => {
+        console.error("Fetch execution error:", fetchError);
+        throw new Error(`Network error: ${fetchError.message}`);
       });
 
       const responseData: LoginResponse = await response.json();
@@ -112,14 +125,21 @@ export default function LoginPage() {
 
     setError("");
     setIsLoading(true);
+    console.log(`Verifying MFA with: ${apiBaseUrl}/api/auth/verify-mfa`);
 
     try {
       const response = await fetch(`${apiBaseUrl}/api/auth/verify-mfa`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
         },
         body: JSON.stringify({ code: mfaCode, session, username: email }),
+        mode: "cors",
+      }).catch(fetchError => {
+        console.error("MFA fetch error:", fetchError);
+        throw new Error(`Network error: ${fetchError.message}`);
       });
 
       const data: LoginResponse = await response.json();
