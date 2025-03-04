@@ -33,6 +33,7 @@ interface LoginResponse {
   session?: string;
   email?: string;
   role?: string;
+  detail?: string;
 }
 
 export default function LoginPage() {
@@ -87,15 +88,23 @@ export default function LoginPage() {
           password,
         }),
         mode: "cors",
+        credentials: "include",  // Added to include cookies if needed
       }).catch(fetchError => {
         console.error("Fetch execution error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
       });
 
-      const responseData: LoginResponse = await response.json();
+      // Try to parse the response body as JSON
+      let responseData: LoginResponse;
+      try {
+        responseData = await response.json();
+      } catch (jsonError) {
+        console.error("Failed to parse JSON response:", jsonError);
+        throw new Error("Invalid response from server. Please try again.");
+      }
 
       if (!response.ok) {
-        throw new Error(responseData?.email || "Invalid credentials");
+        throw new Error(responseData?.detail || "Invalid credentials");
       }
 
       if (responseData.mfa_required) {
@@ -137,15 +146,23 @@ export default function LoginPage() {
         },
         body: JSON.stringify({ code: mfaCode, session, username: email }),
         mode: "cors",
+        credentials: "include",  // Added to include cookies if needed
       }).catch(fetchError => {
         console.error("MFA fetch error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
       });
 
-      const data: LoginResponse = await response.json();
+      // Try to parse the response body as JSON
+      let data: LoginResponse;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.error("Failed to parse JSON response:", jsonError);
+        throw new Error("Invalid response from server. Please try again.");
+      }
 
       if (!response.ok) {
-        throw new Error("Invalid MFA code");
+        throw new Error(data?.detail || "Invalid MFA code");
       }
 
       localStorage.setItem("access_token", data.access_token || "");
