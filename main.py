@@ -81,6 +81,12 @@ CORS(app,
 
 # Register Blueprints
 try:
+    # Add the current directory to the Python path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+        logger.info(f"Added {current_dir} to Python path")
+    
     # Import the authentication route blueprints
     from app.services.auth_services_routes import auth_services_routes
     from app.services.auth_routes import auth_routes
@@ -143,6 +149,23 @@ def debug_route():
         "running_processes": os.popen("ps aux | grep gunicorn").read().strip()
     }
     return jsonify(debug_info), 200
+
+# === Fallback Authentication Route (in case blueprint registration fails) ===
+@app.route("/api/auth/authenticate", methods=["POST"])
+def fallback_authenticate():
+    logger.info("Fallback authentication route accessed")
+    try:
+        data = request.json
+        logger.info(f"Received auth data: {data}")
+        
+        return jsonify({
+            "status": "success",
+            "message": "This is the fallback authentication endpoint. Blueprint registration might have failed.",
+            "received_data": data
+        }), 200
+    except Exception as e:
+        logger.error(f"Error in fallback_authenticate: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 # === Example API Route to Verify Functionality ===
 @app.route("/api/hello", methods=["GET"])
