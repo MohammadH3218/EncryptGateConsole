@@ -15,21 +15,29 @@ export default async function handler(req, res) {
   }
 
   // API endpoint fetched from environment variable or fallback URL
-  const apiEndpoint = process.env.NEXT_PUBLIC_API_URL || "https://backend.console-encryptgate.net";
+  // Update to use the direct Elastic Beanstalk URL
+  const apiEndpoint = process.env.NEXT_PUBLIC_API_URL || "https://encryptgateconsole-env.eba-r2es7hns.us-east-1.elasticbeanstalk.com";
+  
+  console.log(`Attempting to connect to API at: ${apiEndpoint}/api/auth/authenticate`);
 
   try {
-    // Make a POST request to the Flask backend
+    // Make a POST request to the Flask backend with additional options
     const response = await fetch(`${apiEndpoint}/api/auth/authenticate`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": "https://console-encryptgate.net"
       },
       body: JSON.stringify({ username, password }),
+      credentials: "include",
+      mode: "cors",
+      timeout: 10000 // 10 second timeout
     });
 
     // Handle non-OK responses
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorData = await response.json().catch(() => ({ detail: `HTTP error! Status: ${response.status}` }));
       console.error("Authentication API Error:", errorData);
       return res.status(response.status).json(errorData);
     }
@@ -39,8 +47,12 @@ export default async function handler(req, res) {
     res.status(200).json(data);
 
   } catch (error) {
-    // Log and return a server error response
-    console.error("Login API Error:", error);
-    res.status(500).json({ detail: "Unexpected server error. Please try again later." });
+    // Log and return a server error response with more detailed information
+    console.error("Login API Error:", error.message || error);
+    res.status(500).json({ 
+      detail: "Failed to connect to authentication service. Please try again later.",
+      error: error.message || "Unknown error",
+      apiEndpoint: apiEndpoint
+    });
   }
 }
