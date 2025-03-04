@@ -79,6 +79,21 @@ CORS(app,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
 
+# Register Blueprints
+try:
+    # Import the authentication route blueprints
+    from app.services.auth_services_routes import auth_services_routes
+    from app.services.auth_routes import auth_routes
+    
+    # Register the blueprints with appropriate URL prefixes
+    app.register_blueprint(auth_services_routes, url_prefix="/api/auth")
+    app.register_blueprint(auth_routes, url_prefix="/api/user")
+    
+    logger.info("Successfully registered authentication blueprints")
+except Exception as e:
+    logger.error(f"Failed to register authentication blueprints: {e}")
+    logger.error(traceback.format_exc())
+
 # === AWS Cognito Configuration ===
 COGNITO_REGION = os.getenv("REGION", "us-east-1")
 COGNITO_USERPOOL_ID = os.getenv("COGNITO_USERPOOL_ID")
