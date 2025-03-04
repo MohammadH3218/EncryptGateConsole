@@ -123,7 +123,7 @@ def debug_route():
     }
     return jsonify(debug_info), 200
 
-# === Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ===
+# == Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ==
 if __name__ == "__main__":
     try:
         debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
