@@ -39,6 +39,49 @@ def generate_client_secret_hash(username: str) -> str:
     hash_result = base64.b64encode(hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()).decode()
     return hash_result
 
+# Confirm User Signup
+def confirm_signup(email, temp_password, new_password):
+    """
+    Confirms a user's signup by setting a new permanent password.
+    """
+    try:
+        logger.info(f"Confirming signup for {email}")
+        
+        # Authenticate user to confirm signup
+        auth_response = cognito_client.initiate_auth(
+            ClientId=CLIENT_ID,
+            AuthFlow="USER_PASSWORD_AUTH",
+            AuthParameters={
+                "USERNAME": email,
+                "PASSWORD": temp_password,
+                "SECRET_HASH": generate_client_secret_hash(email),
+            },
+        )
+
+        # Check if a new password is required
+        if auth_response.get("ChallengeName") == "NEW_PASSWORD_REQUIRED":
+            response = cognito_client.respond_to_auth_challenge(
+                ClientId=CLIENT_ID,
+                ChallengeName="NEW_PASSWORD_REQUIRED",
+                Session=auth_response.get("Session"),
+                ChallengeResponses={
+                    "USERNAME": email,
+                    "NEW_PASSWORD": new_password,
+                    "SECRET_HASH": generate_client_secret_hash(email),
+                },
+            )
+            logger.info(f"Signup confirmation successful for {email}")
+            return response
+
+        logger.error("Unexpected signup flow state")
+        return None
+    except cognito_client.exceptions.NotAuthorizedException:
+        logger.error("Invalid temporary password provided")
+        return None
+    except Exception as e:
+        logger.error(f"Error confirming signup: {e}")
+        return None
+
 # Enhanced CORS handler for preflight requests
 def handle_cors_preflight():
     response = make_response()
@@ -69,9 +112,7 @@ def authenticate_user():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
 
-    # Log request details for debugging
     logger.info(f"Authentication request received from: {request.headers.get('Origin', 'Unknown')}")
-    logger.info(f"Request headers: {dict(request.headers)}")
     
     data = request.json
     username = data.get('username')
@@ -91,361 +132,48 @@ def authenticate_user():
             },
         )
 
-        challenge_name = response.get("ChallengeName")
-        session = response.get("Session")
-
-        if challenge_name == "NEW_PASSWORD_REQUIRED":
-            # Set CORS headers for the response
-            resp = jsonify({"new_password_required": True, "session": session})
-            
-            # Get origin and validate against allowed origins
-            origin = request.headers.get("Origin", "")
-            allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-            allowed_origins = [o.strip() for o in allowed_origins]
-            
-            if origin in allowed_origins or "*" in allowed_origins:
-                resp.headers.add("Access-Control-Allow-Origin", origin)
-            else:
-                resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-                
-            resp.headers.add("Access-Control-Allow-Credentials", "true")
-            return resp
-
-        if challenge_name == "SOFTWARE_TOKEN_MFA":
-            # Set CORS headers for the response
-            resp = jsonify({"mfa_required": True, "session": session})
-            
-            # Get origin and validate against allowed origins
-            origin = request.headers.get("Origin", "")
-            allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-            allowed_origins = [o.strip() for o in allowed_origins]
-            
-            if origin in allowed_origins or "*" in allowed_origins:
-                resp.headers.add("Access-Control-Allow-Origin", origin)
-            else:
-                resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-                
-            resp.headers.add("Access-Control-Allow-Credentials", "true")
-            return resp
-
         auth_result = response.get("AuthenticationResult")
         
-        # Set CORS headers for the response
-        resp = jsonify({
+        return jsonify({
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
             "refresh_token": auth_result.get("RefreshToken"),
             "token_type": auth_result.get("TokenType"),
             "expires_in": auth_result.get("ExpiresIn"),
         })
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp
 
     except cognito_client.exceptions.NotAuthorizedException:
-        # Set CORS headers for error response
-        resp = jsonify({"detail": "Invalid username or password."})
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp, 401
+        return jsonify({"detail": "Invalid username or password."}), 401
         
     except Exception as e:
         logger.error(f"Error during authentication: {e}")
-        
-        # Set CORS headers for error response
-        resp = jsonify({"detail": "Authentication failed"})
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp, 500
+        return jsonify({"detail": "Authentication failed"}), 500
 
-# Change Password Route
-@auth_services_routes.route("/change-password", methods=["OPTIONS", "POST"])
-def change_password():
+# Route to confirm signup (Uses the confirm_signup function)
+@auth_services_routes.route("/confirm-signup", methods=["POST", "OPTIONS"])
+def confirm_signup_endpoint():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-
+    
     data = request.json
-    session = data.get('session')
+    email = data.get('email')
+    temp_password = data.get('temporary_password')
     new_password = data.get('new_password')
-    username = data.get('username')
 
-    if not session or not new_password:
-        return jsonify({"detail": "Session and new password are required"}), 400
-
-    try:
-        response = cognito_client.respond_to_auth_challenge(
-            ClientId=CLIENT_ID,
-            ChallengeName="NEW_PASSWORD_REQUIRED",
-            Session=session,
-            ChallengeResponses={
-                "USERNAME": username,
-                "NEW_PASSWORD": new_password,
-                "SECRET_HASH": generate_client_secret_hash(username),
-            },
-        )
-
-        if response.get("ChallengeName") == "MFA_SETUP":
-            # Set CORS headers for the response
-            resp = jsonify({"message": "MFA setup required", "session": response["Session"]})
-            
-            # Get origin and validate against allowed origins
-            origin = request.headers.get("Origin", "")
-            allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-            allowed_origins = [o.strip() for o in allowed_origins]
-            
-            if origin in allowed_origins or "*" in allowed_origins:
-                resp.headers.add("Access-Control-Allow-Origin", origin)
-            else:
-                resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-                
-            resp.headers.add("Access-Control-Allow-Credentials", "true")
-            return resp
-
-        # Set CORS headers for the response
-        resp = jsonify({"message": "Password changed successfully"})
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp
-
-    except Exception as e:
-        logger.error(f"Error changing password: {e}")
-        
-        # Set CORS headers for error response
-        resp = jsonify({"detail": "Password change failed"})
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp, 500
-
-# MFA Setup Details
-@auth_services_routes.route("/mfa-setup-details", methods=["OPTIONS", "GET"])
-def get_mfa_setup_details():
-    if request.method == "OPTIONS":
-        return handle_cors_preflight()
-
-    username = request.args.get('username')
-    if not username:
-        return jsonify({"detail": "Username is required"}), 400
-
-    secret = pyotp.random_base32()
-    issuer = "EncryptGate"
-    otpauth_url = pyotp.totp.TOTP(secret).provisioning_uri(name=username, issuer_name=issuer)
-
-    qr = qrcode.make(otpauth_url)
-    buffer = BytesIO()
-    qr.save(buffer, format="PNG")
-    buffer.seek(0)
-    qr_code_base64 = b64encode(buffer.getvalue()).decode()
-
-    # Set CORS headers for the response
-    resp = jsonify({
-        "mfa_secret": secret,
-        "otpauth_url": otpauth_url,
-        "qr_code_base64": qr_code_base64,
-    })
-    
-    # Get origin and validate against allowed origins
-    origin = request.headers.get("Origin", "")
-    allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-    allowed_origins = [o.strip() for o in allowed_origins]
-    
-    if origin in allowed_origins or "*" in allowed_origins:
-        resp.headers.add("Access-Control-Allow-Origin", origin)
-    else:
-        resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-        
-    resp.headers.add("Access-Control-Allow-Credentials", "true")
-    return resp
-
-# Verify MFA Route
-@auth_services_routes.route("/verify-mfa", methods=["OPTIONS", "POST"])
-def verify_mfa():
-    if request.method == "OPTIONS":
-        return handle_cors_preflight()
-
-    data = request.json
-    session = data.get('session')
-    code = data.get('code')
-    username = data.get('username')
-
-    if not (session and code and username):
-        return jsonify({"detail": "Session, username, and code are required"}), 400
+    if not (email and temp_password and new_password):
+        return jsonify({"detail": "All fields are required"}), 400
 
     try:
-        response = cognito_client.respond_to_auth_challenge(
-            ClientId=CLIENT_ID,
-            ChallengeName="SOFTWARE_TOKEN_MFA",
-            Session=session,
-            ChallengeResponses={
-                "USERNAME": username,
-                "SOFTWARE_TOKEN_MFA_CODE": code,
-                "SECRET_HASH": generate_client_secret_hash(username),
-            },
-        )
-
-        auth_result = response.get("AuthenticationResult", {})
-        # Set CORS headers for the response
-        resp = jsonify({
-            "id_token": auth_result.get("IdToken"),
-            "access_token": auth_result.get("AccessToken"),
-            "refresh_token": auth_result.get("RefreshToken"),
-            "token_type": auth_result.get("TokenType"),
-            "expires_in": auth_result.get("ExpiresIn"),
-        })
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp
-
-    except cognito_client.exceptions.CodeMismatchException:
-        # Set CORS headers for error response
-        resp = jsonify({"detail": "Invalid MFA code"})
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp, 401
-        
+        signup_response = confirm_signup(email, temp_password, new_password)
+        if not signup_response:
+            return jsonify({"detail": "Failed to confirm sign-up"}), 400
     except Exception as e:
-        logger.error(f"MFA verification failed: {e}")
-        
-        # Set CORS headers for error response
-        resp = jsonify({"detail": "MFA verification failed"})
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp, 401
+        logger.error(f"Signup confirmation failed: {e}")
+        return jsonify({"detail": f"Signup confirmation failed: {e}"}), 400
 
-# Token Refresh Route
-@auth_services_routes.route("/refresh-token", methods=["OPTIONS", "POST"])
-def refresh_token():
-    if request.method == "OPTIONS":
-        return handle_cors_preflight()
+    return jsonify({"message": "Password changed successfully"}), 200
 
-    data = request.json
-    refresh_token = data.get("refresh_token")
-
-    if not refresh_token:
-        return jsonify({"detail": "Refresh token is required"}), 400
-
-    try:
-        response = cognito_client.initiate_auth(
-            ClientId=CLIENT_ID,
-            AuthFlow="REFRESH_TOKEN_AUTH",
-            AuthParameters={"REFRESH_TOKEN": refresh_token},
-        )
-
-        auth_result = response.get("AuthenticationResult")
-        # Set CORS headers for the response
-        resp = jsonify({
-            "id_token": auth_result.get("IdToken"),
-            "access_token": auth_result.get("AccessToken"),
-            "expires_in": auth_result.get("ExpiresIn"),
-        })
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp
-
-    except Exception as e:
-        logger.error(f"Token refresh failed: {e}")
-        
-        # Set CORS headers for error response
-        resp = jsonify({"detail": "Token refresh failed"})
-        
-        # Get origin and validate against allowed origins
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-            
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp, 401
+# Health Check Route
+@auth_services_routes.route("/health", methods=["GET"])
+def health_check():
+    return jsonify({"status": "success", "message": "Service is running"}), 200

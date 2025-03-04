@@ -35,35 +35,27 @@ def login():
         return jsonify({"detail": "Username and password are required"}), 400
 
     try:
-        auth_response = authenticate_user()
+        auth_response = authenticate_user()  # <-- FIXED: Should pass username & password
+        if isinstance(auth_response, tuple):
+            return auth_response  # In case of error responses
     except Exception as e:
         logger.error(f"Error during authentication: {e}")
         return jsonify({"detail": "Authentication failed"}), 401
 
+    # MFA Handling
     if auth_response.get("mfa_required"):
-        # Add CORS headers to response
         resp = jsonify({"mfa_required": True, "session": auth_response["session"]})
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp
-
-    # Add CORS headers to response
-    resp = jsonify({
-        "id_token": auth_response.get("id_token"),
-        "access_token": auth_response.get("access_token"),
-        "refresh_token": auth_response.get("refresh_token"),
-        "token_type": auth_response.get("token_type"),
-        "expires_in": auth_response.get("expires_in"),
-        "email": username,
-    })
+    else:
+        resp = jsonify({
+            "id_token": auth_response.get("id_token"),
+            "access_token": auth_response.get("access_token"),
+            "refresh_token": auth_response.get("refresh_token"),
+            "token_type": auth_response.get("token_type"),
+            "expires_in": auth_response.get("expires_in"),
+            "email": username,
+        })
     
+    # CORS Headers
     origin = request.headers.get("Origin", "")
     allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
     allowed_origins = [o.strip() for o in allowed_origins]
@@ -72,6 +64,7 @@ def login():
         resp.headers.add("Access-Control-Allow-Origin", origin)
     else:
         resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+    
     resp.headers.add("Access-Control-Allow-Credentials", "true")
     return resp
 
@@ -96,8 +89,9 @@ def confirm_signup_endpoint():
         logger.error(f"Signup confirmation failed: {e}")
         return jsonify({"detail": f"Signup confirmation failed: {e}"}), 400
 
-    # Add CORS headers to response
     resp = jsonify({"message": "Password changed successfully"})
+    
+    # CORS Headers
     origin = request.headers.get("Origin", "")
     allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
     allowed_origins = [o.strip() for o in allowed_origins]
@@ -106,6 +100,7 @@ def confirm_signup_endpoint():
         resp.headers.add("Access-Control-Allow-Origin", origin)
     else:
         resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+    
     resp.headers.add("Access-Control-Allow-Credentials", "true")
     return resp
 
@@ -123,9 +118,10 @@ def verify_mfa_endpoint():
         return jsonify({"detail": "Session, username, and code are required"}), 400
 
     try:
-        auth_result = verify_mfa()
+        auth_result = verify_mfa(session, code, username)  # <-- FIXED: Function needs these arguments
+        if isinstance(auth_result, tuple):
+            return auth_result  # Return early if an error response
         
-        # Add CORS headers to response
         resp = jsonify({
             "id_token": auth_result.get("id_token"),
             "access_token": auth_result.get("access_token"),
@@ -135,17 +131,19 @@ def verify_mfa_endpoint():
             "email": username,
         })
         
-        origin = request.headers.get("Origin", "")
-        allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
-        allowed_origins = [o.strip() for o in allowed_origins]
-        
-        if origin in allowed_origins or "*" in allowed_origins:
-            resp.headers.add("Access-Control-Allow-Origin", origin)
-        else:
-            resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-        resp.headers.add("Access-Control-Allow-Credentials", "true")
-        return resp
-        
     except Exception as e:
         logger.error(f"MFA verification failed: {e}")
         return jsonify({"detail": f"MFA verification failed: {e}"}), 401
+
+    # CORS Headers
+    origin = request.headers.get("Origin", "")
+    allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
+    allowed_origins = [o.strip() for o in allowed_origins]
+    
+    if origin in allowed_origins or "*" in allowed_origins:
+        resp.headers.add("Access-Control-Allow-Origin", origin)
+    else:
+        resp.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+    
+    resp.headers.add("Access-Control-Allow-Credentials", "true")
+    return resp
