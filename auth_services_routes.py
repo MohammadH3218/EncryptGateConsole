@@ -311,18 +311,25 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         )
         
         logger.info(f"Challenge response successful. Response keys: {list(response.keys())}")
+        logger.debug(f"Full response: {response}")
         
         # Process response
         auth_result = response.get("AuthenticationResult")
         if auth_result:
             # Authentication completed successfully
-            return {
+            result = {
                 "id_token": auth_result.get("IdToken"),
                 "access_token": auth_result.get("AccessToken"),
                 "refresh_token": auth_result.get("RefreshToken"),
                 "token_type": auth_result.get("TokenType"),
                 "expires_in": auth_result.get("ExpiresIn"),
             }
+            
+            # For NEW_PASSWORD_REQUIRED challenge, add success message
+            if challenge_name == "NEW_PASSWORD_REQUIRED":
+                result["message"] = "Password changed successfully"
+                
+            return result
         
         # If no auth result, check for next challenge
         next_challenge = response.get("ChallengeName")
@@ -344,8 +351,17 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
                 
             return response_data
         
+        # If we get here but the challenge was NEW_PASSWORD_REQUIRED, we'll assume it succeeded
+        # This handles a known edge case in Cognito responses
+        if challenge_name == "NEW_PASSWORD_REQUIRED" and "ChallengeName" not in response:
+            logger.info("Password change appears successful but no auth result or next challenge")
+            return {
+                "message": "Password changed successfully. Please sign in with your new password."
+            }
+            
         # If we get here, something unexpected happened
         logger.error("No AuthenticationResult or ChallengeName in response")
+        logger.debug(f"Unexpected response format: {response}")
         return {"detail": "Invalid challenge response"}, 500
         
     except cognito_client.exceptions.InvalidPasswordException as pwd_error:

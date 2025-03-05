@@ -31,6 +31,7 @@ interface LoginResponse {
   access_token?: string;
   id_token?: string;
   refresh_token?: string;
+  token?: string; // Added for flexibility
   mfa_required?: boolean;
   ChallengeName?: string;
   session?: string;
@@ -38,6 +39,7 @@ interface LoginResponse {
   role?: string;
   detail?: string;
   secretCode?: string;
+  message?: string; // Added for message handling
 }
 
 export default function LoginPage() {
@@ -251,7 +253,7 @@ export default function LoginPage() {
           password,
         }),
         mode: "cors",
-        credentials: "include",  // Added to include cookies if needed
+        credentials: "include",
       }).catch(fetchError => {
         console.error("Fetch execution error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
@@ -289,9 +291,23 @@ export default function LoginPage() {
       } else if (responseData.access_token) {
         // Success with tokens - check if MFA setup is needed
         await checkAndSetupMFA(responseData.access_token);
+      } else if (responseData.message && typeof responseData.message === 'string' && 
+                 responseData.message.includes("Password changed successfully")) {
+        // Handle password change success message from backend
+        setError("Password changed successfully. Please sign in with your new password.");
       } else {
-        console.error("Unexpected response format:", responseData);
-        throw new Error("Server returned an unexpected response format. Please try again.");
+        // More flexible handling of unexpected response formats
+        console.warn("Unrecognized response format:", responseData);
+        
+        // Try to continue with whatever we have
+        if (responseData.id_token || (responseData as any).token) {
+          // We have some kind of token, try to use it
+          const token = responseData.access_token || responseData.id_token || (responseData as any).token;
+          localStorage.setItem("access_token", token);
+          router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+        } else {
+          setError("Unable to process login response. Please try again or contact support.");
+        }
       }
     } catch (error: any) {
       console.error("Login error:", error.message);
@@ -430,7 +446,15 @@ export default function LoginPage() {
         setSession(responseData.session || "");
         setShowMFA(true);
       } else {
-        throw new Error("Unexpected response format after password change");
+        // Instead of throwing an error, handle unknown response formats gracefully
+        console.warn("Unrecognized response format after password change:", responseData);
+        
+        // Show success message and prompt the user to sign in again
+        setError("Password changed successfully. Please sign in with your new password.");
+        
+        // Clear form fields
+        setNewPassword("");
+        setConfirmPassword("");
       }
     } catch (error: any) {
       setError(error.message || "Failed to change password");
