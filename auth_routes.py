@@ -35,7 +35,8 @@ def login():
         return jsonify({"detail": "Username and password are required"}), 400
 
     try:
-        auth_response = authenticate_user()  # <-- FIXED: Should pass username & password
+        # Pass username and password to authenticate_user
+        auth_response = authenticate_user(username, password)
         if isinstance(auth_response, tuple):
             return auth_response  # In case of error responses
     except Exception as e:
@@ -118,7 +119,7 @@ def verify_mfa_endpoint():
         return jsonify({"detail": "Session, username, and code are required"}), 400
 
     try:
-        auth_result = verify_mfa(session, code, username)  # <-- FIXED: Function needs these arguments
+        auth_result = verify_mfa(session, code, username)
         if isinstance(auth_result, tuple):
             return auth_result  # Return early if an error response
         
