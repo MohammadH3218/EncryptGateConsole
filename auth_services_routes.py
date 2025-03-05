@@ -148,8 +148,22 @@ def check_mfa_enabled(access_token):
         
         logger.info(f"MFA status for user: {'Enabled' if mfa_enabled else 'Not enabled'}")
         
+        # Get user's MFA preferences
+        try:
+            user_attrs = {}
+            for attr in response.get("UserAttributes", []):
+                user_attrs[attr["Name"]] = attr["Value"]
+                
+            # Check if user is required to set up MFA (this is a custom attribute we need to check)
+            mfa_required = user_attrs.get("custom:mfa_required", "false").lower() == "true"
+        except Exception as attr_error:
+            logger.warning(f"Error checking custom MFA attributes: {attr_error}")
+            mfa_required = False
+            
+        # Return consolidated info
         return {
             "mfaEnabled": mfa_enabled,
+            "mfaRequired": mfa_required,
             "username": response.get("Username"),
             "message": "MFA is enabled" if mfa_enabled else "MFA is not enabled"
         }
@@ -329,6 +343,35 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
             if challenge_name == "NEW_PASSWORD_REQUIRED":
                 result["message"] = "Password changed successfully"
                 
+            # Check if MFA setup is required for this user
+            if challenge_name == "NEW_PASSWORD_REQUIRED":
+                try:
+                    # Get user attributes to check if MFA setup is required
+                    user_info = cognito_client.get_user(
+                        AccessToken=auth_result.get("AccessToken")
+                    )
+                    
+                    # Check for MFA settings
+                    user_attrs = {}
+                    for attr in user_info.get("UserAttributes", []):
+                        user_attrs[attr["Name"]] = attr["Value"]
+                        
+                    # If MFA is required based on custom attribute, and not yet set up
+                    mfa_options = user_info.get("UserMFASettingList", [])
+                    preferred_mfa = user_info.get("PreferredMfaSetting")
+                    mfa_enabled = ("SOFTWARE_TOKEN_MFA" in mfa_options or 
+                                   preferred_mfa == "SOFTWARE_TOKEN_MFA")
+                    
+                    mfa_required = user_attrs.get("custom:mfa_required", "false").lower() == "true"
+                    
+                    if mfa_required and not mfa_enabled:
+                        # Indicate MFA setup is required
+                        result["mfa_setup_required"] = True
+                        logger.info("Password changed, MFA setup required")
+                except Exception as user_error:
+                    logger.warning(f"Error checking MFA requirement after password change: {user_error}")
+                    # Continue without MFA requirement info
+                
             return result
         
         # If no auth result, check for next challenge
@@ -464,6 +507,30 @@ def verify_software_token_setup(access_token, code):
             except Exception as set_error:
                 logger.error(f"Error setting MFA preferences: {set_error}")
                 # Continue even if preference setting fails
+            
+            # Get new token after MFA setup
+            try:
+                # Get current user
+                user_info = cognito_client.get_user(
+                    AccessToken=access_token
+                )
+                username = user_info.get("Username")
+                
+                # Generate new tokens - this ensures the tokens reflect updated MFA status
+                new_tokens = authenticate_user(username, "dummy_password")
+                
+                # If successful, include tokens in response
+                if isinstance(new_tokens, dict) and not isinstance(new_tokens, tuple) and new_tokens.get("access_token"):
+                    return {
+                        "message": "MFA setup verified successfully",
+                        "status": status,
+                        "access_token": new_tokens.get("access_token"),
+                        "id_token": new_tokens.get("id_token"),
+                        "refresh_token": new_tokens.get("refresh_token")
+                    }
+            except Exception as token_error:
+                logger.warning(f"Error refreshing tokens after MFA setup: {token_error}")
+                # Continue without new tokens
             
             return {
                 "message": "MFA setup verified successfully",
