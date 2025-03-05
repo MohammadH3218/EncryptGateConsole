@@ -290,7 +290,7 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         logger.error(f"Challenge response error: {e}")
         return {"detail": f"Challenge response failed: {str(e)}"}, 500
 
-# Set up MFA with access token
+# Set up MFA with access token - UPDATED IMPLEMENTATION
 def setup_mfa(access_token):
     """
     Set up MFA for a user with access token
@@ -318,7 +318,16 @@ def setup_mfa(access_token):
             return {"detail": "Failed to generate MFA secret code"}, 500
         
         # Generate QR code
-        qr_code = generate_qr_code(secret_code, "user")  # We don't have username here, using generic
+        try:
+            # Try to get the username for a better QR code
+            user_response = cognito_client.get_user(
+                AccessToken=access_token
+            )
+            username = user_response.get("Username", "user")
+        except Exception:
+            username = "user"  # Fallback if we can't get the username
+            
+        qr_code = generate_qr_code(secret_code, username)
         
         return {
             "secretCode": secret_code,
@@ -330,7 +339,7 @@ def setup_mfa(access_token):
         logger.error(f"Error setting up MFA: {e}")
         return {"detail": f"Failed to setup MFA: {str(e)}"}, 500
 
-# Verify MFA setup with access token
+# Verify MFA setup with access token - UPDATED IMPLEMENTATION
 def verify_software_token_setup(access_token, code):
     """
     Verify MFA setup with access token and verification code
@@ -356,6 +365,20 @@ def verify_software_token_setup(access_token, code):
         logger.info(f"MFA verification status: {status}")
         
         if status == "SUCCESS":
+            # Set the user's MFA preference to require TOTP
+            try:
+                cognito_client.set_user_mfa_preference(
+                    AccessToken=access_token,
+                    SoftwareTokenMfaSettings={
+                        "Enabled": True,
+                        "PreferredMfa": True
+                    }
+                )
+                logger.info("MFA preference set successfully")
+            except Exception as pref_error:
+                logger.warning(f"MFA verified but couldn't set preference: {pref_error}")
+                # Continue anyway since the token was verified
+            
             return {
                 "message": "MFA setup verified successfully",
                 "status": status
@@ -890,6 +913,190 @@ def verify_mfa_endpoint():
     
     # Otherwise, it's a successful response
     return jsonify(auth_result)
+
+# MFA debugging routes
+@auth_services_routes.route("/test-mfa-process", methods=["POST"])
+def test_mfa_process():
+    """Test endpoint to debug MFA setup process"""
+    if os.environ.get("FLASK_ENV") != "development":
+        return jsonify({"detail": "This endpoint is only available in development mode"}), 403
+        
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        access_token = data.get('access_token')
+        code = data.get('code')
+        
+        if not access_token:
+            return jsonify({"detail": "Access token is required"}), 400
+            
+        try:
+            # Step 1: Try getting user attributes to check token validity
+            try:
+                user_attr_response = cognito_client.get_user(
+                    AccessToken=access_token
+                )
+                username = user_attr_response.get("Username", "unknown")
+            except Exception as attr_error:
+                return jsonify({
+                    "phase": "token_validation",
+                    "error": str(attr_error),
+                    "status": "Token appears to be invalid"
+                }), 200
+                
+            # Step 2: Associate software token (start MFA setup)
+            try:
+                associate_response = cognito_client.associate_software_token(
+                    AccessToken=access_token
+                )
+                secret_code = associate_response.get("SecretCode")
+                
+                if not secret_code:
+                    return jsonify({
+                        "phase": "associate_token",
+                        "error": "No secret code returned",
+                        "status": "Failed to get secret code"
+                    }), 200
+                    
+            except Exception as assoc_error:
+                return jsonify({
+                    "phase": "associate_token",
+                    "error": str(assoc_error),
+                    "status": "Failed to associate software token"
+                }), 200
+                
+            # Step 3: If code provided, verify software token
+            if code:
+                try:
+                    verify_response = cognito_client.verify_software_token(
+                        AccessToken=access_token,
+                        UserCode=code
+                    )
+                    
+                    status = verify_response.get("Status")
+                    
+                    if status == "SUCCESS":
+                        # Step 4: Set user MFA preference
+                        try:
+                            pref_response = cognito_client.set_user_mfa_preference(
+                                AccessToken=access_token,
+                                SoftwareTokenMfaSettings={
+                                    "Enabled": True,
+                                    "PreferredMfa": True
+                                }
+                            )
+                            
+                            return jsonify({
+                                "phase": "complete",
+                                "status": "SUCCESS",
+                                "message": "MFA setup completed successfully",
+                                "secret_code": secret_code,
+                                "username": username
+                            }), 200
+                            
+                        except Exception as pref_error:
+                            return jsonify({
+                                "phase": "set_mfa_preference",
+                                "error": str(pref_error),
+                                "status": "Failed to set MFA preference"
+                            }), 200
+                    else:
+                        return jsonify({
+                            "phase": "verify_token",
+                            "status": status,
+                            "message": "Code verification not successful"
+                        }), 200
+                        
+                except Exception as verify_error:
+                    return jsonify({
+                        "phase": "verify_token",
+                        "error": str(verify_error),
+                        "status": "Failed to verify token"
+                    }), 200
+            
+            # If no code provided, just return the generated secret
+            return jsonify({
+                "phase": "setup_ready",
+                "status": "SUCCESS",
+                "message": "MFA setup initialized successfully",
+                "secret_code": secret_code,
+                "username": username,
+                "next_step": "Enter this secret in your authenticator app and provide a code to complete setup"
+            }), 200
+                
+        except Exception as e:
+            return jsonify({
+                "phase": "unknown",
+                "error": str(e),
+                "status": "Error in MFA process"
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+# Helper route to inspect user MFA status
+@auth_services_routes.route("/check-user-mfa-status", methods=["POST"])
+def check_user_mfa_status():
+    """Check a user's MFA status"""
+    if os.environ.get("FLASK_ENV") != "development":
+        return jsonify({"detail": "This endpoint is only available in development mode"}), 403
+        
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        access_token = data.get('access_token')
+        
+        if not access_token:
+            return jsonify({"detail": "Access token is required"}), 400
+            
+        try:
+            # Get user attributes
+            user_attr_response = cognito_client.get_user(
+                AccessToken=access_token
+            )
+            
+            # Check if user has MFA enabled
+            try:
+                mfa_response = cognito_client.get_user_mfa_setting(
+                    AccessToken=access_token
+                )
+                
+                return jsonify({
+                    "status": "success",
+                    "username": user_attr_response.get("Username"),
+                    "user_attributes": user_attr_response.get("UserAttributes"),
+                    "mfa_settings": mfa_response,
+                    "message": "User MFA status retrieved successfully"
+                }), 200
+                
+            except Exception as mfa_error:
+                return jsonify({
+                    "status": "error",
+                    "username": user_attr_response.get("Username"),
+                    "user_attributes": user_attr_response.get("UserAttributes"),
+                    "mfa_error": str(mfa_error),
+                    "message": "Failed to get MFA settings"
+                }), 200
+                
+        except Exception as user_error:
+            return jsonify({
+                "status": "error",
+                "error": str(user_error),
+                "message": "Failed to get user information"
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 # Health Check Route
 @auth_services_routes.route("/health", methods=["GET"])
