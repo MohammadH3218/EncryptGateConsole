@@ -411,6 +411,102 @@ def verify_mfa(session, code, username):
         logger.error(traceback.format_exc())
         return {"detail": f"MFA verification failed: {e}"}, 401
 
+# Initiate forgot password flow
+def initiate_forgot_password(username):
+    """
+    Initiates the forgot password flow for a user
+    
+    Args:
+        username (str): User's email or username
+        
+    Returns:
+        dict: Success message or error
+    """
+    logger.info(f"Initiating forgot password flow for user: {username}")
+    
+    try:
+        # Generate secret hash
+        try:
+            secret_hash = generate_client_secret_hash(username)
+        except Exception as hash_error:
+            logger.error(f"Failed to generate secret hash: {hash_error}")
+            return {"detail": "Failed to generate credentials"}, 500
+            
+        # Call Cognito API
+        response = cognito_client.forgot_password(
+            ClientId=CLIENT_ID,
+            Username=username,
+            SecretHash=secret_hash
+        )
+        
+        logger.info("Forgot password initiated successfully")
+        return {
+            "message": "Password reset initiated. Check your email for verification code.",
+            "delivery": response.get("CodeDeliveryDetails"),
+        }
+        
+    except cognito_client.exceptions.UserNotFoundException:
+        # For security, don't reveal if user exists or not
+        logger.warning(f"User not found during forgot password: {username}")
+        return {
+            "message": "Password reset initiated. Check your email for verification code."
+        }
+        
+    except Exception as e:
+        logger.error(f"Error initiating forgot password: {e}")
+        logger.error(traceback.format_exc())
+        return {"detail": f"Failed to initiate password reset: {str(e)}"}, 500
+
+# Complete forgot password flow
+def confirm_forgot_password(username, confirmation_code, new_password):
+    """
+    Completes the forgot password flow by confirming code and setting new password
+    
+    Args:
+        username (str): User's email or username
+        confirmation_code (str): Verification code sent to user's email
+        new_password (str): New password to set
+        
+    Returns:
+        dict: Success message or error
+    """
+    logger.info(f"Confirming forgot password for user: {username}")
+    
+    try:
+        # Generate secret hash
+        try:
+            secret_hash = generate_client_secret_hash(username)
+        except Exception as hash_error:
+            logger.error(f"Failed to generate secret hash: {hash_error}")
+            return {"detail": "Failed to generate credentials"}, 500
+            
+        # Call Cognito API
+        cognito_client.confirm_forgot_password(
+            ClientId=CLIENT_ID,
+            Username=username,
+            ConfirmationCode=confirmation_code,
+            Password=new_password,
+            SecretHash=secret_hash
+        )
+        
+        logger.info("Password reset successfully")
+        return {
+            "message": "Password has been reset successfully."
+        }
+        
+    except cognito_client.exceptions.CodeMismatchException:
+        logger.error("Invalid verification code")
+        return {"detail": "Invalid verification code. Please try again."}, 400
+        
+    except cognito_client.exceptions.InvalidPasswordException as e:
+        logger.error(f"Invalid password format: {e}")
+        return {"detail": f"Password does not meet requirements: {str(e)}"}, 400
+        
+    except Exception as e:
+        logger.error(f"Error confirming forgot password: {e}")
+        logger.error(traceback.format_exc())
+        return {"detail": f"Failed to reset password: {str(e)}"}, 500
+
 # Confirm User Signup
 def confirm_signup(email, temp_password, new_password):
     """
@@ -657,6 +753,72 @@ def confirm_mfa_setup_endpoint():
             
     except Exception as e:
         logger.error(f"Error in confirm_mfa_setup_endpoint: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# Route for initiating forgot password
+@auth_services_routes.route("/forgot-password", methods=["POST", "OPTIONS"])
+def forgot_password_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        
+        if not username:
+            return jsonify({"detail": "Username is required"}), 400
+            
+        logger.info(f"Forgot password request for user: {username}")
+        
+        # Call the initiate_forgot_password function
+        response = initiate_forgot_password(username)
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in forgot_password_endpoint: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# Route for confirming forgot password
+@auth_services_routes.route("/confirm-forgot-password", methods=["POST", "OPTIONS"])
+def confirm_forgot_password_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        confirmation_code = data.get('code')
+        new_password = data.get('password')
+        
+        if not (username and confirmation_code and new_password):
+            return jsonify({"detail": "Username, verification code, and new password are required"}), 400
+            
+        logger.info(f"Confirming forgot password for user: {username}")
+        
+        # Call the confirm_forgot_password function
+        response = confirm_forgot_password(username, confirmation_code, new_password)
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in confirm_forgot_password_endpoint: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 

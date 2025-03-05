@@ -18,10 +18,10 @@ import { LogoText } from "@/components/ui/logo-text";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -61,6 +61,16 @@ export default function LoginPage() {
   const [mfaSecretCode, setMfaSecretCode] = useState("");
   const [setupMfaCode, setSetupMfaCode] = useState("");
   
+  // Forgot Password states
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("");
+  const [forgotPasswordStep, setForgotPasswordStep] = useState(1); // 1: request, 2: confirm
+  const [forgotPasswordCode, setForgotPasswordCode] = useState("");
+  const [newForgotPassword, setNewForgotPassword] = useState("");
+  const [confirmForgotPassword, setConfirmForgotPassword] = useState("");
+  const [forgotPasswordError, setForgotPasswordError] = useState("");
+  const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false);
+  
   const [session, setSession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null);
@@ -81,6 +91,122 @@ export default function LoginPage() {
     }
   }, []);
 
+  // Handle forgot password request
+  const handleForgotPasswordRequest = async () => {
+    if (!forgotPasswordEmail) {
+      setForgotPasswordError("Please enter your email address");
+      return;
+    }
+    
+    setIsForgotPasswordLoading(true);
+    setForgotPasswordError("");
+    
+    try {
+      const forgotPasswordEndpoint = `${apiBaseUrl}/api/auth/forgot-password`;
+      
+      const response = await fetch(forgotPasswordEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
+        },
+        body: JSON.stringify({
+          username: forgotPasswordEmail
+        }),
+        mode: "cors",
+        credentials: "include",
+      });
+      
+      const responseData = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(responseData.detail || `Failed to initiate password reset (${response.status})`);
+      }
+      
+      // Move to confirmation step
+      setForgotPasswordStep(2);
+    } catch (error: any) {
+      setForgotPasswordError(error.message || "Failed to initiate password reset");
+    } finally {
+      setIsForgotPasswordLoading(false);
+    }
+  };
+
+  // Handle forgot password confirm
+  const handleForgotPasswordConfirm = async () => {
+    if (!forgotPasswordCode) {
+      setForgotPasswordError("Please enter the verification code");
+      return;
+    }
+    
+    if (!newForgotPassword) {
+      setForgotPasswordError("Please enter a new password");
+      return;
+    }
+    
+    if (newForgotPassword !== confirmForgotPassword) {
+      setForgotPasswordError("Passwords do not match");
+      return;
+    }
+    
+    setIsForgotPasswordLoading(true);
+    setForgotPasswordError("");
+    
+    try {
+      const confirmForgotPasswordEndpoint = `${apiBaseUrl}/api/auth/confirm-forgot-password`;
+      
+      const response = await fetch(confirmForgotPasswordEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
+        },
+        body: JSON.stringify({
+          username: forgotPasswordEmail,
+          code: forgotPasswordCode,
+          password: newForgotPassword
+        }),
+        mode: "cors",
+        credentials: "include",
+      });
+      
+      const responseData = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(responseData.detail || `Failed to reset password (${response.status})`);
+      }
+      
+      // Reset state and close dialog
+      resetForgotPasswordState();
+      setShowForgotPassword(false);
+      
+      // Show success message
+      setError("Password reset successful. Please sign in with your new password.");
+    } catch (error: any) {
+      setForgotPasswordError(error.message || "Failed to reset password");
+    } finally {
+      setIsForgotPasswordLoading(false);
+    }
+  };
+
+  // Reset forgot password state
+  const resetForgotPasswordState = () => {
+    setForgotPasswordStep(1);
+    setForgotPasswordEmail("");
+    setForgotPasswordCode("");
+    setNewForgotPassword("");
+    setConfirmForgotPassword("");
+    setForgotPasswordError("");
+  };
+
+  // Handle forgot password dialog close
+  const handleForgotPasswordClose = () => {
+    resetForgotPasswordState();
+    setShowForgotPassword(false);
+  };
+
   const handleLogin = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -90,7 +216,7 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     
-    // Try with direct authenticate endpoint
+    // Try with direct authenticate endpoint (fallback to original if it fails)
     const loginEndpoint = `${apiBaseUrl}/authenticate`;
     console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
@@ -108,7 +234,7 @@ export default function LoginPage() {
           password,
         }),
         mode: "cors",
-        credentials: "include",
+        credentials: "include",  // Added to include cookies if needed
       }).catch(fetchError => {
         console.error("Fetch execution error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
@@ -128,28 +254,54 @@ export default function LoginPage() {
         throw new Error(responseData?.detail || `Authentication failed (${response.status})`);
       }
 
-      // Check for the different possible challenges
       console.log("Authentication response:", responseData);
-      
+
+      // Handle different authentication flows
       if (responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
         // Handle password change requirement
         setSession(responseData.session || "");
         setShowPasswordChange(true);
-      } else if (responseData.ChallengeName === "MFA_SETUP") {
-        // Handle MFA setup requirement
-        setSession(responseData.session || "");
-        setMfaSecretCode(responseData.secretCode || "");
-        setShowMFASetup(true);
-      } else if (responseData.mfa_required) {
-        // Handle MFA verification
-        setSession(responseData.session || "");
-        setShowMFA(true);
-      } else if (responseData.id_token && responseData.access_token) {
-        // Success - store tokens and redirect
+      } else if (responseData.access_token) {
+        // We have an access token, check if we need to set up MFA
+        // Try to set up MFA
+        try {
+          const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
+          const mfaResponse = await fetch(setupMfaEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Origin": window.location.origin
+            },
+            body: JSON.stringify({
+              access_token: responseData.access_token
+            }),
+            mode: "cors",
+            credentials: "include",
+          });
+          
+          const mfaData = await mfaResponse.json();
+          
+          if (mfaResponse.ok && mfaData.secretCode) {
+            // We have a secret code - show MFA setup
+            setMfaSecretCode(mfaData.secretCode);
+            setShowMFASetup(true);
+            return;
+          }
+        } catch (mfaError) {
+          console.error("Error setting up MFA:", mfaError);
+          // Continue with login if MFA setup fails - user is already authenticated
+        }
+        
+        // Store tokens and redirect
         localStorage.setItem("access_token", responseData.access_token);
-        localStorage.setItem("id_token", responseData.id_token);
+        localStorage.setItem("id_token", responseData.id_token || "");
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      } else if (responseData.mfa_required) {
+        // Standard MFA verification
+        setSession(responseData.session || "");
+        setShowMFA(true);
       } else {
         console.error("Unexpected response format:", responseData);
         throw new Error("Unexpected server response format");
@@ -163,29 +315,28 @@ export default function LoginPage() {
   };
 
   const handlePasswordChange = async () => {
-    if (!apiBaseUrl) {
-      setError("API URL is not available.");
+    if (!apiBaseUrl || !session) {
+      setError("Unable to change password.");
       return;
     }
-
-    // Validate password
-    if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters long");
-      return;
-    }
-
+    
     if (newPassword !== confirmPassword) {
-      setError("Passwords do not match");
+      setError("Passwords do not match.");
       return;
     }
-
-    setError("");
+    
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+    
     setIsLoading(true);
+    setError("");
     
     try {
-      const changePasswordEndpoint = `${apiBaseUrl}/api/auth/respond-to-challenge`;
+      const challengeEndpoint = `${apiBaseUrl}/api/auth/respond-to-challenge`;
       
-      const response = await fetch(changePasswordEndpoint, {
+      const response = await fetch(challengeEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -197,64 +348,107 @@ export default function LoginPage() {
           session: session,
           challengeName: "NEW_PASSWORD_REQUIRED",
           challengeResponses: {
-            NEW_PASSWORD: newPassword
+            "NEW_PASSWORD": newPassword
           }
         }),
         mode: "cors",
         credentials: "include",
       });
-
-      const data = await response.json();
+      
+      const responseData = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.detail || `Failed to change password (${response.status})`);
+        throw new Error(responseData.detail || `Failed to change password (${response.status})`);
       }
-
-      console.log("Password change response:", data);
       
-      // Check next challenge type
-      if (data.ChallengeName === "MFA_SETUP") {
-        setSession(data.session || "");
-        setMfaSecretCode(data.secretCode || "");
+      console.log("Password change response:", responseData);
+      
+      // Handle different response types
+      if (responseData.access_token) {
+        // We have access_token, try to set up MFA
+        try {
+          const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
+          const mfaResponse = await fetch(setupMfaEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Origin": window.location.origin
+            },
+            body: JSON.stringify({
+              access_token: responseData.access_token
+            }),
+            mode: "cors",
+            credentials: "include",
+          });
+          
+          const mfaData = await mfaResponse.json();
+          
+          if (mfaResponse.ok && mfaData.secretCode) {
+            // Close password change dialog and show MFA setup
+            setShowPasswordChange(false);
+            setMfaSecretCode(mfaData.secretCode);
+            setShowMFASetup(true);
+            return;
+          }
+        } catch (mfaError) {
+          console.error("Error setting up MFA:", mfaError);
+          // Continue with login if MFA setup fails
+        }
+        
+        // Store tokens and redirect
+        localStorage.setItem("access_token", responseData.access_token);
+        localStorage.setItem("id_token", responseData.id_token || "");
+        localStorage.setItem("refresh_token", responseData.refresh_token || "");
         setShowPasswordChange(false);
-        setShowMFASetup(true);
-      } else if (data.mfa_required) {
-        setSession(data.session || "");
-        setShowPasswordChange(false);
-        setShowMFA(true);
-      } else if (data.id_token && data.access_token) {
-        // Success - store tokens and redirect
-        localStorage.setItem("access_token", data.access_token);
-        localStorage.setItem("id_token", data.id_token);
-        localStorage.setItem("refresh_token", data.refresh_token || "");
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      } else if (responseData.ChallengeName) {
+        // Handle additional challenges
+        if (responseData.ChallengeName === "MFA_SETUP") {
+          setSession(responseData.session || "");
+          setShowPasswordChange(false);
+          setMfaSecretCode(responseData.secretCode || "");
+          setShowMFASetup(true);
+        } else if (responseData.mfa_required) {
+          setSession(responseData.session || "");
+          setShowPasswordChange(false);
+          setShowMFA(true);
+        }
+      } else {
+        throw new Error("Unexpected response format");
       }
     } catch (error: any) {
-      console.error("Password change error:", error.message);
-      setError(error.message || "Failed to change password. Please try again.");
+      setError(error.message || "Failed to change password");
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleMFASetup = async () => {
-    if (!apiBaseUrl) {
-      setError("API URL is not available.");
+    if (!apiBaseUrl || !mfaSecretCode) {
+      setError("Unable to set up MFA.");
       return;
     }
-
+    
     if (setupMfaCode.length !== 6) {
-      setError("Please enter a valid 6-digit code");
+      setError("Please enter a valid 6-digit code.");
       return;
     }
-
-    setError("");
+    
     setIsLoading(true);
+    setError("");
     
     try {
-      const setupMfaEndpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
+      // Get the access token from localStorage if it exists
+      const accessToken = localStorage.getItem("access_token");
       
-      const response = await fetch(setupMfaEndpoint, {
+      if (!accessToken && !session) {
+        throw new Error("Missing authentication credentials");
+      }
+      
+      const setupEndpoint = `${apiBaseUrl}/api/auth/verify-mfa-setup`;
+      
+      const response = await fetch(setupEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -262,37 +456,31 @@ export default function LoginPage() {
           "Origin": window.location.origin
         },
         body: JSON.stringify({
-          username: email,
-          session: session,
+          access_token: accessToken,
           code: setupMfaCode
         }),
         mode: "cors",
         credentials: "include",
       });
-
-      const data = await response.json();
+      
+      const responseData = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.detail || `Failed to setup MFA (${response.status})`);
+        throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
       }
-
-      console.log("MFA setup response:", data);
       
-      // Check if we need to verify MFA now
-      if (data.mfa_required) {
-        setSession(data.session || "");
-        setShowMFASetup(false);
-        setShowMFA(true);
-      } else if (data.id_token && data.access_token) {
-        // Success - store tokens and redirect
-        localStorage.setItem("access_token", data.access_token);
-        localStorage.setItem("id_token", data.id_token);
-        localStorage.setItem("refresh_token", data.refresh_token || "");
+      // MFA setup successful, close dialog and proceed
+      setShowMFASetup(false);
+      
+      // If we don't already have tokens, redirect to login
+      if (!accessToken) {
+        setError("MFA setup successful. Please log in again.");
+      } else {
+        // We already have tokens, go to dashboard
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       }
     } catch (error: any) {
-      console.error("MFA setup error:", error.message);
-      setError(error.message || "Failed to setup MFA. Please try again.");
+      setError(error.message || "Failed to set up MFA");
     } finally {
       setIsLoading(false);
     }
@@ -307,6 +495,7 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
     
+    // Updated endpoint to include the proper API path
     const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
     console.log(`Verifying MFA with: ${mfaEndpoint}`);
 
@@ -320,7 +509,7 @@ export default function LoginPage() {
         },
         body: JSON.stringify({ code: mfaCode, session, username: email }),
         mode: "cors",
-        credentials: "include",
+        credentials: "include",  // Added to include cookies if needed
       }).catch(fetchError => {
         console.error("MFA fetch error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
@@ -420,6 +609,15 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading ? "Please wait..." : "Sign In"}
             </Button>
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="text-sm text-muted-foreground hover:text-primary"
+              >
+                Forgot Password?
+              </button>
+            </div>
           </CardFooter>
         </form>
       </Card>
@@ -562,6 +760,96 @@ export default function LoginPage() {
               {isLoading ? "Verifying..." : "Verify"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Forgot Password Dialog */}
+      <Dialog open={showForgotPassword} onOpenChange={(open) => {
+        if (!open) handleForgotPasswordClose();
+        else setShowForgotPassword(true);
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset Your Password</DialogTitle>
+            <DialogDescription>
+              {forgotPasswordStep === 1 
+                ? "Enter your email address to receive a verification code" 
+                : "Enter the verification code and your new password"}
+            </DialogDescription>
+          </DialogHeader>
+          
+          {forgotPasswordStep === 1 ? (
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">Email Address</Label>
+                <Input
+                  id="reset-email"
+                  type="email"
+                  placeholder="name@example.com"
+                  value={forgotPasswordEmail}
+                  onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                />
+              </div>
+              {forgotPasswordError && <p className="text-sm text-destructive">{forgotPasswordError}</p>}
+              <Button 
+                onClick={handleForgotPasswordRequest} 
+                disabled={!forgotPasswordEmail || isForgotPasswordLoading}
+                className="w-full"
+              >
+                {isForgotPasswordLoading ? "Sending..." : "Send Reset Code"}
+              </Button>
+            </div>
+          ) : (
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-code">Verification Code</Label>
+                <Input
+                  id="reset-code"
+                  placeholder="Enter verification code"
+                  value={forgotPasswordCode}
+                  onChange={(e) => setForgotPasswordCode(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-forgot-password">New Password</Label>
+                <Input
+                  id="new-forgot-password"
+                  type="password"
+                  placeholder="Enter new password"
+                  value={newForgotPassword}
+                  onChange={(e) => setNewForgotPassword(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-forgot-password">Confirm New Password</Label>
+                <Input
+                  id="confirm-forgot-password"
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmForgotPassword}
+                  onChange={(e) => setConfirmForgotPassword(e.target.value)}
+                />
+              </div>
+              {forgotPasswordError && <p className="text-sm text-destructive">{forgotPasswordError}</p>}
+              <div className="flex gap-3">
+                <Button 
+                  variant="outline"
+                  onClick={() => setForgotPasswordStep(1)}
+                  disabled={isForgotPasswordLoading}
+                  className="flex-1"
+                >
+                  Back
+                </Button>
+                <Button 
+                  onClick={handleForgotPasswordConfirm} 
+                  disabled={!forgotPasswordCode || !newForgotPassword || !confirmForgotPassword || isForgotPasswordLoading}
+                  className="flex-1"
+                >
+                  {isForgotPasswordLoading ? "Resetting..." : "Reset Password"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
