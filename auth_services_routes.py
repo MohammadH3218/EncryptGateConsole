@@ -282,6 +282,10 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         logger.warning(f"Invalid password format")
         return {"detail": f"Password does not meet requirements: {str(pwd_error)}"}, 400
         
+    except cognito_client.exceptions.CodeMismatchException:
+        logger.warning("CodeMismatchException: Invalid verification code")
+        return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
+        
     except Exception as e:
         logger.error(f"Challenge response error: {e}")
         return {"detail": f"Challenge response failed: {str(e)}"}, 500
@@ -361,7 +365,7 @@ def verify_software_token_setup(access_token, code):
         
     except cognito_client.exceptions.CodeMismatchException:
         logger.warning("Invalid verification code")
-        return {"detail": "Invalid verification code. Please try again."}, 400
+        return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
         
     except cognito_client.exceptions.EnableSoftwareTokenMFAException as e:
         logger.error(f"Error enabling MFA: {e}")
@@ -421,7 +425,7 @@ def verify_mfa(session, code, username):
         
     except cognito_client.exceptions.CodeMismatchException:
         logger.warning("MFA code mismatch")
-        return {"detail": "Invalid MFA code provided."}, 401
+        return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
         
     except Exception as e:
         logger.error(f"MFA verification error: {e}")
@@ -673,7 +677,7 @@ def setup_mfa_endpoint():
         logger.error(f"Error in setup_mfa_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Updated route to verify MFA setup with better error messages
+# Updated route to verify MFA setup with better error handling for CodeMismatchException
 @auth_services_routes.route("/verify-mfa-setup", methods=["POST", "OPTIONS"])
 def verify_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -695,21 +699,25 @@ def verify_mfa_setup_endpoint():
         if not code:
             logger.warning("Missing verification code in request")
             return jsonify({"detail": "Verification code is required"}), 400
+        
+        try:    
+            # Call the verify_software_token_setup function
+            response = verify_software_token_setup(access_token, code)
+        
+            # Check if it's an error response (tuple with status code)
+            if isinstance(response, tuple):
+                return jsonify(response[0]), response[1]
             
-        # Call the verify_software_token_setup function
-        response = verify_software_token_setup(access_token, code)
-        
-        # Check if it's an error response (tuple with status code)
-        if isinstance(response, tuple):
-            return jsonify(response[0]), response[1]
-        
-        # Otherwise, it's a successful response
-        return jsonify(response)
+            # Otherwise, it's a successful response
+            return jsonify(response)
+        except cognito_client.exceptions.CodeMismatchException:
+            logger.warning("CodeMismatchException: Invalid verification code")
+            return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
     except Exception as e:
         logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Updated route with more flexible parameter handling
+# Updated route with more flexible parameter handling and improved error handling for CodeMismatchException
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -725,18 +733,30 @@ def confirm_mfa_setup_endpoint():
         code = data.get('code')
         access_token = data.get('access_token')
         
+        logger.info(f"MFA setup parameters received: username present: {bool(username)}, session present: {bool(session)}, code present: {bool(code)}, access_token present: {bool(access_token)}")
+        
         # Check if we have access token (new flow) or session (old flow)
         if access_token:
-            # Call the verify_software_token_setup function
-            response = verify_software_token_setup(access_token, code)
+            logger.info("Using access token flow for MFA verification")
+            try:
+                # Call the verify_software_token_setup function
+                response = verify_software_token_setup(access_token, code)
+            except cognito_client.exceptions.CodeMismatchException:
+                logger.warning("CodeMismatchException: Invalid verification code")
+                return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
         elif session and username and code:
-            # Use the respond_to_auth_challenge function
-            response = respond_to_auth_challenge(
-                username, 
-                session, 
-                "SOFTWARE_TOKEN_MFA", 
-                {"SOFTWARE_TOKEN_MFA_CODE": code}
-            )
+            logger.info(f"Using session flow for MFA verification")
+            try:
+                # Use the respond_to_auth_challenge function
+                response = respond_to_auth_challenge(
+                    username, 
+                    session, 
+                    "SOFTWARE_TOKEN_MFA", 
+                    {"SOFTWARE_TOKEN_MFA_CODE": code}
+                )
+            except cognito_client.exceptions.CodeMismatchException:
+                logger.warning("CodeMismatchException: Invalid verification code") 
+                return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
         else:
             missing_params = []
             if not access_token and not session:
@@ -756,6 +776,9 @@ def confirm_mfa_setup_endpoint():
         
         # Otherwise, it's a successful response
         return jsonify(response)
+    except cognito_client.exceptions.CodeMismatchException:
+        logger.warning("CodeMismatchException: Invalid verification code")
+        return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
     except Exception as e:
         logger.error(f"Error in confirm_mfa_setup_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500

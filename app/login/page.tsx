@@ -422,7 +422,7 @@ export default function LoginPage() {
     }
   };
 
-  // Updated handleMFASetup function with better error handling and support for both flows
+  // Updated handleMFASetup function with improved error handling for CodeMismatchException
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -430,7 +430,7 @@ export default function LoginPage() {
     }
     
     if (setupMfaCode.length !== 6) {
-      setError("Please enter a valid 6-digit code.");
+      setError("Please enter a valid 6-digit code from your authenticator app.");
       return;
     }
     
@@ -443,7 +443,7 @@ export default function LoginPage() {
       
       // Check if we have a session - we'll use this as a fallback if access_token is not available
       if (!accessToken && !session) {
-        throw new Error("Missing authentication credentials - need either access token or session");
+        throw new Error("Authentication session expired. Please log in again.");
       }
       
       let endpoint;
@@ -479,12 +479,24 @@ export default function LoginPage() {
         credentials: "include",
       });
       
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || `Failed to verify MFA setup (${response.status})`);
+      // Try to parse the response
+      let responseData;
+      try {
+        responseData = await response.json();
+      } catch (parseError) {
+        throw new Error("Unable to parse server response. Please try again.");
       }
       
-      const responseData = await response.json();
+      if (!response.ok) {
+        // Check for specific error types from backend
+        if (response.status === 400 && responseData.detail) {
+          throw new Error(responseData.detail);
+        } else if (response.status === 500) {
+          throw new Error("Server error while verifying code. Please try again with a new code.");
+        } else {
+          throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
+        }
+      }
       
       // MFA setup successful, close dialog and process the result
       setShowMFASetup(false);
@@ -508,6 +520,12 @@ export default function LoginPage() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to set up MFA";
       setError(errorMessage);
+      
+      // If there's an issue with the verification code, clear the input
+      // so the user can try again with a new code
+      if (errorMessage.includes("code") || errorMessage.includes("verification")) {
+        setSetupMfaCode("");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -547,6 +565,10 @@ export default function LoginPage() {
       }
 
       if (!response.ok) {
+        if (response.status === 400 && data.detail && data.detail.includes("verification code")) {
+          // Clear the mfa code field on code mismatch errors
+          setMfaCode("");
+        }
         throw new Error(data?.detail || "Invalid MFA code");
       }
 
