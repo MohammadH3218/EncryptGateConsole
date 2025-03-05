@@ -75,7 +75,7 @@ export default function LoginPage() {
     setError("");
     
     // Updated endpoint to match backend configuration
-    const loginEndpoint = `${apiBaseUrl}/api/user/login`;
+    const loginEndpoint = `${apiBaseUrl}/authenticate`;
     console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
     try {
@@ -142,7 +142,7 @@ export default function LoginPage() {
     setIsLoading(true);
     
     // Updated endpoint to match backend configuration
-    const mfaEndpoint = `${apiBaseUrl}/api/user/verify-mfa`;
+    const mfaEndpoint = `${apiBaseUrl}/verify-mfa`;
     console.log(`Verifying MFA with: ${mfaEndpoint}`);
 
     try {
