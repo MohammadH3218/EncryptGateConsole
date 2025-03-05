@@ -119,6 +119,50 @@ def generate_qr_code(secret_code, username, issuer="EncryptGate"):
         logger.error(traceback.format_exc())
         return None
 
+# Function to check if MFA is enabled for a user with access token
+def check_mfa_enabled(access_token):
+    """
+    Check if MFA is enabled for a user using their access token
+    
+    Args:
+        access_token (str): User's access token from authentication
+        
+    Returns:
+        dict: Status of MFA configuration for the user
+    """
+    logger.info("Checking MFA status with access token")
+    
+    try:
+        # Get the user attributes from Cognito
+        response = cognito_client.get_user(
+            AccessToken=access_token
+        )
+        
+        # Check if MFA is enabled by looking at user attributes
+        mfa_options = response.get("UserMFASettingList", [])
+        preferred_mfa = response.get("PreferredMfaSetting")
+        
+        # Check if SOFTWARE_TOKEN_MFA is in the options or is the preferred
+        mfa_enabled = ("SOFTWARE_TOKEN_MFA" in mfa_options or 
+                      preferred_mfa == "SOFTWARE_TOKEN_MFA")
+        
+        logger.info(f"MFA status for user: {'Enabled' if mfa_enabled else 'Not enabled'}")
+        
+        return {
+            "mfaEnabled": mfa_enabled,
+            "username": response.get("Username"),
+            "message": "MFA is enabled" if mfa_enabled else "MFA is not enabled"
+        }
+        
+    except cognito_client.exceptions.NotAuthorizedException:
+        logger.error("Invalid or expired access token")
+        return {"detail": "Invalid or expired access token"}, 401
+        
+    except Exception as e:
+        logger.error(f"Error checking MFA status: {e}")
+        logger.error(traceback.format_exc())
+        return {"detail": f"Failed to check MFA status: {str(e)}"}, 500
+
 # Function for use in other modules - can be called directly with parameters
 def authenticate_user(username, password):
     """
@@ -327,6 +371,16 @@ def setup_mfa(access_token):
     logger.info("Setting up MFA")
     
     try:
+        # Get user info for better QR code generation
+        try:
+            user_info = cognito_client.get_user(
+                AccessToken=access_token
+            )
+            username = user_info.get("Username", "user")
+        except Exception as user_error:
+            logger.warning(f"Could not get user info: {user_error}")
+            username = "user"
+        
         # Make the API call to associate software token
         response = cognito_client.associate_software_token(
             AccessToken=access_token
@@ -341,7 +395,7 @@ def setup_mfa(access_token):
             return {"detail": "Failed to generate MFA secret code"}, 500
         
         # Generate QR code
-        qr_code = generate_qr_code(secret_code, "user")  # We don't have username here, using generic
+        qr_code = generate_qr_code(secret_code, username)
         
         return {
             "secretCode": secret_code,
@@ -370,16 +424,31 @@ def verify_software_token_setup(access_token, code):
     
     try:
         # Make the API call to verify software token
-        response = cognito_client.verify_software_token(
+        verify_response = cognito_client.verify_software_token(
             AccessToken=access_token,
             UserCode=code
         )
         
         # Check the status
-        status = response.get("Status")
+        status = verify_response.get("Status")
         logger.info(f"MFA verification status: {status}")
         
         if status == "SUCCESS":
+            # Enable MFA for the user
+            try:
+                # Enable MFA as the preferred method
+                set_mfa_response = cognito_client.set_user_mfa_preference(
+                    AccessToken=access_token,
+                    SoftwareTokenMfaSettings={
+                        "Enabled": True,
+                        "PreferredMfa": True
+                    }
+                )
+                logger.info("MFA preferences set successfully")
+            except Exception as set_error:
+                logger.error(f"Error setting MFA preferences: {set_error}")
+                # Continue even if preference setting fails
+            
             return {
                 "message": "MFA setup verified successfully",
                 "status": status
@@ -498,6 +567,10 @@ def initiate_forgot_password(username):
             "message": "Password reset initiated. Check your email for verification code."
         }
         
+    except cognito_client.exceptions.LimitExceededException as e:
+        logger.error(f"Limit exceeded for forgot password: {e}")
+        return {"detail": "Too many password reset attempts. Please try again later."}, 429
+        
     except Exception as e:
         logger.error(f"Error initiating forgot password: {e}")
         logger.error(traceback.format_exc())
@@ -543,6 +616,10 @@ def confirm_forgot_password(username, confirmation_code, new_password):
     except cognito_client.exceptions.CodeMismatchException:
         logger.error("Invalid verification code")
         return {"detail": "Invalid verification code. Please try again."}, 400
+        
+    except cognito_client.exceptions.ExpiredCodeException:
+        logger.error("Verification code has expired")
+        return {"detail": "Verification code has expired. Please request a new code."}, 400
         
     except cognito_client.exceptions.InvalidPasswordException as e:
         logger.error(f"Invalid password format: {e}")
@@ -689,6 +766,38 @@ def respond_to_challenge_endpoint():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in respond_to_challenge_endpoint: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# New route to check MFA status
+@auth_services_routes.route("/mfa-status", methods=["POST", "OPTIONS"])
+def mfa_status_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        access_token = data.get('access_token')
+        
+        if not access_token:
+            return jsonify({"detail": "Access token is required"}), 400
+            
+        logger.info("Checking MFA status with access token")
+        
+        # Call the check_mfa_enabled function
+        response = check_mfa_enabled(access_token)
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in mfa_status_endpoint: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
