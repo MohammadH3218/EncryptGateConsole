@@ -39,6 +39,94 @@ def generate_client_secret_hash(username: str) -> str:
     hash_result = base64.b64encode(hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()).decode()
     return hash_result
 
+# Function for use in other modules - can be called directly with parameters
+def authenticate_user(username, password):
+    """
+    Function version of authenticate_user that can be imported and called directly.
+    
+    Args:
+        username (str): User's email or username
+        password (str): User's password
+        
+    Returns:
+        dict: Authentication response containing tokens or error information
+    """
+    logger.info(f"Authentication function called for user: {username}")
+    
+    if not username or not password:
+        return {"detail": "Username and password are required"}, 400
+
+    try:
+        response = cognito_client.initiate_auth(
+            ClientId=CLIENT_ID,
+            AuthFlow="USER_PASSWORD_AUTH",
+            AuthParameters={
+                "USERNAME": username,
+                "PASSWORD": password,
+                "SECRET_HASH": generate_client_secret_hash(username),
+            },
+        )
+
+        auth_result = response.get("AuthenticationResult")
+        
+        return {
+            "id_token": auth_result.get("IdToken"),
+            "access_token": auth_result.get("AccessToken"),
+            "refresh_token": auth_result.get("RefreshToken"),
+            "token_type": auth_result.get("TokenType"),
+            "expires_in": auth_result.get("ExpiresIn"),
+        }
+
+    except cognito_client.exceptions.NotAuthorizedException:
+        return {"detail": "Invalid username or password."}, 401
+        
+    except Exception as e:
+        logger.error(f"Error during authentication: {e}")
+        return {"detail": "Authentication failed"}, 500
+
+# Verify MFA function
+def verify_mfa(session, code, username):
+    """
+    Verifies a multi-factor authentication code.
+    
+    Args:
+        session (str): The session from the initial authentication
+        code (str): The MFA code provided by the user
+        username (str): The username of the user
+        
+    Returns:
+        dict: Authentication result or error information
+    """
+    logger.info(f"MFA verification initiated for user: {username}")
+    
+    try:
+        response = cognito_client.respond_to_auth_challenge(
+            ClientId=CLIENT_ID,
+            ChallengeName="SOFTWARE_TOKEN_MFA",
+            Session=session,
+            ChallengeResponses={
+                "USERNAME": username,
+                "SOFTWARE_TOKEN_MFA_CODE": code,
+                "SECRET_HASH": generate_client_secret_hash(username)
+            }
+        )
+        
+        auth_result = response.get("AuthenticationResult")
+        return {
+            "id_token": auth_result.get("IdToken"),
+            "access_token": auth_result.get("AccessToken"),
+            "refresh_token": auth_result.get("RefreshToken"),
+            "token_type": auth_result.get("TokenType"),
+            "expires_in": auth_result.get("ExpiresIn"),
+        }
+        
+    except cognito_client.exceptions.CodeMismatchException:
+        return {"detail": "Invalid MFA code provided."}, 401
+        
+    except Exception as e:
+        logger.error(f"MFA verification error: {e}")
+        return {"detail": f"MFA verification failed: {e}"}, 401
+
 # Confirm User Signup
 def confirm_signup(email, temp_password, new_password):
     """
@@ -106,48 +194,27 @@ def handle_cors_preflight():
     response.headers.add("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
     return response, 204
 
-# Authenticate User Route
+# Authenticate User Route - Keep for backward compatibility
 @auth_services_routes.route("/authenticate", methods=["OPTIONS", "POST"])
-def authenticate_user():
+def authenticate_user_route():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
 
-    logger.info(f"Authentication request received from: {request.headers.get('Origin', 'Unknown')}")
+    logger.info(f"Authentication route accessed from: {request.headers.get('Origin', 'Unknown')}")
     
     data = request.json
     username = data.get('username')
     password = data.get('password')
 
-    if not username or not password:
-        return jsonify({"detail": "Username and password are required"}), 400
-
-    try:
-        response = cognito_client.initiate_auth(
-            ClientId=CLIENT_ID,
-            AuthFlow="USER_PASSWORD_AUTH",
-            AuthParameters={
-                "USERNAME": username,
-                "PASSWORD": password,
-                "SECRET_HASH": generate_client_secret_hash(username),
-            },
-        )
-
-        auth_result = response.get("AuthenticationResult")
-        
-        return jsonify({
-            "id_token": auth_result.get("IdToken"),
-            "access_token": auth_result.get("AccessToken"),
-            "refresh_token": auth_result.get("RefreshToken"),
-            "token_type": auth_result.get("TokenType"),
-            "expires_in": auth_result.get("ExpiresIn"),
-        })
-
-    except cognito_client.exceptions.NotAuthorizedException:
-        return jsonify({"detail": "Invalid username or password."}), 401
-        
-    except Exception as e:
-        logger.error(f"Error during authentication: {e}")
-        return jsonify({"detail": "Authentication failed"}), 500
+    # Call the function version and handle the response
+    auth_response = authenticate_user(username, password)
+    
+    # Check if it's an error response (tuple with status code)
+    if isinstance(auth_response, tuple):
+        return jsonify(auth_response[0]), auth_response[1]
+    
+    # Otherwise, it's a successful response
+    return jsonify(auth_response)
 
 # Route to confirm signup (Uses the confirm_signup function)
 @auth_services_routes.route("/confirm-signup", methods=["POST", "OPTIONS"])
@@ -172,6 +239,30 @@ def confirm_signup_endpoint():
         return jsonify({"detail": f"Signup confirmation failed: {e}"}), 400
 
     return jsonify({"message": "Password changed successfully"}), 200
+
+# Route for MFA verification
+@auth_services_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
+def verify_mfa_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    data = request.json
+    session = data.get('session')
+    code = data.get('code')
+    username = data.get('username')
+
+    if not (session and code and username):
+        return jsonify({"detail": "Session, username, and code are required"}), 400
+
+    # Call the verify_mfa function
+    auth_result = verify_mfa(session, code, username)
+    
+    # Check if it's an error response (tuple with status code)
+    if isinstance(auth_result, tuple):
+        return jsonify(auth_result[0]), auth_result[1]
+    
+    # Otherwise, it's a successful response
+    return jsonify(auth_result)
 
 # Health Check Route
 @auth_services_routes.route("/health", methods=["GET"])

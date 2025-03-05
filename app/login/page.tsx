@@ -53,8 +53,9 @@ export default function LoginPage() {
     const configuredUrl = process.env.NEXT_PUBLIC_API_URL;
     console.log("Frontend API URL from env:", configuredUrl);
     
-    // Use the configured URL or fall back to the Elastic Beanstalk URL
-    const fallbackUrl = "https://encryptgateconsole-env.eba-r2es7hns.us-east-1.elasticbeanstalk.com";
+    // Use the configured URL or fall back to the correct API URL
+    // Removed extra whitespace in the fallback URL
+    const fallbackUrl = "https://api.console-encryptgate.net";
     const finalUrl = configuredUrl || fallbackUrl;
     
     setApiBaseUrl(finalUrl);
@@ -72,11 +73,14 @@ export default function LoginPage() {
 
     setIsLoading(true);
     setError("");
-    console.log(`Attempting to authenticate with: ${apiBaseUrl}/api/auth/authenticate`);
+    
+    // Updated endpoint to match backend configuration
+    const loginEndpoint = `${apiBaseUrl}/api/user/login`;
+    console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
     try {
       // Enhanced fetch with better error handling
-      const response = await fetch(`${apiBaseUrl}/api/auth/authenticate`, {
+      const response = await fetch(loginEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -104,7 +108,8 @@ export default function LoginPage() {
       }
 
       if (!response.ok) {
-        throw new Error(responseData?.detail || "Invalid credentials");
+        console.error("Server returned error status:", response.status, responseData);
+        throw new Error(responseData?.detail || `Authentication failed (${response.status})`);
       }
 
       if (responseData.mfa_required) {
@@ -116,7 +121,8 @@ export default function LoginPage() {
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       } else {
-        throw new Error("Unexpected server response");
+        console.error("Unexpected response format:", responseData);
+        throw new Error("Unexpected server response format");
       }
     } catch (error: any) {
       console.error("Login error:", error.message);
@@ -134,10 +140,13 @@ export default function LoginPage() {
 
     setError("");
     setIsLoading(true);
-    console.log(`Verifying MFA with: ${apiBaseUrl}/api/auth/verify-mfa`);
+    
+    // Updated endpoint to match backend configuration
+    const mfaEndpoint = `${apiBaseUrl}/api/user/verify-mfa`;
+    console.log(`Verifying MFA with: ${mfaEndpoint}`);
 
     try {
-      const response = await fetch(`${apiBaseUrl}/api/auth/verify-mfa`, {
+      const response = await fetch(mfaEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -162,6 +171,7 @@ export default function LoginPage() {
       }
 
       if (!response.ok) {
+        console.error("MFA verification failed with status:", response.status, data);
         throw new Error(data?.detail || "Invalid MFA code");
       }
 
