@@ -31,15 +31,17 @@ interface LoginResponse {
   access_token?: string;
   id_token?: string;
   refresh_token?: string;
-  token?: string; // Added for flexibility
+  token?: string;
   mfa_required?: boolean;
+  mfa_setup_required?: boolean;
   ChallengeName?: string;
   session?: string;
   email?: string;
   role?: string;
   detail?: string;
   secretCode?: string;
-  message?: string; // Added for message handling
+  message?: string;
+  mfaEnabled?: boolean;
 }
 
 export default function LoginPage() {
@@ -77,7 +79,7 @@ export default function LoginPage() {
   const [session, setSession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null);
-  const [passwordJustChanged, setPasswordJustChanged] = useState(false);
+  const [tempAccessToken, setTempAccessToken] = useState<string | null>(null);
 
   // Fetch API URL from the backend with fallback
   useEffect(() => {
@@ -108,73 +110,6 @@ export default function LoginPage() {
       setQrCodeUrl(qrCodeApiUrl);
     }
   }, [mfaSecretCode, email]);
-
-  // If password was just changed, trigger MFA setup automatically
-  useEffect(() => {
-    if (passwordJustChanged && !showMFASetup && !showMFA) {
-      console.log("Password was just changed, checking if MFA setup is needed...");
-      initiateLoginAfterPasswordChange();
-      setPasswordJustChanged(false);
-    }
-  }, [passwordJustChanged]);
-
-  // Handle the authentication flow after password change
-  const initiateLoginAfterPasswordChange = async () => {
-    if (!apiBaseUrl) {
-      setError("API URL is not available.");
-      return;
-    }
-
-    setIsLoading(true);
-    
-    try {
-      // Try with direct authenticate endpoint to get tokens
-      const loginEndpoint = `${apiBaseUrl}/api/auth/authenticate`;
-      
-      const response = await fetch(loginEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Origin": window.location.origin
-        },
-        body: JSON.stringify({
-          username: email,
-          password: newPassword, // Use the new password
-        }),
-        mode: "cors",
-        credentials: "include",
-      });
-      
-      const responseData = await response.json();
-      
-      if (response.ok) {
-        console.log("Post-password-change authentication response:", responseData);
-        
-        // Handle different authentication flows
-        if (responseData.ChallengeName === "SOFTWARE_TOKEN_MFA") {
-          // Handle MFA challenge
-          setSession(responseData.session || "");
-          setShowMFA(true);
-        } else if (responseData.mfa_required) {
-          // Another way the backend might indicate MFA is required
-          setSession(responseData.session || "");
-          setShowMFA(true);
-        } else if (responseData.access_token) {
-          // Success with tokens - check if MFA setup is needed
-          await checkAndSetupMFA(responseData.access_token);
-        }
-      } else {
-        console.error("Failed to initiate MFA setup after password change");
-        setError("Password changed successfully. Please sign in with your new password.");
-      }
-    } catch (error: any) {
-      console.error("Error initiating MFA after password change:", error);
-      setError("Password changed successfully. Please sign in with your new password.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   // Handle forgot password request
   const handleForgotPasswordRequest = async () => {
@@ -361,7 +296,7 @@ export default function LoginPage() {
         await checkAndSetupMFA(responseData.access_token);
       } else if (responseData.message && typeof responseData.message === 'string' && 
                  responseData.message.includes("Password changed successfully")) {
-        // Handle password change success message from backend
+        // Password was changed successfully but no tokens received
         setError("Password changed successfully. Please sign in with your new password.");
       } else {
         // More flexible handling of unexpected response formats
@@ -385,13 +320,18 @@ export default function LoginPage() {
     }
   };
 
-  // New helper function to check and setup MFA if needed
+  // Check and setup MFA if needed
   const checkAndSetupMFA = async (accessToken: string) => {
+    if (!apiBaseUrl) {
+      console.error("API URL is not available");
+      return;
+    }
+
     try {
+      console.log("Checking if MFA setup is needed with token:", accessToken.substring(0, 10) + "...");
+      
       // Check if MFA is already configured
       const mfaStatusEndpoint = `${apiBaseUrl}/api/auth/mfa-status`;
-      console.log("Checking MFA status with token:", accessToken.substring(0, 10) + "...");
-      
       const statusResponse = await fetch(mfaStatusEndpoint, {
         method: "POST",
         headers: {
@@ -413,13 +353,15 @@ export default function LoginPage() {
         // MFA is already set up, proceed to dashboard
         console.log("MFA is already enabled, proceeding to dashboard");
         localStorage.setItem("access_token", accessToken);
-        localStorage.setItem("id_token", accessToken); // Fallback
+        localStorage.setItem("id_token", accessToken);
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
         return;
       }
       
       // MFA setup is needed
       console.log("MFA setup is needed, initiating setup");
+      setTempAccessToken(accessToken);
+      
       const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
       const mfaResponse = await fetch(setupMfaEndpoint, {
         method: "POST",
@@ -439,12 +381,14 @@ export default function LoginPage() {
       console.log("MFA setup response:", mfaData);
       
       if (mfaResponse.ok && mfaData.secretCode) {
-        // Store tokens temporarily
-        localStorage.setItem("temp_access_token", accessToken);
         // Show MFA setup screen
         setMfaSecretCode(mfaData.secretCode);
         setQrCodeUrl(mfaData.qrCodeImage || "");
         setShowMFASetup(true);
+      } else if (mfaData.mfaEnabled) {
+        // MFA is already enabled (double-check)
+        localStorage.setItem("access_token", accessToken);
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       } else {
         throw new Error("Failed to initialize MFA setup");
       }
@@ -505,38 +449,67 @@ export default function LoginPage() {
       
       console.log("Password change response:", responseData);
       
-      // Close password change dialog
+      // Close password change dialog - we'll handle MFA setup in the next step
       setShowPasswordChange(false);
       
       // Handle response based on tokens and challenges
       if (responseData.access_token) {
-        // Have tokens - check if MFA setup is needed
-        console.log("Received access token after password change");
+        console.log("Password changed successfully, received access token");
+        // Get the new access token and check/setup MFA
         await checkAndSetupMFA(responseData.access_token);
       } else if (responseData.ChallengeName === "SOFTWARE_TOKEN_MFA") {
         // MFA verification required
-        console.log("Received MFA challenge after password change");
+        console.log("Password changed, MFA verification required");
         setSession(responseData.session || "");
         setShowMFA(true);
-      } else if (responseData.mfa_required) {
-        // Another way the backend might indicate MFA is required
-        console.log("MFA required flag detected after password change");
-        setSession(responseData.session || "");
-        setShowMFA(true);
+      } else if (responseData.mfa_required || responseData.mfa_setup_required) {
+        // Need to trigger MFA setup
+        console.log("Password changed, MFA setup is required");
+        
+        // We need to log in again to get a fresh token for MFA setup
+        try {
+          const loginResponse = await fetch(apiBaseUrl + "/api/auth/authenticate", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Origin": window.location.origin
+            },
+            body: JSON.stringify({
+              username: email,
+              password: newPassword
+            }),
+            mode: "cors",
+            credentials: "include",
+          });
+          
+          const loginData = await loginResponse.json();
+          
+          if (loginResponse.ok && loginData.access_token) {
+            // Got new token after password change, now check/setup MFA
+            await checkAndSetupMFA(loginData.access_token);
+          } else if (loginData.ChallengeName === "SOFTWARE_TOKEN_MFA") {
+            // MFA verification required
+            setSession(loginData.session || "");
+            setShowMFA(true);
+          } else {
+            // Cannot automatically continue the flow
+            setPassword(newPassword); // Set password field to new password
+            setError("Password changed successfully. Please sign in with your new password.");
+          }
+        } catch (loginError) {
+          console.error("Error logging in after password change:", loginError);
+          setPassword(newPassword); // Set password field to new password
+          setError("Password changed successfully. Please sign in with your new password.");
+        }
       } else {
-        // Flag that password was changed to trigger MFA setup flow in the useEffect
-        console.log("Password changed, triggering MFA setup check");
-        setPasswordJustChanged(true);
-        
-        // Show success message
-        setError("Password changed successfully");
-        
-        // Clear form fields
-        setNewPassword("");
-        setConfirmPassword("");
+        // No clear next step, prompt user to sign in again
+        setPassword(newPassword); // Set password field to new password
+        setError("Password changed successfully. Please sign in with your new password.");
       }
     } catch (error: any) {
-      setError(error.message || "Failed to change password");
+      console.error("Password change error:", error);
+      setError(typeof error === 'object' && error.message ? error.message : "Failed to change password");
     } finally {
       setIsLoading(false);
     }
@@ -557,8 +530,8 @@ export default function LoginPage() {
     setError("");
     
     try {
-      // Get the access token from localStorage
-      const accessToken = localStorage.getItem("temp_access_token") || "";
+      // Get the access token
+      const accessToken = tempAccessToken || localStorage.getItem("temp_access_token") || "";
       
       if (!accessToken && !session) {
         throw new Error("Missing authentication credentials");
@@ -589,14 +562,15 @@ export default function LoginPage() {
       
       // MFA setup successful
       localStorage.removeItem("temp_access_token");
+      setTempAccessToken(null);
       
-      // Store the actual tokens if they exist
+      // Store the actual tokens
       if (responseData.access_token) {
         localStorage.setItem("access_token", responseData.access_token);
         localStorage.setItem("id_token", responseData.id_token || "");
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
       } else {
-        // Use the temp token we had
+        // Use the token we had before
         localStorage.setItem("access_token", accessToken);
       }
       
@@ -608,6 +582,7 @@ export default function LoginPage() {
       // Redirect to dashboard
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
+      console.error("MFA setup error:", error);
       setError(error.message || "Failed to set up MFA");
     } finally {
       setIsLoading(false);
@@ -756,193 +731,180 @@ export default function LoginPage() {
         </form>
       </Card>
 
-{/* Password Change Dialog */}
-<Dialog 
-  open={showPasswordChange} 
-  onOpenChange={(open) => {
-    // Only allow the dialog to be closed if we're not in the middle of a password change
-    // If attempting to close (open is false) and password hasn't just changed, allow closing
-    // Otherwise, keep the dialog open
-    if (!open && !passwordJustChanged) {
-      setShowPasswordChange(false);
-    } else if (open) {
-      // Allow opening the dialog
-      setShowPasswordChange(true);
-    }
-    // Don't allow closing when passwordJustChanged is true
-  }}
->
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Change Password Required</DialogTitle>
-      <DialogDescription>
-        Your account requires a password change. Please create a new password.
-      </DialogDescription>
-    </DialogHeader>
-    <div className="grid gap-4 py-4">
-      <div className="space-y-2">
-        <Label htmlFor="new-password">New Password</Label>
-        <Input
-          id="new-password"
-          type="password"
-          placeholder="Enter new password"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="confirm-password">Confirm Password</Label>
-        <Input
-          id="confirm-password"
-          type="password"
-          placeholder="Confirm new password"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-        />
-      </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <Alert>
-        <AlertDescription className="text-xs">
-          Your password must be at least 8 characters long and include uppercase and lowercase letters, numbers, and special characters.
-        </AlertDescription>
-      </Alert>
-    </div>
-    <DialogFooter>
-      <Button 
-        onClick={handlePasswordChange} 
-        disabled={isLoading || !newPassword || !confirmPassword || newPassword !== confirmPassword}
-        className="w-full"
+      {/* Password Change Dialog - Force user to complete this step */}
+      <Dialog 
+        open={showPasswordChange} 
+        onOpenChange={(open) => {
+          // Only allow opening, not closing
+          if (open) setShowPasswordChange(true);
+          // Closing is handled programmatically after successful password change
+        }}
       >
-        {isLoading ? "Updating..." : "Update Password"}
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
-
-{/* MFA Setup Dialog */}
-<Dialog 
-  open={showMFASetup} 
-  onOpenChange={(open) => {
-    // Only allow the dialog to be opened, never closed through UI interactions
-    // If open is true, update state; if open is false, ignore the change
-    if (open) {
-      setShowMFASetup(true);
-    }
-    // By not setting to false, we prevent the dialog from closing via UI
-  }}
->
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
-      <DialogDescription>
-        For additional security, please set up two-factor authentication using an authenticator app.
-      </DialogDescription>
-    </DialogHeader>
-    <div className="grid gap-4 py-4">
-      <Alert>
-        <AlertDescription className="text-xs">
-          1. Install an authenticator app like Google Authenticator or Authy on your mobile device.
-          <br />
-          2. Scan the QR code or enter the secret key in your app.
-          <br />
-          3. Enter the 6-digit code from your authenticator app below.
-        </AlertDescription>
-      </Alert>
-      
-      {qrCodeUrl && (
-        <div className="flex flex-col items-center justify-center space-y-2">
-          <Label>Scan QR Code</Label>
-          <div className="bg-white p-2 rounded-md">
-            <img 
-              src={qrCodeUrl || "/placeholder.svg"} 
-              alt="QR Code for MFA setup" 
-              className="w-48 h-48 mx-auto"
-            />
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Password Required</DialogTitle>
+            <DialogDescription>
+              Your account requires a password change. Please create a new password.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-password">New Password</Label>
+              <Input
+                id="new-password"
+                type="password"
+                placeholder="Enter new password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">Confirm Password</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                placeholder="Confirm new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Alert>
+              <AlertDescription className="text-xs">
+                Your password must be at least 8 characters long and include uppercase and lowercase letters, numbers, and special characters.
+              </AlertDescription>
+            </Alert>
           </div>
-        </div>
-      )}
-      
-      {mfaSecretCode && (
-        <div className="space-y-2 text-center">
-          <Label>Secret Key</Label>
-          <div className="p-3 bg-muted rounded-md font-mono text-center break-all">
-            {mfaSecretCode}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Enter this code manually if you cannot scan the QR code
-          </p>
-        </div>
-      )}
-      
-      <div className="space-y-2">
-        <Label htmlFor="setup-mfa-code">Authentication Code</Label>
-        <Input
-          id="setup-mfa-code"
-          placeholder="000000"
-          value={setupMfaCode}
-          onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-          maxLength={6}
-          className="text-center text-2xl tracking-widest"
-        />
-      </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-    </div>
-    <DialogFooter>
-      <Button 
-        onClick={handleMFASetup} 
-        disabled={setupMfaCode.length !== 6 || isLoading}
-        className="w-full"
-      >
-        {isLoading ? "Verifying..." : "Verify & Complete Setup"}
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+          <DialogFooter>
+            <Button 
+              onClick={handlePasswordChange} 
+              disabled={isLoading || !newPassword || !confirmPassword || newPassword !== confirmPassword}
+              className="w-full"
+            >
+              {isLoading ? "Updating..." : "Update Password"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-{/* MFA Verification Dialog */}
-<Dialog 
-  open={showMFA} 
-  onOpenChange={(open) => {
-    // Only allow the dialog to be opened, never closed through UI interactions
-    // If open is true, update state; if open is false, ignore the change
-    if (open) {
-      setShowMFA(true);
-    }
-    // By not setting to false, we prevent the dialog from closing via UI
-  }}
->
-  <DialogContent>
-    <DialogHeader>
-      <DialogTitle>Enter Authentication Code</DialogTitle>
-      <DialogDescription>
-        Please enter the 6-digit code from your authenticator app
-      </DialogDescription>
-    </DialogHeader>
-    <div className="grid gap-4 py-4">
-      <div className="space-y-2">
-        <Label htmlFor="mfa-code">Authentication Code</Label>
-        <Input
-          id="mfa-code"
-          placeholder="000000"
-          value={mfaCode}
-          onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-          maxLength={6}
-          className="text-center text-2xl tracking-widest"
-        />
-      </div>
-      {error && <p className="text-sm text-destructive">{error}</p>}
-    </div>
-    <DialogFooter>
-      <Button 
-        onClick={handleMFASubmit} 
-        disabled={mfaCode.length !== 6 || isLoading}
-        className="w-full"
+      {/* MFA Setup Dialog - Force user to complete this step */}
+      <Dialog 
+        open={showMFASetup} 
+        onOpenChange={(open) => {
+          // Only allow opening, not closing
+          if (open) setShowMFASetup(true);
+          // Closing is handled programmatically after successful setup
+        }}
       >
-        {isLoading ? "Verifying..." : "Verify"}
-      </Button>
-    </DialogFooter>
-  </DialogContent>
-</Dialog>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
+            <DialogDescription>
+              For additional security, please set up two-factor authentication using an authenticator app.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Alert>
+              <AlertDescription className="text-xs">
+                1. Install an authenticator app like Google Authenticator or Authy on your mobile device.
+                <br />
+                2. Scan the QR code or enter the secret key in your app.
+                <br />
+                3. Enter the 6-digit code from your authenticator app below.
+              </AlertDescription>
+            </Alert>
+            
+            {qrCodeUrl && (
+              <div className="flex flex-col items-center justify-center space-y-2">
+                <Label>Scan QR Code</Label>
+                <div className="bg-white p-2 rounded-md">
+                  <img 
+                    src={qrCodeUrl || "/placeholder.svg"} 
+                    alt="QR Code for MFA setup" 
+                    className="w-48 h-48 mx-auto"
+                  />
+                </div>
+              </div>
+            )}
+            
+            {mfaSecretCode && (
+              <div className="space-y-2 text-center">
+                <Label>Secret Key</Label>
+                <div className="p-3 bg-muted rounded-md font-mono text-center break-all">
+                  {mfaSecretCode}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter this code manually if you cannot scan the QR code
+                </p>
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <Label htmlFor="setup-mfa-code">Authentication Code</Label>
+              <Input
+                id="setup-mfa-code"
+                placeholder="000000"
+                value={setupMfaCode}
+                onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                maxLength={6}
+                className="text-center text-2xl tracking-widest"
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={handleMFASetup} 
+              disabled={setupMfaCode.length !== 6 || isLoading}
+              className="w-full"
+            >
+              {isLoading ? "Verifying..." : "Verify & Complete Setup"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MFA Verification Dialog - Force user to complete this step */}
+      <Dialog 
+        open={showMFA} 
+        onOpenChange={(open) => {
+          // Only allow opening, not closing
+          if (open) setShowMFA(true);
+          // Closing is handled programmatically after successful verification
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Authentication Code</DialogTitle>
+            <DialogDescription>
+              Please enter the 6-digit code from your authenticator app
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="mfa-code">Authentication Code</Label>
+              <Input
+                id="mfa-code"
+                placeholder="000000"
+                value={mfaCode}
+                onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+                maxLength={6}
+                className="text-center text-2xl tracking-widest"
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={handleMFASubmit} 
+              disabled={mfaCode.length !== 6 || isLoading}
+              className="w-full"
+            >
+              {isLoading ? "Verifying..." : "Verify"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Forgot Password Dialog */}
       <Dialog open={showForgotPassword} onOpenChange={(open) => {
