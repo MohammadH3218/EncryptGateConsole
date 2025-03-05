@@ -271,6 +271,89 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         logger.error(traceback.format_exc())
         return {"detail": f"Challenge response failed: {str(e)}"}, 500
 
+# Set up MFA with access token
+def setup_mfa(access_token):
+    """
+    Set up MFA for a user with access token
+    
+    Args:
+        access_token (str): User's access token from successful authentication
+        
+    Returns:
+        dict: MFA setup information including secret code
+    """
+    logger.info("Setting up MFA")
+    
+    try:
+        # Make the API call to associate software token
+        response = cognito_client.associate_software_token(
+            AccessToken=access_token
+        )
+        
+        logger.info("Software token association successful")
+        
+        # Get the secret code
+        secret_code = response.get("SecretCode")
+        if not secret_code:
+            logger.error("No secret code in response")
+            return {"detail": "Failed to generate MFA secret code"}, 500
+        
+        return {
+            "secretCode": secret_code,
+            "message": "MFA setup initiated successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error setting up MFA: {e}")
+        logger.error(traceback.format_exc())
+        return {"detail": f"Failed to setup MFA: {str(e)}"}, 500
+
+# Verify MFA setup with access token
+def verify_software_token_setup(access_token, code):
+    """
+    Verify MFA setup with access token and verification code
+    
+    Args:
+        access_token (str): User's access token from successful authentication
+        code (str): The verification code from authenticator app
+        
+    Returns:
+        dict: Success message or error
+    """
+    logger.info("Verifying MFA setup")
+    
+    try:
+        # Make the API call to verify software token
+        response = cognito_client.verify_software_token(
+            AccessToken=access_token,
+            UserCode=code
+        )
+        
+        # Check the status
+        status = response.get("Status")
+        logger.info(f"MFA verification status: {status}")
+        
+        if status == "SUCCESS":
+            return {
+                "message": "MFA setup verified successfully",
+                "status": status
+            }
+        else:
+            return {"detail": f"MFA verification failed with status: {status}"}, 400
+        
+    except cognito_client.exceptions.CodeMismatchException:
+        logger.error("Invalid verification code")
+        return {"detail": "Invalid verification code. Please try again."}, 400
+        
+    except cognito_client.exceptions.EnableSoftwareTokenMFAException as e:
+        logger.error(f"Error enabling MFA: {e}")
+        return {"detail": "Error enabling MFA. Try again or contact support."}, 400
+        
+    except Exception as e:
+        logger.error(f"Error verifying MFA setup: {e}")
+        logger.error(traceback.format_exc())
+        return {"detail": f"MFA verification failed: {str(e)}"}, 500
+
 # Verify MFA function
 def verify_mfa(session, code, username):
     """
@@ -467,6 +550,71 @@ def respond_to_challenge_endpoint():
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
+# New route to initiate MFA setup
+@auth_services_routes.route("/setup-mfa", methods=["POST", "OPTIONS"])
+def setup_mfa_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        access_token = data.get('access_token')
+        
+        if not access_token:
+            return jsonify({"detail": "Access token is required"}), 400
+            
+        logger.info("Initiating MFA setup with access token")
+        
+        # Call the setup_mfa function
+        response = setup_mfa(access_token)
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in setup_mfa_endpoint: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# New route to verify MFA setup
+@auth_services_routes.route("/verify-mfa-setup", methods=["POST", "OPTIONS"])
+def verify_mfa_setup_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        access_token = data.get('access_token')
+        code = data.get('code')
+        
+        if not (access_token and code):
+            return jsonify({"detail": "Access token and code are required"}), 400
+            
+        logger.info("Verifying MFA setup with access token")
+        
+        # Call the verify_software_token_setup function
+        response = verify_software_token_setup(access_token, code)
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
 # Route for confirming MFA setup
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
@@ -481,27 +629,32 @@ def confirm_mfa_setup_endpoint():
         username = data.get('username')
         session = data.get('session')
         code = data.get('code')
+        access_token = data.get('access_token')
         
-        if not (username and session and code):
-            return jsonify({"detail": "Username, session, and code are required"}), 400
+        # Check if we have access token (new flow) or session (old flow)
+        if access_token:
+            logger.info(f"Using new MFA setup flow with access token")
+            return verify_mfa_setup_endpoint()
+        elif session and username and code:
+            logger.info(f"Using old MFA setup flow with session for user: {username}")
             
-        logger.info(f"MFA setup confirmation for user: {username}")
-        
-        # For MFA setup confirmation, we use the same respond_to_auth_challenge function
-        # with the SOFTWARE_TOKEN_MFA challenge type
-        response = respond_to_auth_challenge(
-            username, 
-            session, 
-            "SOFTWARE_TOKEN_MFA", 
-            {"SOFTWARE_TOKEN_MFA_CODE": code}
-        )
-        
-        # Check if it's an error response (tuple with status code)
-        if isinstance(response, tuple):
-            return jsonify(response[0]), response[1]
-        
-        # Otherwise, it's a successful response
-        return jsonify(response)
+            # Use the respond_to_auth_challenge function
+            response = respond_to_auth_challenge(
+                username, 
+                session, 
+                "SOFTWARE_TOKEN_MFA", 
+                {"SOFTWARE_TOKEN_MFA_CODE": code}
+            )
+            
+            # Check if it's an error response (tuple with status code)
+            if isinstance(response, tuple):
+                return jsonify(response[0]), response[1]
+            
+            # Otherwise, it's a successful response
+            return jsonify(response)
+        else:
+            return jsonify({"detail": "Missing required parameters"}), 400
+            
     except Exception as e:
         logger.error(f"Error in confirm_mfa_setup_endpoint: {e}")
         logger.error(traceback.format_exc())
