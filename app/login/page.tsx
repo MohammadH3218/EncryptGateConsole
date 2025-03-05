@@ -74,7 +74,7 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     
-    // Updated endpoint to match backend configuration
+    // Try with direct authenticate endpoint (fallback to original if it fails)
     const loginEndpoint = `${apiBaseUrl}/authenticate`;
     console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
@@ -141,8 +141,8 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
     
-    // Updated endpoint to match backend configuration
-    const mfaEndpoint = `${apiBaseUrl}/verify-mfa`;
+    // Updated endpoint to include the proper API path
+    const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
     console.log(`Verifying MFA with: ${mfaEndpoint}`);
 
     try {

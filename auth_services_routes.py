@@ -12,6 +12,8 @@ import pyotp
 import qrcode
 from io import BytesIO
 from base64 import b64encode
+from flask import Flask
+from flask_cors import CORS
 
 # Load environment variables
 load_dotenv()
