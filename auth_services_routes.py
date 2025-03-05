@@ -14,6 +14,7 @@ from io import BytesIO
 from base64 import b64encode
 from flask import Flask
 from flask_cors import CORS
+import traceback
 
 # Load environment variables
 load_dotenv()
@@ -28,18 +29,53 @@ USER_POOL_ID = os.getenv("USER_POOL_ID")
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
-# Cognito Client
-cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
+# Log Cognito configuration status
+logger.info("=== Cognito Configuration Status ===")
+logger.info(f"AWS_REGION: {'Configured' if AWS_REGION else 'MISSING'}")
+logger.info(f"USER_POOL_ID: {'Configured' if USER_POOL_ID else 'MISSING'}")
+logger.info(f"CLIENT_ID: {'Configured' if CLIENT_ID else 'MISSING'}")
+logger.info(f"CLIENT_SECRET: {'Configured' if CLIENT_SECRET else 'MISSING'}")
+
+# Create Cognito client with error handling
+try:
+    logger.info(f"Initializing Cognito client with region: {AWS_REGION}")
+    cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
+    logger.info("Cognito client initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize Cognito client: {e}")
+    logger.error(traceback.format_exc())
+    # Create a dummy client to prevent app crash, but it won't work
+    cognito_client = boto3.client("cognito-idp", region_name="us-east-1")
 
 # Blueprint for auth routes
 auth_services_routes = Blueprint('auth_services_routes', __name__)
 
 # Generate Client Secret Hash
 def generate_client_secret_hash(username: str) -> str:
-    message = username + CLIENT_ID
-    secret = CLIENT_SECRET.encode("utf-8")
-    hash_result = base64.b64encode(hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()).decode()
-    return hash_result
+    try:
+        if not CLIENT_ID:
+            logger.error("CLIENT_ID is not configured")
+            raise ValueError("CLIENT_ID is missing")
+            
+        if not CLIENT_SECRET:
+            logger.error("CLIENT_SECRET is not configured")
+            raise ValueError("CLIENT_SECRET is missing")
+            
+        logger.debug(f"Generating client secret hash for username: {username}")
+        message = username + CLIENT_ID
+        secret = CLIENT_SECRET.encode("utf-8")
+        
+        # Compute the hash
+        hash_obj = hmac.new(secret, message.encode("utf-8"), hashlib.sha256)
+        hash_digest = hash_obj.digest()
+        hash_result = base64.b64encode(hash_digest).decode()
+        
+        logger.debug("Client secret hash generated successfully")
+        return hash_result
+    except Exception as e:
+        logger.error(f"Error generating client secret hash: {e}")
+        logger.error(traceback.format_exc())
+        raise
 
 # Function for use in other modules - can be called directly with parameters
 def authenticate_user(username, password):
@@ -55,22 +91,80 @@ def authenticate_user(username, password):
     """
     logger.info(f"Authentication function called for user: {username}")
     
+    # Validate parameters
     if not username or not password:
+        logger.error("Missing username or password")
         return {"detail": "Username and password are required"}, 400
 
-    try:
-        response = cognito_client.initiate_auth(
-            ClientId=CLIENT_ID,
-            AuthFlow="USER_PASSWORD_AUTH",
-            AuthParameters={
-                "USERNAME": username,
-                "PASSWORD": password,
-                "SECRET_HASH": generate_client_secret_hash(username),
-            },
-        )
-
-        auth_result = response.get("AuthenticationResult")
+    # Check AWS Cognito configuration
+    if not CLIENT_ID:
+        logger.error("CLIENT_ID is not configured")
+        return {"detail": "Authentication service misconfigured (CLIENT_ID missing)"}, 500
         
+    if not CLIENT_SECRET:
+        logger.error("CLIENT_SECRET is not configured")
+        return {"detail": "Authentication service misconfigured (CLIENT_SECRET missing)"}, 500
+        
+    if not USER_POOL_ID:
+        logger.error("USER_POOL_ID is not configured")
+        return {"detail": "Authentication service misconfigured (USER_POOL_ID missing)"}, 500
+
+    try:
+        # Generate secret hash with error handling
+        try:
+            logger.debug("Generating client secret hash")
+            secret_hash = generate_client_secret_hash(username)
+            logger.debug("Secret hash generated successfully")
+        except Exception as hash_error:
+            logger.error(f"Failed to generate secret hash: {hash_error}")
+            return {"detail": f"Authentication error: Failed to generate credentials"}, 500
+
+        # Log initiate auth attempt
+        logger.info(f"Initiating Cognito authentication for user: {username}")
+        logger.debug(f"Using CLIENT_ID: {CLIENT_ID[:4]}...{CLIENT_ID[-4:] if CLIENT_ID and len(CLIENT_ID) > 8 else 'invalid'}")
+        
+        # Call Cognito API
+        try:
+            response = cognito_client.initiate_auth(
+                ClientId=CLIENT_ID,
+                AuthFlow="USER_PASSWORD_AUTH",
+                AuthParameters={
+                    "USERNAME": username,
+                    "PASSWORD": password,
+                    "SECRET_HASH": secret_hash,
+                },
+            )
+            logger.info("Cognito authentication API call successful")
+            logger.debug(f"Response keys: {list(response.keys())}")
+        except cognito_client.exceptions.NotAuthorizedException as auth_error:
+            logger.error(f"NotAuthorizedException: {auth_error}")
+            return {"detail": "Invalid username or password."}, 401
+        except cognito_client.exceptions.UserNotFoundException as user_error:
+            logger.error(f"UserNotFoundException: {user_error}")
+            return {"detail": "Invalid username or password."}, 401  # Same error for security
+        except Exception as api_error:
+            logger.error(f"Cognito API call failed: {api_error}")
+            logger.error(traceback.format_exc())
+            return {"detail": f"Authentication failed: {str(api_error)}"}, 500
+
+        # Process auth result
+        auth_result = response.get("AuthenticationResult")
+        if not auth_result:
+            # Check for challenges
+            challenge_name = response.get("ChallengeName")
+            if challenge_name:
+                logger.info(f"Authentication challenge required: {challenge_name}")
+                return {
+                    "mfa_required": True,
+                    "session": response.get("Session"),
+                    "challenge": challenge_name
+                }
+            else:
+                logger.error("No AuthenticationResult or ChallengeName in response")
+                return {"detail": "Invalid authentication response"}, 500
+        
+        # Return successful result
+        logger.info("Authentication successful, returning tokens")
         return {
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
@@ -79,12 +173,10 @@ def authenticate_user(username, password):
             "expires_in": auth_result.get("ExpiresIn"),
         }
 
-    except cognito_client.exceptions.NotAuthorizedException:
-        return {"detail": "Invalid username or password."}, 401
-        
     except Exception as e:
-        logger.error(f"Error during authentication: {e}")
-        return {"detail": "Authentication failed"}, 500
+        logger.error(f"Unhandled error during authentication: {e}")
+        logger.error(traceback.format_exc())
+        return {"detail": f"Authentication failed: {str(e)}"}, 500
 
 # Verify MFA function
 def verify_mfa(session, code, username):
@@ -102,6 +194,14 @@ def verify_mfa(session, code, username):
     logger.info(f"MFA verification initiated for user: {username}")
     
     try:
+        # Generate secret hash
+        try:
+            secret_hash = generate_client_secret_hash(username)
+        except Exception as hash_error:
+            logger.error(f"Failed to generate secret hash for MFA: {hash_error}")
+            return {"detail": "MFA verification failed: Unable to generate credentials"}, 500
+            
+        # Make the API call
         response = cognito_client.respond_to_auth_challenge(
             ClientId=CLIENT_ID,
             ChallengeName="SOFTWARE_TOKEN_MFA",
@@ -109,11 +209,15 @@ def verify_mfa(session, code, username):
             ChallengeResponses={
                 "USERNAME": username,
                 "SOFTWARE_TOKEN_MFA_CODE": code,
-                "SECRET_HASH": generate_client_secret_hash(username)
+                "SECRET_HASH": secret_hash
             }
         )
         
         auth_result = response.get("AuthenticationResult")
+        if not auth_result:
+            logger.error("No AuthenticationResult in MFA response")
+            return {"detail": "Invalid MFA response from server"}, 500
+            
         return {
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
@@ -123,10 +227,12 @@ def verify_mfa(session, code, username):
         }
         
     except cognito_client.exceptions.CodeMismatchException:
+        logger.error("MFA code mismatch")
         return {"detail": "Invalid MFA code provided."}, 401
         
     except Exception as e:
         logger.error(f"MFA verification error: {e}")
+        logger.error(traceback.format_exc())
         return {"detail": f"MFA verification failed: {e}"}, 401
 
 # Confirm User Signup
@@ -170,6 +276,7 @@ def confirm_signup(email, temp_password, new_password):
         return None
     except Exception as e:
         logger.error(f"Error confirming signup: {e}")
+        logger.error(traceback.format_exc())
         return None
 
 # Enhanced CORS handler for preflight requests
@@ -200,23 +307,37 @@ def handle_cors_preflight():
 @auth_services_routes.route("/authenticate", methods=["OPTIONS", "POST"])
 def authenticate_user_route():
     if request.method == "OPTIONS":
+        logger.info("OPTIONS request received on /api/auth/authenticate")
         return handle_cors_preflight()
 
     logger.info(f"Authentication route accessed from: {request.headers.get('Origin', 'Unknown')}")
     
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    try:
+        data = request.json
+        if not data:
+            logger.error("No JSON data in request")
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        password = data.get('password')
+        
+        logger.info(f"Authentication attempt for user: {username}")
 
-    # Call the function version and handle the response
-    auth_response = authenticate_user(username, password)
-    
-    # Check if it's an error response (tuple with status code)
-    if isinstance(auth_response, tuple):
-        return jsonify(auth_response[0]), auth_response[1]
-    
-    # Otherwise, it's a successful response
-    return jsonify(auth_response)
+        # Call the function version and handle the response
+        auth_response = authenticate_user(username, password)
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(auth_response, tuple):
+            logger.info(f"Authentication returned error: {auth_response[0]}")
+            return jsonify(auth_response[0]), auth_response[1]
+        
+        # Otherwise, it's a successful response
+        logger.info("Authentication successful")
+        return jsonify(auth_response)
+    except Exception as e:
+        logger.error(f"Error in authenticate_user_route: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Route to confirm signup (Uses the confirm_signup function)
 @auth_services_routes.route("/confirm-signup", methods=["POST", "OPTIONS"])
@@ -238,6 +359,7 @@ def confirm_signup_endpoint():
             return jsonify({"detail": "Failed to confirm sign-up"}), 400
     except Exception as e:
         logger.error(f"Signup confirmation failed: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Signup confirmation failed: {e}"}), 400
 
     return jsonify({"message": "Password changed successfully"}), 200
@@ -269,4 +391,13 @@ def verify_mfa_endpoint():
 # Health Check Route
 @auth_services_routes.route("/health", methods=["GET"])
 def health_check():
-    return jsonify({"status": "success", "message": "Service is running"}), 200
+    return jsonify({
+        "status": "success", 
+        "message": "Service is running",
+        "aws_credentials": {
+            "region": "configured" if AWS_REGION else "missing",
+            "user_pool_id": "configured" if USER_POOL_ID else "missing",
+            "client_id": "configured" if CLIENT_ID else "missing",
+            "client_secret": "configured" if CLIENT_SECRET else "missing"
+        }
+    }), 200

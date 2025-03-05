@@ -171,37 +171,94 @@ def debug_route():
     }
     return jsonify(debug_info), 200
 
+# === Test POST endpoint to verify basic functionality ===
+@app.route("/api/test-post", methods=["POST", "OPTIONS"])
+def test_post():
+    if request.method == "OPTIONS":
+        return handle_preflight_request()
+        
+    try:
+        logger.info("Test POST endpoint accessed")
+        data = request.json
+        logger.info(f"Test POST received data: {data}")
+        
+        return jsonify({
+            "status": "success",
+            "received_data": data,
+            "message": "POST request successful"
+        }), 200
+    except Exception as e:
+        logger.error(f"Error in test POST endpoint: {str(e)}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "message": "Error processing POST request"
+        }), 500
+
 # === Direct authenticate endpoint to handle non-prefixed requests ===
 @app.route("/authenticate", methods=["OPTIONS", "POST"])
 def direct_authenticate():
     logger.info(f"Direct authenticate endpoint accessed from: {request.headers.get('Origin', 'Unknown')}")
     
     if request.method == "OPTIONS":
+        logger.info("OPTIONS request to /authenticate - returning preflight response")
         return handle_preflight_request()
     
     # Forward this request to the proper endpoint in auth_services_routes
     try:
         from auth_services_routes import authenticate_user
         
+        logger.info("Loading request data")
         data = request.json
+        logger.info(f"Authentication data received: {data if data else 'No data'}")
+        
         if not data:
+            logger.error("No JSON data provided in request")
             return jsonify({"detail": "No JSON data provided"}), 400
             
         username = data.get('username')
         password = data.get('password')
         
+        # Log authentication attempt (without password)
+        logger.info(f"Authentication attempt for user: {username}")
+        
+        # Check if data is properly formed
         if not username or not password:
+            logger.error("Missing username or password in request")
             return jsonify({"detail": "Username and password are required"}), 400
             
-        # Call the authenticate_user function
-        auth_response = authenticate_user(username, password)
+        # Check if AWS credentials are properly configured
+        aws_region = os.getenv("AWS_REGION", "us-east-1")
+        user_pool_id = os.getenv("USER_POOL_ID")
+        client_id = os.getenv("CLIENT_ID")
+        client_secret = os.getenv("CLIENT_SECRET")
         
-        # Check if it's an error response (tuple with status code)
-        if isinstance(auth_response, tuple):
-            return jsonify(auth_response[0]), auth_response[1]
+        logger.info(f"AWS Region configured: {'Yes' if aws_region else 'No'}")
+        logger.info(f"User Pool ID configured: {'Yes' if user_pool_id else 'No'}")
+        logger.info(f"Client ID configured: {'Yes' if client_id else 'No'}")
+        logger.info(f"Client Secret configured: {'Yes' if client_secret else 'No'}")
         
-        # Otherwise, it's a successful response
-        return jsonify(auth_response)
+        # Call the authenticate_user function with detailed try/except
+        try:
+            logger.info("Calling authenticate_user function")
+            auth_response = authenticate_user(username, password)
+            logger.info(f"Auth response type: {type(auth_response)}")
+            
+            # Check if it's an error response (tuple with status code)
+            if isinstance(auth_response, tuple):
+                logger.error(f"Authentication returned error: {auth_response[0]}")
+                return jsonify(auth_response[0]), auth_response[1]
+                
+            # Otherwise, it's a successful response
+            logger.info("Authentication successful")
+            return jsonify(auth_response)
+            
+        except Exception as e:
+            logger.error(f"Exception in authenticate_user: {str(e)}")
+            logger.error(traceback.format_exc())
+            return jsonify({"detail": f"Authentication error: {str(e)}"}), 500
+            
     except Exception as e:
         logger.error(f"Error in direct_authenticate: {e}")
         logger.error(traceback.format_exc())
@@ -211,6 +268,7 @@ def direct_authenticate():
 def handle_preflight_request():
     response = jsonify({"status": "success"})
     origin = request.headers.get("Origin", "")
+    logger.info(f"Handling CORS preflight for origin: {origin}")
     
     if origin in allowed_origins or "*" in allowed_origins:
         response.headers.set("Access-Control-Allow-Origin", origin)
