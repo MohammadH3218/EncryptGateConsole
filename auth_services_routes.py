@@ -24,10 +24,10 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # AWS Cognito Configuration
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-USER_POOL_ID = os.getenv("USER_POOL_ID")
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+AWS_REGION = os.getenv("REGION", "us-east-1")
+USER_POOL_ID = os.getenv("COGNITO_USERPOOL_ID")
+CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
+CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
 
 # Log Cognito configuration status
 logger.info("=== Cognito Configuration Status ===")
