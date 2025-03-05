@@ -20,7 +20,7 @@ import traceback
 load_dotenv()
 
 # Logging Configuration
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # AWS Cognito Configuration
@@ -29,21 +29,11 @@ USER_POOL_ID = os.getenv("COGNITO_USERPOOL_ID")
 CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
 CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
 
-# Log Cognito configuration status
-logger.info("=== Cognito Configuration Status ===")
-logger.info(f"AWS_REGION: {'Configured' if AWS_REGION else 'MISSING'}")
-logger.info(f"USER_POOL_ID: {'Configured' if USER_POOL_ID else 'MISSING'}")
-logger.info(f"CLIENT_ID: {'Configured' if CLIENT_ID else 'MISSING'}")
-logger.info(f"CLIENT_SECRET: {'Configured' if CLIENT_SECRET else 'MISSING'}")
-
 # Create Cognito client with error handling
 try:
-    logger.info(f"Initializing Cognito client with region: {AWS_REGION}")
     cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
-    logger.info("Cognito client initialized successfully")
 except Exception as e:
     logger.error(f"Failed to initialize Cognito client: {e}")
-    logger.error(traceback.format_exc())
     # Create a dummy client to prevent app crash, but it won't work
     cognito_client = boto3.client("cognito-idp", region_name="us-east-1")
 
@@ -61,7 +51,6 @@ def generate_client_secret_hash(username: str) -> str:
             logger.error("CLIENT_SECRET is not configured")
             raise ValueError("CLIENT_SECRET is missing")
             
-        logger.debug(f"Generating client secret hash for username: {username}")
         message = username + CLIENT_ID
         secret = CLIENT_SECRET.encode("utf-8")
         
@@ -70,11 +59,9 @@ def generate_client_secret_hash(username: str) -> str:
         hash_digest = hash_obj.digest()
         hash_result = base64.b64encode(hash_digest).decode()
         
-        logger.debug("Client secret hash generated successfully")
         return hash_result
     except Exception as e:
         logger.error(f"Error generating client secret hash: {e}")
-        logger.error(traceback.format_exc())
         raise
 
 # Function to generate QR code for MFA setup
@@ -116,7 +103,6 @@ def generate_qr_code(secret_code, username, issuer="EncryptGate"):
         return f"data:image/png;base64,{img_str}"
     except Exception as e:
         logger.error(f"Error generating QR code: {e}")
-        logger.error(traceback.format_exc())
         return None
 
 # Function for use in other modules - can be called directly with parameters
@@ -131,7 +117,7 @@ def authenticate_user(username, password):
     Returns:
         dict: Authentication response containing tokens or error information
     """
-    logger.info(f"Authentication function called for user: {username}")
+    logger.info(f"Authentication attempt for user: {username}")
     
     # Validate parameters
     if not username or not password:
@@ -154,17 +140,11 @@ def authenticate_user(username, password):
     try:
         # Generate secret hash with error handling
         try:
-            logger.debug("Generating client secret hash")
             secret_hash = generate_client_secret_hash(username)
-            logger.debug("Secret hash generated successfully")
         except Exception as hash_error:
             logger.error(f"Failed to generate secret hash: {hash_error}")
             return {"detail": f"Authentication error: Failed to generate credentials"}, 500
 
-        # Log initiate auth attempt
-        logger.info(f"Initiating Cognito authentication for user: {username}")
-        logger.debug(f"Using CLIENT_ID: {CLIENT_ID[:4]}...{CLIENT_ID[-4:] if CLIENT_ID and len(CLIENT_ID) > 8 else 'invalid'}")
-        
         # Call Cognito API
         try:
             response = cognito_client.initiate_auth(
@@ -176,17 +156,14 @@ def authenticate_user(username, password):
                     "SECRET_HASH": secret_hash,
                 },
             )
-            logger.info("Cognito authentication API call successful")
-            logger.debug(f"Response keys: {list(response.keys())}")
         except cognito_client.exceptions.NotAuthorizedException as auth_error:
-            logger.error(f"NotAuthorizedException: {auth_error}")
+            logger.warning(f"Authentication failed: Invalid credentials")
             return {"detail": "Invalid username or password."}, 401
         except cognito_client.exceptions.UserNotFoundException as user_error:
-            logger.error(f"UserNotFoundException: {user_error}")
+            logger.warning(f"Authentication failed: User not found")
             return {"detail": "Invalid username or password."}, 401  # Same error for security
         except Exception as api_error:
             logger.error(f"Cognito API call failed: {api_error}")
-            logger.error(traceback.format_exc())
             return {"detail": f"Authentication failed: {str(api_error)}"}, 500
 
         # Process auth result
@@ -210,7 +187,7 @@ def authenticate_user(username, password):
                 return {"detail": "Invalid authentication response"}, 500
         
         # Return successful result
-        logger.info("Authentication successful, returning tokens")
+        logger.info("Authentication successful")
         return {
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
@@ -221,7 +198,6 @@ def authenticate_user(username, password):
 
     except Exception as e:
         logger.error(f"Unhandled error during authentication: {e}")
-        logger.error(traceback.format_exc())
         return {"detail": f"Authentication failed: {str(e)}"}, 500
 
 # Respond to Auth Challenge (for password change, MFA setup, etc.)
@@ -266,8 +242,6 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
             ChallengeResponses=challenge_responses_with_auth
         )
         
-        logger.info(f"Challenge response successful. Response keys: {list(response.keys())}")
-        
         # Process response
         auth_result = response.get("AuthenticationResult")
         if auth_result:
@@ -305,12 +279,11 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         return {"detail": "Invalid challenge response"}, 500
         
     except cognito_client.exceptions.InvalidPasswordException as pwd_error:
-        logger.error(f"Invalid password format: {pwd_error}")
+        logger.warning(f"Invalid password format")
         return {"detail": f"Password does not meet requirements: {str(pwd_error)}"}, 400
         
     except Exception as e:
         logger.error(f"Challenge response error: {e}")
-        logger.error(traceback.format_exc())
         return {"detail": f"Challenge response failed: {str(e)}"}, 500
 
 # Set up MFA with access token
@@ -351,7 +324,6 @@ def setup_mfa(access_token):
         
     except Exception as e:
         logger.error(f"Error setting up MFA: {e}")
-        logger.error(traceback.format_exc())
         return {"detail": f"Failed to setup MFA: {str(e)}"}, 500
 
 # Verify MFA setup with access token
@@ -388,7 +360,7 @@ def verify_software_token_setup(access_token, code):
             return {"detail": f"MFA verification failed with status: {status}"}, 400
         
     except cognito_client.exceptions.CodeMismatchException:
-        logger.error("Invalid verification code")
+        logger.warning("Invalid verification code")
         return {"detail": "Invalid verification code. Please try again."}, 400
         
     except cognito_client.exceptions.EnableSoftwareTokenMFAException as e:
@@ -397,7 +369,6 @@ def verify_software_token_setup(access_token, code):
         
     except Exception as e:
         logger.error(f"Error verifying MFA setup: {e}")
-        logger.error(traceback.format_exc())
         return {"detail": f"MFA verification failed: {str(e)}"}, 500
 
 # Verify MFA function
@@ -449,12 +420,11 @@ def verify_mfa(session, code, username):
         }
         
     except cognito_client.exceptions.CodeMismatchException:
-        logger.error("MFA code mismatch")
+        logger.warning("MFA code mismatch")
         return {"detail": "Invalid MFA code provided."}, 401
         
     except Exception as e:
         logger.error(f"MFA verification error: {e}")
-        logger.error(traceback.format_exc())
         return {"detail": f"MFA verification failed: {e}"}, 401
 
 # Initiate forgot password flow
@@ -500,7 +470,6 @@ def initiate_forgot_password(username):
         
     except Exception as e:
         logger.error(f"Error initiating forgot password: {e}")
-        logger.error(traceback.format_exc())
         return {"detail": f"Failed to initiate password reset: {str(e)}"}, 500
 
 # Complete forgot password flow
@@ -541,16 +510,15 @@ def confirm_forgot_password(username, confirmation_code, new_password):
         }
         
     except cognito_client.exceptions.CodeMismatchException:
-        logger.error("Invalid verification code")
+        logger.warning("Invalid verification code")
         return {"detail": "Invalid verification code. Please try again."}, 400
         
     except cognito_client.exceptions.InvalidPasswordException as e:
-        logger.error(f"Invalid password format: {e}")
+        logger.warning(f"Invalid password format: {e}")
         return {"detail": f"Password does not meet requirements: {str(e)}"}, 400
         
     except Exception as e:
         logger.error(f"Error confirming forgot password: {e}")
-        logger.error(traceback.format_exc())
         return {"detail": f"Failed to reset password: {str(e)}"}, 500
 
 # Confirm User Signup
@@ -590,20 +558,16 @@ def confirm_signup(email, temp_password, new_password):
         logger.error("Unexpected signup flow state")
         return None
     except cognito_client.exceptions.NotAuthorizedException:
-        logger.error("Invalid temporary password provided")
+        logger.warning("Invalid temporary password provided")
         return None
     except Exception as e:
         logger.error(f"Error confirming signup: {e}")
-        logger.error(traceback.format_exc())
         return None
 
 # Enhanced CORS handler for preflight requests
 def handle_cors_preflight():
     response = make_response()
     origin = request.headers.get("Origin", "")
-    
-    # Log received headers for debugging
-    logger.info(f"Preflight request received. Origin: {origin}")
     
     # Get allowed origins from environment variable
     allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
@@ -625,36 +589,27 @@ def handle_cors_preflight():
 @auth_services_routes.route("/authenticate", methods=["OPTIONS", "POST"])
 def authenticate_user_route():
     if request.method == "OPTIONS":
-        logger.info("OPTIONS request received on /api/auth/authenticate")
         return handle_cors_preflight()
 
-    logger.info(f"Authentication route accessed from: {request.headers.get('Origin', 'Unknown')}")
-    
     try:
         data = request.json
         if not data:
-            logger.error("No JSON data in request")
             return jsonify({"detail": "No JSON data provided"}), 400
             
         username = data.get('username')
         password = data.get('password')
         
-        logger.info(f"Authentication attempt for user: {username}")
-
         # Call the function version and handle the response
         auth_response = authenticate_user(username, password)
         
         # Check if it's an error response (tuple with status code)
         if isinstance(auth_response, tuple):
-            logger.info(f"Authentication returned error: {auth_response[0]}")
             return jsonify(auth_response[0]), auth_response[1]
         
         # Otherwise, it's a successful response
-        logger.info("Authentication successful or challenge required")
         return jsonify(auth_response)
     except Exception as e:
         logger.error(f"Error in authenticate_user_route: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Route for responding to auth challenges (handles password change)
@@ -676,8 +631,6 @@ def respond_to_challenge_endpoint():
         if not (username and session and challenge_name):
             return jsonify({"detail": "Username, session, and challengeName are required"}), 400
             
-        logger.info(f"Challenge response for {username}: {challenge_name}")
-        
         # Call the respond_to_auth_challenge function
         response = respond_to_auth_challenge(username, session, challenge_name, challenge_responses)
         
@@ -689,7 +642,6 @@ def respond_to_challenge_endpoint():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in respond_to_challenge_endpoint: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # New route to initiate MFA setup
@@ -708,8 +660,6 @@ def setup_mfa_endpoint():
         if not access_token:
             return jsonify({"detail": "Access token is required"}), 400
             
-        logger.info("Initiating MFA setup with access token")
-        
         # Call the setup_mfa function
         response = setup_mfa(access_token)
         
@@ -721,7 +671,6 @@ def setup_mfa_endpoint():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in setup_mfa_endpoint: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Updated route to verify MFA setup with better error messages
@@ -740,15 +689,13 @@ def verify_mfa_setup_endpoint():
         
         # Enhanced error message with more details
         if not access_token:
-            logger.error("Missing access_token in request")
+            logger.warning("Missing access_token in request")
             return jsonify({"detail": "Access token is required. Make sure you're properly authenticated."}), 400
             
         if not code:
-            logger.error("Missing verification code in request")
+            logger.warning("Missing verification code in request")
             return jsonify({"detail": "Verification code is required"}), 400
             
-        logger.info("Verifying MFA setup with access token")
-        
         # Call the verify_software_token_setup function
         response = verify_software_token_setup(access_token, code)
         
@@ -760,7 +707,6 @@ def verify_mfa_setup_endpoint():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Updated route with more flexible parameter handling
@@ -779,17 +725,11 @@ def confirm_mfa_setup_endpoint():
         code = data.get('code')
         access_token = data.get('access_token')
         
-        # Log what parameters we received for debugging
-        logger.info(f"MFA setup parameters received: username={bool(username)}, session={bool(session)}, code={bool(code)}, access_token={bool(access_token)}")
-        
         # Check if we have access token (new flow) or session (old flow)
         if access_token:
-            logger.info(f"Using MFA setup flow with access token")
             # Call the verify_software_token_setup function
             response = verify_software_token_setup(access_token, code)
         elif session and username and code:
-            logger.info(f"Using MFA setup flow with session for user: {username}")
-            
             # Use the respond_to_auth_challenge function
             response = respond_to_auth_challenge(
                 username, 
@@ -807,7 +747,7 @@ def confirm_mfa_setup_endpoint():
                 missing_params.append("code")
                 
             error_msg = f"Missing required parameters: {', '.join(missing_params)}"
-            logger.error(error_msg)
+            logger.warning(error_msg)
             return jsonify({"detail": error_msg}), 400
             
         # Check if it's an error response (tuple with status code)
@@ -818,7 +758,6 @@ def confirm_mfa_setup_endpoint():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in confirm_mfa_setup_endpoint: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Route for initiating forgot password
@@ -837,8 +776,6 @@ def forgot_password_endpoint():
         if not username:
             return jsonify({"detail": "Username is required"}), 400
             
-        logger.info(f"Forgot password request for user: {username}")
-        
         # Call the initiate_forgot_password function
         response = initiate_forgot_password(username)
         
@@ -850,7 +787,6 @@ def forgot_password_endpoint():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in forgot_password_endpoint: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Route for confirming forgot password
@@ -871,8 +807,6 @@ def confirm_forgot_password_endpoint():
         if not (username and confirmation_code and new_password):
             return jsonify({"detail": "Username, verification code, and new password are required"}), 400
             
-        logger.info(f"Confirming forgot password for user: {username}")
-        
         # Call the confirm_forgot_password function
         response = confirm_forgot_password(username, confirmation_code, new_password)
         
@@ -884,7 +818,6 @@ def confirm_forgot_password_endpoint():
         return jsonify(response)
     except Exception as e:
         logger.error(f"Error in confirm_forgot_password_endpoint: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Route to confirm signup (Uses the confirm_signup function)
@@ -907,7 +840,6 @@ def confirm_signup_endpoint():
             return jsonify({"detail": "Failed to confirm sign-up"}), 400
     except Exception as e:
         logger.error(f"Signup confirmation failed: {e}")
-        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Signup confirmation failed: {e}"}), 400
 
     return jsonify({"message": "Password changed successfully"}), 200
@@ -935,196 +867,6 @@ def verify_mfa_endpoint():
     
     # Otherwise, it's a successful response
     return jsonify(auth_result)
-
-# Add debugging route to check authentication configuration
-@auth_services_routes.route("/debug", methods=["GET"])
-def debug_auth_configuration():
-    """
-    Endpoint to check the authentication configuration and service connectivity.
-    This is useful for debugging login issues.
-    """
-    try:
-        # Check environment variables
-        config_status = {
-            "region": AWS_REGION,
-            "user_pool_id": USER_POOL_ID,
-            "client_id": CLIENT_ID,
-            "client_secret": "CONFIGURED" if CLIENT_SECRET else "MISSING",
-            "environment": os.environ.get("FLASK_ENV", "unknown")
-        }
-        
-        # Check Cognito connectivity
-        try:
-            # Make a simple call to Cognito to check connectivity
-            response = cognito_client.list_user_pools(MaxResults=1)
-            cognito_status = {
-                "connected": True,
-                "user_pools_found": len(response.get("UserPools", [])) > 0
-            }
-        except Exception as e:
-            cognito_status = {
-                "connected": False,
-                "error": str(e)
-            }
-        
-        # Check the user pool existence if ID is provided
-        user_pool_status = {"exists": False}
-        if USER_POOL_ID:
-            try:
-                response = cognito_client.describe_user_pool(
-                    UserPoolId=USER_POOL_ID
-                )
-                user_pool_status = {
-                    "exists": True,
-                    "name": response.get("UserPool", {}).get("Name", "Unknown"),
-                    "mfa_configuration": response.get("UserPool", {}).get("MfaConfiguration", "Unknown")
-                }
-            except Exception as e:
-                user_pool_status = {
-                    "exists": False,
-                    "error": str(e)
-                }
-        
-        # Check the app client if ID is provided
-        client_status = {"exists": False}
-        if USER_POOL_ID and CLIENT_ID:
-            try:
-                response = cognito_client.describe_user_pool_client(
-                    UserPoolId=USER_POOL_ID,
-                    ClientId=CLIENT_ID
-                )
-                client_status = {
-                    "exists": True,
-                    "name": response.get("UserPoolClient", {}).get("ClientName", "Unknown"),
-                    "explicit_auth_flows": response.get("UserPoolClient", {}).get("ExplicitAuthFlows", [])
-                }
-            except Exception as e:
-                client_status = {
-                    "exists": False,
-                    "error": str(e)
-                }
-        
-        return jsonify({
-            "status": "success",
-            "configuration": config_status,
-            "cognito_connectivity": cognito_status,
-            "user_pool_status": user_pool_status,
-            "client_status": client_status,
-            "server_time": datetime.now().isoformat()
-        }), 200
-    except Exception as e:
-        logger.error(f"Error in debug endpoint: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "traceback": traceback.format_exc()
-        }), 500
-
-# Add test endpoint for authentication flow (development only)
-@auth_services_routes.route("/test-auth-flow", methods=["POST"])
-def test_auth_flow():
-    """
-    Test the complete authentication flow with provided credentials.
-    This endpoint should be disabled in production.
-    """
-    # Check if we're in development mode
-    if os.environ.get("FLASK_ENV") != "development":
-        return jsonify({"detail": "This endpoint is only available in development mode"}), 403
-    
-    try:
-        data = request.json
-        if not data:
-            return jsonify({"detail": "No JSON data provided"}), 400
-            
-        username = data.get('username')
-        password = data.get('password')
-        
-        if not (username and password):
-            return jsonify({"detail": "Username and password are required"}), 400
-        
-        # Step 1: Authenticate user
-        logger.info(f"Testing auth flow for {username}")
-        auth_response = authenticate_user(username, password)
-        
-        # If authenticate_user returns a tuple, it's an error
-        if isinstance(auth_response, tuple):
-            return jsonify({
-                "status": "error",
-                "step": "authentication",
-                "response": auth_response[0],
-                "status_code": auth_response[1]
-            }), 200  # Return 200 so frontend can see the details
-        
-        # Step 2: Check for challenges
-        if auth_response.get("ChallengeName"):
-            challenge_name = auth_response.get("ChallengeName")
-            session = auth_response.get("session")
-            
-            return jsonify({
-                "status": "challenge_required",
-                "challenge_name": challenge_name,
-                "session": session,
-                "next_step": "respond_to_challenge",
-                "challenge_params_needed": get_challenge_params_needed(challenge_name)
-            }), 200
-        
-        # Step 3: Check if we got tokens
-        if auth_response.get("access_token"):
-            # Try to set up MFA if we have an access token
-            try:
-                mfa_setup_response = setup_mfa(auth_response.get("access_token"))
-                
-                if isinstance(mfa_setup_response, tuple):
-                    return jsonify({
-                        "status": "completed",
-                        "auth_result": auth_response,
-                        "mfa_setup_attempted": True,
-                        "mfa_setup_result": "error",
-                        "mfa_setup_error": mfa_setup_response[0]
-                    }), 200
-                else:
-                    return jsonify({
-                        "status": "completed",
-                        "auth_result": auth_response,
-                        "mfa_setup_attempted": True,
-                        "mfa_setup_result": "success",
-                        "mfa_setup_data": mfa_setup_response
-                    }), 200
-            except Exception as e:
-                return jsonify({
-                    "status": "completed",
-                    "auth_result": auth_response,
-                    "mfa_setup_attempted": True,
-                    "mfa_setup_result": "error",
-                    "mfa_setup_error": str(e)
-                }), 200
-        
-        # If we got here, something unexpected happened
-        return jsonify({
-            "status": "unexpected",
-            "auth_response": auth_response
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Error in test auth flow: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({
-            "status": "error",
-            "message": str(e),
-            "traceback": traceback.format_exc()
-        }), 500
-
-def get_challenge_params_needed(challenge_name):
-    """Helper function to determine what parameters are needed for a challenge"""
-    if challenge_name == "NEW_PASSWORD_REQUIRED":
-        return ["NEW_PASSWORD"]
-    elif challenge_name == "SOFTWARE_TOKEN_MFA":
-        return ["SOFTWARE_TOKEN_MFA_CODE"]
-    elif challenge_name == "MFA_SETUP":
-        return []
-    else:
-        return []
 
 # Health Check Route
 @auth_services_routes.route("/health", methods=["GET"])

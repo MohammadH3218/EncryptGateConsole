@@ -79,17 +79,12 @@ export default function LoginPage() {
   // Fetch API URL from the backend with fallback
   useEffect(() => {
     const configuredUrl = process.env.NEXT_PUBLIC_API_URL;
-    console.log("Frontend API URL from env:", configuredUrl);
     
     // Use the configured URL or fall back to the correct API URL
     const fallbackUrl = "https://api.console-encryptgate.net";
     const finalUrl = configuredUrl || fallbackUrl;
     
     setApiBaseUrl(finalUrl);
-    
-    if (!configuredUrl) {
-      console.warn("Using fallback API URL:", fallbackUrl);
-    }
   }, []);
 
   // Generate QR code URL when secret code is available
@@ -231,12 +226,9 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     
-    // Try with direct authenticate endpoint (fallback to original if it fails)
     const loginEndpoint = `${apiBaseUrl}/api/auth/authenticate`;
-    console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
     try {
-      // Enhanced fetch with better error handling
       const response = await fetch(loginEndpoint, {
         method: "POST",
         headers: {
@@ -249,27 +241,21 @@ export default function LoginPage() {
           password,
         }),
         mode: "cors",
-        credentials: "include",  // Added to include cookies if needed
+        credentials: "include",
       }).catch(fetchError => {
-        console.error("Fetch execution error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
       });
 
-      // Try to parse the response body as JSON
       let responseData: LoginResponse;
       try {
         responseData = await response.json();
       } catch (jsonError) {
-        console.error("Failed to parse JSON response:", jsonError);
         throw new Error("Invalid response from server. Please try again.");
       }
 
       if (!response.ok) {
-        console.error("Server returned error status:", response.status, responseData);
         throw new Error(responseData?.detail || `Authentication failed (${response.status})`);
       }
-
-      console.log("Authentication response:", responseData);
 
       // Handle different authentication flows
       if (responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
@@ -278,7 +264,6 @@ export default function LoginPage() {
         setShowPasswordChange(true);
       } else if (responseData.access_token) {
         // We have an access token, check if we need to set up MFA
-        // Try to set up MFA
         try {
           const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
           const mfaResponse = await fetch(setupMfaEndpoint, {
@@ -306,7 +291,6 @@ export default function LoginPage() {
             return;
           }
         } catch (mfaError) {
-          console.error("Error setting up MFA:", mfaError);
           // Continue with login if MFA setup fails - user is already authenticated
         }
         
@@ -320,11 +304,9 @@ export default function LoginPage() {
         setSession(responseData.session || "");
         setShowMFA(true);
       } else {
-        console.error("Unexpected response format:", responseData);
         throw new Error("Unexpected server response format");
       }
     } catch (error: any) {
-      console.error("Login error:", error.message);
       setError(error.message || "An error occurred. Please try again.");
     } finally {
       setIsLoading(false);
@@ -378,8 +360,6 @@ export default function LoginPage() {
         throw new Error(responseData.detail || `Failed to change password (${response.status})`);
       }
       
-      console.log("Password change response:", responseData);
-      
       // Handle different response types
       if (responseData.access_token) {
         // We have access_token, try to set up MFA
@@ -411,7 +391,6 @@ export default function LoginPage() {
             return;
           }
         } catch (mfaError) {
-          console.error("Error setting up MFA:", mfaError);
           // Continue with login if MFA setup fails
         }
         
@@ -488,15 +467,6 @@ export default function LoginPage() {
         };
       }
       
-      console.log("MFA verification request:", {
-        endpoint,
-        // Don't log the actual credentials, just log if they're present
-        hasAccessToken: !!accessToken,
-        hasSession: !!session,
-        hasCode: !!setupMfaCode,
-        hasUsername: !!email
-      });
-      
       const response = await fetch(endpoint, {
         method: "POST",
         headers: {
@@ -537,7 +507,6 @@ export default function LoginPage() {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to set up MFA";
-      console.error("MFA setup error:", errorMessage);
       setError(errorMessage);
     } finally {
       setIsLoading(false);
@@ -553,9 +522,7 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
     
-    // Updated endpoint to include the proper API path
     const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
-    console.log(`Verifying MFA with: ${mfaEndpoint}`);
 
     try {
       const response = await fetch(mfaEndpoint, {
@@ -567,23 +534,19 @@ export default function LoginPage() {
         },
         body: JSON.stringify({ code: mfaCode, session, username: email }),
         mode: "cors",
-        credentials: "include",  // Added to include cookies if needed
+        credentials: "include",
       }).catch(fetchError => {
-        console.error("MFA fetch error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
       });
 
-      // Try to parse the response body as JSON
       let data: LoginResponse;
       try {
         data = await response.json();
       } catch (jsonError) {
-        console.error("Failed to parse JSON response:", jsonError);
         throw new Error("Invalid response from server. Please try again.");
       }
 
       if (!response.ok) {
-        console.error("MFA verification failed with status:", response.status, data);
         throw new Error(data?.detail || "Invalid MFA code");
       }
 
@@ -593,7 +556,6 @@ export default function LoginPage() {
 
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
-      console.error("MFA verification error:", error.message);
       setError(error.message || "MFA verification failed. Please try again.");
     } finally {
       setIsLoading(false);
