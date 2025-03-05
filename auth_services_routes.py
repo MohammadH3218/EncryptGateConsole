@@ -724,7 +724,7 @@ def setup_mfa_endpoint():
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# New route to verify MFA setup
+# Updated route to verify MFA setup with better error messages
 @auth_services_routes.route("/verify-mfa-setup", methods=["POST", "OPTIONS"])
 def verify_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -738,8 +738,14 @@ def verify_mfa_setup_endpoint():
         access_token = data.get('access_token')
         code = data.get('code')
         
-        if not (access_token and code):
-            return jsonify({"detail": "Access token and code are required"}), 400
+        # Enhanced error message with more details
+        if not access_token:
+            logger.error("Missing access_token in request")
+            return jsonify({"detail": "Access token is required. Make sure you're properly authenticated."}), 400
+            
+        if not code:
+            logger.error("Missing verification code in request")
+            return jsonify({"detail": "Verification code is required"}), 400
             
         logger.info("Verifying MFA setup with access token")
         
@@ -757,7 +763,7 @@ def verify_mfa_setup_endpoint():
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Route for confirming MFA setup
+# Updated route with more flexible parameter handling
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -773,12 +779,16 @@ def confirm_mfa_setup_endpoint():
         code = data.get('code')
         access_token = data.get('access_token')
         
+        # Log what parameters we received for debugging
+        logger.info(f"MFA setup parameters received: username={bool(username)}, session={bool(session)}, code={bool(code)}, access_token={bool(access_token)}")
+        
         # Check if we have access token (new flow) or session (old flow)
         if access_token:
-            logger.info(f"Using new MFA setup flow with access token")
-            return verify_mfa_setup_endpoint()
+            logger.info(f"Using MFA setup flow with access token")
+            # Call the verify_software_token_setup function
+            response = verify_software_token_setup(access_token, code)
         elif session and username and code:
-            logger.info(f"Using old MFA setup flow with session for user: {username}")
+            logger.info(f"Using MFA setup flow with session for user: {username}")
             
             # Use the respond_to_auth_challenge function
             response = respond_to_auth_challenge(
@@ -787,16 +797,25 @@ def confirm_mfa_setup_endpoint():
                 "SOFTWARE_TOKEN_MFA", 
                 {"SOFTWARE_TOKEN_MFA_CODE": code}
             )
-            
-            # Check if it's an error response (tuple with status code)
-            if isinstance(response, tuple):
-                return jsonify(response[0]), response[1]
-            
-            # Otherwise, it's a successful response
-            return jsonify(response)
         else:
-            return jsonify({"detail": "Missing required parameters"}), 400
+            missing_params = []
+            if not access_token and not session:
+                missing_params.append("access_token or session")
+            if not username and not access_token:
+                missing_params.append("username")
+            if not code:
+                missing_params.append("code")
+                
+            error_msg = f"Missing required parameters: {', '.join(missing_params)}"
+            logger.error(error_msg)
+            return jsonify({"detail": error_msg}), 400
             
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
     except Exception as e:
         logger.error(f"Error in confirm_mfa_setup_endpoint: {e}")
         logger.error(traceback.format_exc())
@@ -916,6 +935,196 @@ def verify_mfa_endpoint():
     
     # Otherwise, it's a successful response
     return jsonify(auth_result)
+
+# Add debugging route to check authentication configuration
+@auth_services_routes.route("/debug", methods=["GET"])
+def debug_auth_configuration():
+    """
+    Endpoint to check the authentication configuration and service connectivity.
+    This is useful for debugging login issues.
+    """
+    try:
+        # Check environment variables
+        config_status = {
+            "region": AWS_REGION,
+            "user_pool_id": USER_POOL_ID,
+            "client_id": CLIENT_ID,
+            "client_secret": "CONFIGURED" if CLIENT_SECRET else "MISSING",
+            "environment": os.environ.get("FLASK_ENV", "unknown")
+        }
+        
+        # Check Cognito connectivity
+        try:
+            # Make a simple call to Cognito to check connectivity
+            response = cognito_client.list_user_pools(MaxResults=1)
+            cognito_status = {
+                "connected": True,
+                "user_pools_found": len(response.get("UserPools", [])) > 0
+            }
+        except Exception as e:
+            cognito_status = {
+                "connected": False,
+                "error": str(e)
+            }
+        
+        # Check the user pool existence if ID is provided
+        user_pool_status = {"exists": False}
+        if USER_POOL_ID:
+            try:
+                response = cognito_client.describe_user_pool(
+                    UserPoolId=USER_POOL_ID
+                )
+                user_pool_status = {
+                    "exists": True,
+                    "name": response.get("UserPool", {}).get("Name", "Unknown"),
+                    "mfa_configuration": response.get("UserPool", {}).get("MfaConfiguration", "Unknown")
+                }
+            except Exception as e:
+                user_pool_status = {
+                    "exists": False,
+                    "error": str(e)
+                }
+        
+        # Check the app client if ID is provided
+        client_status = {"exists": False}
+        if USER_POOL_ID and CLIENT_ID:
+            try:
+                response = cognito_client.describe_user_pool_client(
+                    UserPoolId=USER_POOL_ID,
+                    ClientId=CLIENT_ID
+                )
+                client_status = {
+                    "exists": True,
+                    "name": response.get("UserPoolClient", {}).get("ClientName", "Unknown"),
+                    "explicit_auth_flows": response.get("UserPoolClient", {}).get("ExplicitAuthFlows", [])
+                }
+            except Exception as e:
+                client_status = {
+                    "exists": False,
+                    "error": str(e)
+                }
+        
+        return jsonify({
+            "status": "success",
+            "configuration": config_status,
+            "cognito_connectivity": cognito_status,
+            "user_pool_status": user_pool_status,
+            "client_status": client_status,
+            "server_time": datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+# Add test endpoint for authentication flow (development only)
+@auth_services_routes.route("/test-auth-flow", methods=["POST"])
+def test_auth_flow():
+    """
+    Test the complete authentication flow with provided credentials.
+    This endpoint should be disabled in production.
+    """
+    # Check if we're in development mode
+    if os.environ.get("FLASK_ENV") != "development":
+        return jsonify({"detail": "This endpoint is only available in development mode"}), 403
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        password = data.get('password')
+        
+        if not (username and password):
+            return jsonify({"detail": "Username and password are required"}), 400
+        
+        # Step 1: Authenticate user
+        logger.info(f"Testing auth flow for {username}")
+        auth_response = authenticate_user(username, password)
+        
+        # If authenticate_user returns a tuple, it's an error
+        if isinstance(auth_response, tuple):
+            return jsonify({
+                "status": "error",
+                "step": "authentication",
+                "response": auth_response[0],
+                "status_code": auth_response[1]
+            }), 200  # Return 200 so frontend can see the details
+        
+        # Step 2: Check for challenges
+        if auth_response.get("ChallengeName"):
+            challenge_name = auth_response.get("ChallengeName")
+            session = auth_response.get("session")
+            
+            return jsonify({
+                "status": "challenge_required",
+                "challenge_name": challenge_name,
+                "session": session,
+                "next_step": "respond_to_challenge",
+                "challenge_params_needed": get_challenge_params_needed(challenge_name)
+            }), 200
+        
+        # Step 3: Check if we got tokens
+        if auth_response.get("access_token"):
+            # Try to set up MFA if we have an access token
+            try:
+                mfa_setup_response = setup_mfa(auth_response.get("access_token"))
+                
+                if isinstance(mfa_setup_response, tuple):
+                    return jsonify({
+                        "status": "completed",
+                        "auth_result": auth_response,
+                        "mfa_setup_attempted": True,
+                        "mfa_setup_result": "error",
+                        "mfa_setup_error": mfa_setup_response[0]
+                    }), 200
+                else:
+                    return jsonify({
+                        "status": "completed",
+                        "auth_result": auth_response,
+                        "mfa_setup_attempted": True,
+                        "mfa_setup_result": "success",
+                        "mfa_setup_data": mfa_setup_response
+                    }), 200
+            except Exception as e:
+                return jsonify({
+                    "status": "completed",
+                    "auth_result": auth_response,
+                    "mfa_setup_attempted": True,
+                    "mfa_setup_result": "error",
+                    "mfa_setup_error": str(e)
+                }), 200
+        
+        # If we got here, something unexpected happened
+        return jsonify({
+            "status": "unexpected",
+            "auth_response": auth_response
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error in test auth flow: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
+def get_challenge_params_needed(challenge_name):
+    """Helper function to determine what parameters are needed for a challenge"""
+    if challenge_name == "NEW_PASSWORD_REQUIRED":
+        return ["NEW_PASSWORD"]
+    elif challenge_name == "SOFTWARE_TOKEN_MFA":
+        return ["SOFTWARE_TOKEN_MFA_CODE"]
+    elif challenge_name == "MFA_SETUP":
+        return []
+    else:
+        return []
 
 # Health Check Route
 @auth_services_routes.route("/health", methods=["GET"])

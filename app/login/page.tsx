@@ -443,9 +443,10 @@ export default function LoginPage() {
     }
   };
 
+  // Updated handleMFASetup function with better error handling and support for both flows
   const handleMFASetup = async () => {
-    if (!apiBaseUrl || !mfaSecretCode) {
-      setError("Unable to set up MFA.");
+    if (!apiBaseUrl) {
+      setError("API URL is not available.");
       return;
     }
     
@@ -461,48 +462,83 @@ export default function LoginPage() {
       // Get the access token from localStorage
       const accessToken = localStorage.getItem("temp_access_token") || localStorage.getItem("access_token");
       
+      // Check if we have a session - we'll use this as a fallback if access_token is not available
       if (!accessToken && !session) {
-        throw new Error("Missing authentication credentials");
+        throw new Error("Missing authentication credentials - need either access token or session");
       }
       
-      const setupEndpoint = `${apiBaseUrl}/api/auth/verify-mfa-setup`;
+      let endpoint;
+      let requestBody;
       
-      const response = await fetch(setupEndpoint, {
+      // Determine which API endpoint and request structure to use based on available credentials
+      if (accessToken) {
+        // Use the access token flow
+        endpoint = `${apiBaseUrl}/api/auth/verify-mfa-setup`;
+        requestBody = {
+          access_token: accessToken,
+          code: setupMfaCode
+        };
+      } else {
+        // Use the session-based flow
+        endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
+        requestBody = {
+          username: email,
+          session: session,
+          code: setupMfaCode
+        };
+      }
+      
+      console.log("MFA verification request:", {
+        endpoint,
+        // Don't log the actual credentials, just log if they're present
+        hasAccessToken: !!accessToken,
+        hasSession: !!session,
+        hasCode: !!setupMfaCode,
+        hasUsername: !!email
+      });
+      
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
           "Origin": window.location.origin
         },
-        body: JSON.stringify({
-          access_token: accessToken,
-          code: setupMfaCode
-        }),
+        body: JSON.stringify(requestBody),
         mode: "cors",
         credentials: "include",
       });
       
-      const responseData = await response.json();
-      
       if (!response.ok) {
-        throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
+        const errorData = await response.json();
+        throw new Error(errorData.detail || `Failed to verify MFA setup (${response.status})`);
       }
       
-      // MFA setup successful, close dialog and proceed
+      const responseData = await response.json();
+      
+      // MFA setup successful, close dialog and process the result
       setShowMFASetup(false);
       
       // Clean up temporary token
       localStorage.removeItem("temp_access_token");
       
-      // If we don't already have tokens stored in localStorage, redirect to login
-      if (!localStorage.getItem("access_token")) {
-        setError("MFA setup successful. Please log in again.");
-      } else {
-        // We already have tokens, go to dashboard
+      // Check if we received tokens in the response
+      if (responseData.access_token) {
+        // Store the new tokens
+        localStorage.setItem("access_token", responseData.access_token);
+        localStorage.setItem("id_token", responseData.id_token || "");
+        localStorage.setItem("refresh_token", responseData.refresh_token || "");
+        
+        // Redirect to dashboard
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      } else {
+        // We didn't get tokens, inform user to log in again
+        setError("MFA setup successful. Please log in again.");
       }
-    } catch (error: any) {
-      setError(error.message || "Failed to set up MFA");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to set up MFA";
+      console.error("MFA setup error:", errorMessage);
+      setError(errorMessage);
     } finally {
       setIsLoading(false);
     }

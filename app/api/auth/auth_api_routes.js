@@ -14,8 +14,8 @@ export default async function handler(req, res) {
     return res.status(400).json({ detail: "Username and password are required" });
   }
 
-  // API endpoint fetched from environment variable or fallback URL
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "https://api.console-encryptgate.net";
+  // API endpoint fetched from environment variable 
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
   
   // Use the correct endpoint path based on backend route configuration
   // Changed from /api/auth/authenticate to /api/user/login to match the backend routes
