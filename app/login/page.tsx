@@ -21,7 +21,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 type UserType = "admin" | "employee";
 
@@ -30,10 +32,12 @@ interface LoginResponse {
   id_token?: string;
   refresh_token?: string;
   mfa_required?: boolean;
+  ChallengeName?: string;
   session?: string;
   email?: string;
   role?: string;
   detail?: string;
+  secretCode?: string;
 }
 
 export default function LoginPage() {
@@ -42,8 +46,21 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  
+  // MFA verification states
   const [showMFA, setShowMFA] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
+  
+  // Password change states
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  
+  // MFA setup states
+  const [showMFASetup, setShowMFASetup] = useState(false);
+  const [mfaSecretCode, setMfaSecretCode] = useState("");
+  const [setupMfaCode, setSetupMfaCode] = useState("");
+  
   const [session, setSession] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null);
@@ -54,7 +71,6 @@ export default function LoginPage() {
     console.log("Frontend API URL from env:", configuredUrl);
     
     // Use the configured URL or fall back to the correct API URL
-    // Removed extra whitespace in the fallback URL
     const fallbackUrl = "https://api.console-encryptgate.net";
     const finalUrl = configuredUrl || fallbackUrl;
     
@@ -74,7 +90,7 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     
-    // Try with direct authenticate endpoint (fallback to original if it fails)
+    // Try with direct authenticate endpoint
     const loginEndpoint = `${apiBaseUrl}/authenticate`;
     console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
@@ -92,7 +108,7 @@ export default function LoginPage() {
           password,
         }),
         mode: "cors",
-        credentials: "include",  // Added to include cookies if needed
+        credentials: "include",
       }).catch(fetchError => {
         console.error("Fetch execution error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
@@ -112,10 +128,24 @@ export default function LoginPage() {
         throw new Error(responseData?.detail || `Authentication failed (${response.status})`);
       }
 
-      if (responseData.mfa_required) {
+      // Check for the different possible challenges
+      console.log("Authentication response:", responseData);
+      
+      if (responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
+        // Handle password change requirement
+        setSession(responseData.session || "");
+        setShowPasswordChange(true);
+      } else if (responseData.ChallengeName === "MFA_SETUP") {
+        // Handle MFA setup requirement
+        setSession(responseData.session || "");
+        setMfaSecretCode(responseData.secretCode || "");
+        setShowMFASetup(true);
+      } else if (responseData.mfa_required) {
+        // Handle MFA verification
         setSession(responseData.session || "");
         setShowMFA(true);
       } else if (responseData.id_token && responseData.access_token) {
+        // Success - store tokens and redirect
         localStorage.setItem("access_token", responseData.access_token);
         localStorage.setItem("id_token", responseData.id_token);
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
@@ -132,6 +162,142 @@ export default function LoginPage() {
     }
   };
 
+  const handlePasswordChange = async () => {
+    if (!apiBaseUrl) {
+      setError("API URL is not available.");
+      return;
+    }
+
+    // Validate password
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters long");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setError("Passwords do not match");
+      return;
+    }
+
+    setError("");
+    setIsLoading(true);
+    
+    try {
+      const changePasswordEndpoint = `${apiBaseUrl}/api/auth/respond-to-challenge`;
+      
+      const response = await fetch(changePasswordEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
+        },
+        body: JSON.stringify({
+          username: email,
+          session: session,
+          challengeName: "NEW_PASSWORD_REQUIRED",
+          challengeResponses: {
+            NEW_PASSWORD: newPassword
+          }
+        }),
+        mode: "cors",
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.detail || `Failed to change password (${response.status})`);
+      }
+
+      console.log("Password change response:", data);
+      
+      // Check next challenge type
+      if (data.ChallengeName === "MFA_SETUP") {
+        setSession(data.session || "");
+        setMfaSecretCode(data.secretCode || "");
+        setShowPasswordChange(false);
+        setShowMFASetup(true);
+      } else if (data.mfa_required) {
+        setSession(data.session || "");
+        setShowPasswordChange(false);
+        setShowMFA(true);
+      } else if (data.id_token && data.access_token) {
+        // Success - store tokens and redirect
+        localStorage.setItem("access_token", data.access_token);
+        localStorage.setItem("id_token", data.id_token);
+        localStorage.setItem("refresh_token", data.refresh_token || "");
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      }
+    } catch (error: any) {
+      console.error("Password change error:", error.message);
+      setError(error.message || "Failed to change password. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMFASetup = async () => {
+    if (!apiBaseUrl) {
+      setError("API URL is not available.");
+      return;
+    }
+
+    if (setupMfaCode.length !== 6) {
+      setError("Please enter a valid 6-digit code");
+      return;
+    }
+
+    setError("");
+    setIsLoading(true);
+    
+    try {
+      const setupMfaEndpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
+      
+      const response = await fetch(setupMfaEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
+        },
+        body: JSON.stringify({
+          username: email,
+          session: session,
+          code: setupMfaCode
+        }),
+        mode: "cors",
+        credentials: "include",
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.detail || `Failed to setup MFA (${response.status})`);
+      }
+
+      console.log("MFA setup response:", data);
+      
+      // Check if we need to verify MFA now
+      if (data.mfa_required) {
+        setSession(data.session || "");
+        setShowMFASetup(false);
+        setShowMFA(true);
+      } else if (data.id_token && data.access_token) {
+        // Success - store tokens and redirect
+        localStorage.setItem("access_token", data.access_token);
+        localStorage.setItem("id_token", data.id_token);
+        localStorage.setItem("refresh_token", data.refresh_token || "");
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      }
+    } catch (error: any) {
+      console.error("MFA setup error:", error.message);
+      setError(error.message || "Failed to setup MFA. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -141,7 +307,6 @@ export default function LoginPage() {
     setError("");
     setIsLoading(true);
     
-    // Updated endpoint to include the proper API path
     const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
     console.log(`Verifying MFA with: ${mfaEndpoint}`);
 
@@ -155,7 +320,7 @@ export default function LoginPage() {
         },
         body: JSON.stringify({ code: mfaCode, session, username: email }),
         mode: "cors",
-        credentials: "include",  // Added to include cookies if needed
+        credentials: "include",
       }).catch(fetchError => {
         console.error("MFA fetch error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
@@ -259,12 +424,119 @@ export default function LoginPage() {
         </form>
       </Card>
 
-      <Dialog open={showMFA} onOpenChange={setShowMFA}>
+      {/* Password Change Dialog */}
+      <Dialog open={showPasswordChange} onOpenChange={(open) => open && setShowPasswordChange(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change Password Required</DialogTitle>
+            <DialogDescription>
+              Your account requires a password change. Please create a new password.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-password">New Password</Label>
+              <Input
+                id="new-password"
+                type="password"
+                placeholder="Enter new password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">Confirm Password</Label>
+              <Input
+                id="confirm-password"
+                type="password"
+                placeholder="Confirm new password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <Alert>
+              <AlertDescription>
+                Your password must be at least 8 characters long and include uppercase and lowercase letters, numbers, and special characters.
+              </AlertDescription>
+            </Alert>
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={handlePasswordChange} 
+              disabled={isLoading || !newPassword || !confirmPassword || newPassword !== confirmPassword}
+              className="w-full"
+            >
+              {isLoading ? "Updating..." : "Update Password"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MFA Setup Dialog */}
+      <Dialog open={showMFASetup} onOpenChange={(open) => open && setShowMFASetup(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
+            <DialogDescription>
+              For additional security, please set up two-factor authentication using an authenticator app.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Alert>
+              <AlertDescription>
+                1. Install an authenticator app like Google Authenticator or Authy on your mobile device.
+                <br />
+                2. Scan the QR code or enter the secret key in your app.
+                <br />
+                3. Enter the 6-digit code from your authenticator app below.
+              </AlertDescription>
+            </Alert>
+            
+            {mfaSecretCode && (
+              <div className="space-y-2 text-center">
+                <Label>Secret Key</Label>
+                <div className="p-3 bg-muted rounded-md font-mono text-center break-all">
+                  {mfaSecretCode}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter this code manually if you cannot scan the QR code
+                </p>
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <Label htmlFor="setup-mfa-code">Authentication Code</Label>
+              <Input
+                id="setup-mfa-code"
+                placeholder="000000"
+                value={setupMfaCode}
+                onChange={(e) => setSetupMfaCode(e.target.value.slice(0, 6))}
+                maxLength={6}
+                className="text-center text-2xl tracking-widest"
+              />
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={handleMFASetup} 
+              disabled={setupMfaCode.length !== 6 || isLoading}
+              className="w-full"
+            >
+              {isLoading ? "Verifying..." : "Verify & Complete Setup"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MFA Verification Dialog */}
+      <Dialog open={showMFA} onOpenChange={(open) => open && setShowMFA(open)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Enter Authentication Code</DialogTitle>
             <DialogDescription>
-              Please enter the 6-digit code sent to your authenticator app
+              Please enter the 6-digit code from your authenticator app
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -280,10 +552,16 @@ export default function LoginPage() {
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <Button onClick={handleMFASubmit} disabled={mfaCode.length !== 6 || isLoading}>
+          </div>
+          <DialogFooter>
+            <Button 
+              onClick={handleMFASubmit} 
+              disabled={mfaCode.length !== 6 || isLoading}
+              className="w-full"
+            >
               {isLoading ? "Verifying..." : "Verify"}
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -154,11 +154,15 @@ def authenticate_user(username, password):
             challenge_name = response.get("ChallengeName")
             if challenge_name:
                 logger.info(f"Authentication challenge required: {challenge_name}")
-                return {
-                    "mfa_required": True,
+                
+                # Return challenge details
+                response_data = {
+                    "ChallengeName": challenge_name,
                     "session": response.get("Session"),
-                    "challenge": challenge_name
+                    "mfa_required": challenge_name == "SOFTWARE_TOKEN_MFA"
                 }
+                
+                return response_data
             else:
                 logger.error("No AuthenticationResult or ChallengeName in response")
                 return {"detail": "Invalid authentication response"}, 500
@@ -177,6 +181,95 @@ def authenticate_user(username, password):
         logger.error(f"Unhandled error during authentication: {e}")
         logger.error(traceback.format_exc())
         return {"detail": f"Authentication failed: {str(e)}"}, 500
+
+# Respond to Auth Challenge (for password change, MFA setup, etc.)
+def respond_to_auth_challenge(username, session, challenge_name, challenge_responses):
+    """
+    Responds to an authentication challenge like NEW_PASSWORD_REQUIRED
+    
+    Args:
+        username (str): User's email or username
+        session (str): Session from previous authentication attempt
+        challenge_name (str): Name of the challenge (e.g., "NEW_PASSWORD_REQUIRED")
+        challenge_responses (dict): Challenge-specific responses
+        
+    Returns:
+        dict: Authentication result or next challenge information
+    """
+    logger.info(f"Responding to {challenge_name} challenge for user: {username}")
+    
+    try:
+        # Generate secret hash
+        try:
+            secret_hash = generate_client_secret_hash(username)
+        except Exception as hash_error:
+            logger.error(f"Failed to generate secret hash: {hash_error}")
+            return {"detail": f"Challenge response failed: Unable to generate credentials"}, 500
+            
+        # Add username and secret hash to challenge responses
+        challenge_responses_with_auth = {
+            "USERNAME": username,
+            "SECRET_HASH": secret_hash
+        }
+        
+        # Add challenge-specific responses
+        for key, value in challenge_responses.items():
+            challenge_responses_with_auth[key] = value
+        
+        # Make the API call
+        response = cognito_client.respond_to_auth_challenge(
+            ClientId=CLIENT_ID,
+            ChallengeName=challenge_name,
+            Session=session,
+            ChallengeResponses=challenge_responses_with_auth
+        )
+        
+        logger.info(f"Challenge response successful. Response keys: {list(response.keys())}")
+        
+        # Process response
+        auth_result = response.get("AuthenticationResult")
+        if auth_result:
+            # Authentication completed successfully
+            return {
+                "id_token": auth_result.get("IdToken"),
+                "access_token": auth_result.get("AccessToken"),
+                "refresh_token": auth_result.get("RefreshToken"),
+                "token_type": auth_result.get("TokenType"),
+                "expires_in": auth_result.get("ExpiresIn"),
+            }
+        
+        # If no auth result, check for next challenge
+        next_challenge = response.get("ChallengeName")
+        if next_challenge:
+            logger.info(f"Next challenge required: {next_challenge}")
+            
+            response_data = {
+                "ChallengeName": next_challenge,
+                "session": response.get("Session"),
+                "mfa_required": next_challenge == "SOFTWARE_TOKEN_MFA"
+            }
+            
+            # Include MFA secret code if this is an MFA setup challenge
+            if next_challenge == "MFA_SETUP":
+                # For MFA setup, we'd typically generate a secret here
+                # This is simplified - in a real implementation, retrieve the actual secret
+                mfa_secret = pyotp.random_base32()
+                response_data["secretCode"] = mfa_secret
+                
+            return response_data
+        
+        # If we get here, something unexpected happened
+        logger.error("No AuthenticationResult or ChallengeName in response")
+        return {"detail": "Invalid challenge response"}, 500
+        
+    except cognito_client.exceptions.InvalidPasswordException as pwd_error:
+        logger.error(f"Invalid password format: {pwd_error}")
+        return {"detail": f"Password does not meet requirements: {str(pwd_error)}"}, 400
+        
+    except Exception as e:
+        logger.error(f"Challenge response error: {e}")
+        logger.error(traceback.format_exc())
+        return {"detail": f"Challenge response failed: {str(e)}"}, 500
 
 # Verify MFA function
 def verify_mfa(session, code, username):
@@ -332,10 +425,85 @@ def authenticate_user_route():
             return jsonify(auth_response[0]), auth_response[1]
         
         # Otherwise, it's a successful response
-        logger.info("Authentication successful")
+        logger.info("Authentication successful or challenge required")
         return jsonify(auth_response)
     except Exception as e:
         logger.error(f"Error in authenticate_user_route: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# Route for responding to auth challenges (handles password change)
+@auth_services_routes.route("/respond-to-challenge", methods=["POST", "OPTIONS"])
+def respond_to_challenge_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        session = data.get('session')
+        challenge_name = data.get('challengeName')
+        challenge_responses = data.get('challengeResponses', {})
+        
+        if not (username and session and challenge_name):
+            return jsonify({"detail": "Username, session, and challengeName are required"}), 400
+            
+        logger.info(f"Challenge response for {username}: {challenge_name}")
+        
+        # Call the respond_to_auth_challenge function
+        response = respond_to_auth_challenge(username, session, challenge_name, challenge_responses)
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in respond_to_challenge_endpoint: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# Route for confirming MFA setup
+@auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
+def confirm_mfa_setup_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        session = data.get('session')
+        code = data.get('code')
+        
+        if not (username and session and code):
+            return jsonify({"detail": "Username, session, and code are required"}), 400
+            
+        logger.info(f"MFA setup confirmation for user: {username}")
+        
+        # For MFA setup confirmation, we use the same respond_to_auth_challenge function
+        # with the SOFTWARE_TOKEN_MFA challenge type
+        response = respond_to_auth_challenge(
+            username, 
+            session, 
+            "SOFTWARE_TOKEN_MFA", 
+            {"SOFTWARE_TOKEN_MFA_CODE": code}
+        )
+        
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
+        
+        # Otherwise, it's a successful response
+        return jsonify(response)
+    except Exception as e:
+        logger.error(f"Error in confirm_mfa_setup_endpoint: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
