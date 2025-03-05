@@ -77,6 +77,48 @@ def generate_client_secret_hash(username: str) -> str:
         logger.error(traceback.format_exc())
         raise
 
+# Function to generate QR code for MFA setup
+def generate_qr_code(secret_code, username, issuer="EncryptGate"):
+    """
+    Generate a QR code for MFA setup
+    
+    Args:
+        secret_code (str): The MFA secret code
+        username (str): The username for the MFA setup
+        issuer (str): The issuer name for the MFA setup
+        
+    Returns:
+        str: Base64 encoded QR code image
+    """
+    try:
+        # Create the OTP auth URI
+        totp = pyotp.TOTP(secret_code)
+        provisioning_uri = totp.provisioning_uri(name=username, issuer_name=issuer)
+        
+        # Generate QR code
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(provisioning_uri)
+        qr.make(fit=True)
+        
+        # Create image
+        img = qr.make_image(fill_color="black", back_color="white")
+        
+        # Convert to base64
+        buffered = BytesIO()
+        img.save(buffered)
+        img_str = b64encode(buffered.getvalue()).decode()
+        
+        return f"data:image/png;base64,{img_str}"
+    except Exception as e:
+        logger.error(f"Error generating QR code: {e}")
+        logger.error(traceback.format_exc())
+        return None
+
 # Function for use in other modules - can be called directly with parameters
 def authenticate_user(username, password):
     """
@@ -298,8 +340,12 @@ def setup_mfa(access_token):
             logger.error("No secret code in response")
             return {"detail": "Failed to generate MFA secret code"}, 500
         
+        # Generate QR code
+        qr_code = generate_qr_code(secret_code, "user")  # We don't have username here, using generic
+        
         return {
             "secretCode": secret_code,
+            "qrCodeImage": qr_code,
             "message": "MFA setup initiated successfully"
         }
         

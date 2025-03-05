@@ -60,6 +60,7 @@ export default function LoginPage() {
   const [showMFASetup, setShowMFASetup] = useState(false);
   const [mfaSecretCode, setMfaSecretCode] = useState("");
   const [setupMfaCode, setSetupMfaCode] = useState("");
+  const [qrCodeUrl, setQrCodeUrl] = useState("");
   
   // Forgot Password states
   const [showForgotPassword, setShowForgotPassword] = useState(false);
@@ -90,6 +91,20 @@ export default function LoginPage() {
       console.warn("Using fallback API URL:", fallbackUrl);
     }
   }, []);
+
+  // Generate QR code URL when secret code is available
+  useEffect(() => {
+    if (mfaSecretCode) {
+      // Create a QR code URL for the authenticator app
+      // Format: otpauth://totp/[Service]:[User]?secret=[Secret]&issuer=[Service]
+      const serviceName = "EncryptGate";
+      const otpauthUrl = `otpauth://totp/${serviceName}:${encodeURIComponent(email)}?secret=${mfaSecretCode}&issuer=${serviceName}`;
+      
+      // Generate QR code URL using a QR code API
+      const qrCodeApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
+      setQrCodeUrl(qrCodeApiUrl);
+    }
+  }, [mfaSecretCode, email]);
 
   // Handle forgot password request
   const handleForgotPasswordRequest = async () => {
@@ -217,7 +232,7 @@ export default function LoginPage() {
     setError("");
     
     // Try with direct authenticate endpoint (fallback to original if it fails)
-    const loginEndpoint = `${apiBaseUrl}/authenticate`;
+    const loginEndpoint = `${apiBaseUrl}/api/auth/authenticate`;
     console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
     try {
@@ -285,6 +300,8 @@ export default function LoginPage() {
           if (mfaResponse.ok && mfaData.secretCode) {
             // We have a secret code - show MFA setup
             setMfaSecretCode(mfaData.secretCode);
+            // Store the access token for later use in MFA verification
+            localStorage.setItem("temp_access_token", responseData.access_token);
             setShowMFASetup(true);
             return;
           }
@@ -388,6 +405,8 @@ export default function LoginPage() {
             // Close password change dialog and show MFA setup
             setShowPasswordChange(false);
             setMfaSecretCode(mfaData.secretCode);
+            // Store the access token for later use in MFA verification
+            localStorage.setItem("temp_access_token", responseData.access_token);
             setShowMFASetup(true);
             return;
           }
@@ -439,8 +458,8 @@ export default function LoginPage() {
     setError("");
     
     try {
-      // Get the access token from localStorage if it exists
-      const accessToken = localStorage.getItem("access_token");
+      // Get the access token from localStorage
+      const accessToken = localStorage.getItem("temp_access_token") || localStorage.getItem("access_token");
       
       if (!accessToken && !session) {
         throw new Error("Missing authentication credentials");
@@ -472,8 +491,11 @@ export default function LoginPage() {
       // MFA setup successful, close dialog and proceed
       setShowMFASetup(false);
       
-      // If we don't already have tokens, redirect to login
-      if (!accessToken) {
+      // Clean up temporary token
+      localStorage.removeItem("temp_access_token");
+      
+      // If we don't already have tokens stored in localStorage, redirect to login
+      if (!localStorage.getItem("access_token")) {
         setError("MFA setup successful. Please log in again.");
       } else {
         // We already have tokens, go to dashboard
@@ -691,6 +713,19 @@ export default function LoginPage() {
               </AlertDescription>
             </Alert>
             
+            {qrCodeUrl && (
+              <div className="flex flex-col items-center justify-center space-y-2">
+                <Label>Scan QR Code</Label>
+                <div className="bg-white p-2 rounded-md">
+                  <img 
+                    src={qrCodeUrl || "/placeholder.svg"} 
+                    alt="QR Code for MFA setup" 
+                    className="w-48 h-48 mx-auto"
+                  />
+                </div>
+              </div>
+            )}
+            
             {mfaSecretCode && (
               <div className="space-y-2 text-center">
                 <Label>Secret Key</Label>
@@ -709,7 +744,7 @@ export default function LoginPage() {
                 id="setup-mfa-code"
                 placeholder="000000"
                 value={setupMfaCode}
-                onChange={(e) => setSetupMfaCode(e.target.value.slice(0, 6))}
+                onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
                 maxLength={6}
                 className="text-center text-2xl tracking-widest"
               />
@@ -744,7 +779,7 @@ export default function LoginPage() {
                 id="mfa-code"
                 placeholder="000000"
                 value={mfaCode}
-                onChange={(e) => setMfaCode(e.target.value.slice(0, 6))}
+                onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
                 maxLength={6}
                 className="text-center text-2xl tracking-widest"
               />
