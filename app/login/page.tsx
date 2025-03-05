@@ -142,7 +142,6 @@ export default function LoginPage() {
       // Move to confirmation step
       setForgotPasswordStep(2);
     } catch (error: any) {
-      console.error("Forgot password error:", error);
       setForgotPasswordError(error.message || "Failed to initiate password reset");
     } finally {
       setIsForgotPasswordLoading(false);
@@ -201,7 +200,6 @@ export default function LoginPage() {
       // Show success message
       setError("Password reset successful. Please sign in with your new password.");
     } catch (error: any) {
-      console.error("Reset password error:", error);
       setForgotPasswordError(error.message || "Failed to reset password");
     } finally {
       setIsForgotPasswordLoading(false);
@@ -233,7 +231,7 @@ export default function LoginPage() {
     setIsLoading(true);
     setError("");
     
-    // Try with direct authenticate endpoint
+    // Try with direct authenticate endpoint (fallback to original if it fails)
     const loginEndpoint = `${apiBaseUrl}/api/auth/authenticate`;
     console.log(`Attempting to authenticate with: ${loginEndpoint}`);
 
@@ -278,90 +276,58 @@ export default function LoginPage() {
         // Handle password change requirement
         setSession(responseData.session || "");
         setShowPasswordChange(true);
-      } else if (responseData.ChallengeName === "SOFTWARE_TOKEN_MFA") {
-        // Handle MFA challenge
-        setSession(responseData.session || "");
-        setShowMFA(true);
-      } else if (responseData.mfa_required) {
-        // Another way the backend might indicate MFA is required
-        setSession(responseData.session || "");
-        setShowMFA(true);
       } else if (responseData.access_token) {
-        // Success with tokens - check if MFA setup is needed
-        await checkAndSetupMFA(responseData.access_token);
+        // We have an access token, check if we need to set up MFA
+        // Try to set up MFA
+        try {
+          const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
+          const mfaResponse = await fetch(setupMfaEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Origin": window.location.origin
+            },
+            body: JSON.stringify({
+              access_token: responseData.access_token
+            }),
+            mode: "cors",
+            credentials: "include",
+          });
+          
+          const mfaData = await mfaResponse.json();
+          
+          if (mfaResponse.ok && mfaData.secretCode) {
+            // We have a secret code - show MFA setup
+            setMfaSecretCode(mfaData.secretCode);
+            // Store the access token for later use in MFA verification
+            localStorage.setItem("temp_access_token", responseData.access_token);
+            setShowMFASetup(true);
+            return;
+          }
+        } catch (mfaError) {
+          console.error("Error setting up MFA:", mfaError);
+          // Continue with login if MFA setup fails - user is already authenticated
+        }
+        
+        // Store tokens and redirect
+        localStorage.setItem("access_token", responseData.access_token);
+        localStorage.setItem("id_token", responseData.id_token || "");
+        localStorage.setItem("refresh_token", responseData.refresh_token || "");
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      } else if (responseData.mfa_required) {
+        // Standard MFA verification
+        setSession(responseData.session || "");
+        setShowMFA(true);
       } else {
         console.error("Unexpected response format:", responseData);
-        throw new Error("Server returned an unexpected response format. Please try again.");
+        throw new Error("Unexpected server response format");
       }
     } catch (error: any) {
       console.error("Login error:", error.message);
       setError(error.message || "An error occurred. Please try again.");
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  // New helper function to check and setup MFA if needed
-  const checkAndSetupMFA = async (accessToken: string) => {
-    try {
-      // Check if MFA is already configured (call to a new endpoint you'd need to create)
-      const mfaStatusEndpoint = `${apiBaseUrl}/api/auth/mfa-status`;
-      const statusResponse = await fetch(mfaStatusEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Origin": window.location.origin
-        },
-        body: JSON.stringify({
-          access_token: accessToken
-        }),
-        mode: "cors",
-        credentials: "include",
-      });
-      
-      const statusData = await statusResponse.json();
-      
-      if (statusResponse.ok && statusData.mfaEnabled === true) {
-        // MFA is already set up, proceed to dashboard
-        localStorage.setItem("access_token", accessToken);
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
-        return;
-      }
-      
-      // MFA setup is needed
-      const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
-      const mfaResponse = await fetch(setupMfaEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Origin": window.location.origin
-        },
-        body: JSON.stringify({
-          access_token: accessToken
-        }),
-        mode: "cors",
-        credentials: "include",
-      });
-      
-      const mfaData = await mfaResponse.json();
-      
-      if (mfaResponse.ok && mfaData.secretCode) {
-        // Store tokens temporarily
-        localStorage.setItem("temp_access_token", accessToken);
-        // Show MFA setup screen
-        setMfaSecretCode(mfaData.secretCode);
-        setQrCodeUrl(mfaData.qrCodeImage || "");
-        setShowMFASetup(true);
-      } else {
-        throw new Error("Failed to initialize MFA setup");
-      }
-    } catch (error: any) {
-      console.error("MFA setup check error:", error);
-      // If we can't set up MFA for some reason, still allow login
-      localStorage.setItem("access_token", accessToken);
-      router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     }
   };
 
@@ -414,23 +380,61 @@ export default function LoginPage() {
       
       console.log("Password change response:", responseData);
       
-      // Close password change dialog
-      setShowPasswordChange(false);
-      
-      // Handle response based on tokens and challenges
+      // Handle different response types
       if (responseData.access_token) {
-        // Have tokens - check if MFA setup is needed
-        await checkAndSetupMFA(responseData.access_token);
-      } else if (responseData.ChallengeName === "SOFTWARE_TOKEN_MFA") {
-        // MFA verification required
-        setSession(responseData.session || "");
-        setShowMFA(true);
-      } else if (responseData.mfa_required) {
-        // Another way the backend might indicate MFA is required
-        setSession(responseData.session || "");
-        setShowMFA(true);
+        // We have access_token, try to set up MFA
+        try {
+          const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
+          const mfaResponse = await fetch(setupMfaEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Origin": window.location.origin
+            },
+            body: JSON.stringify({
+              access_token: responseData.access_token
+            }),
+            mode: "cors",
+            credentials: "include",
+          });
+          
+          const mfaData = await mfaResponse.json();
+          
+          if (mfaResponse.ok && mfaData.secretCode) {
+            // Close password change dialog and show MFA setup
+            setShowPasswordChange(false);
+            setMfaSecretCode(mfaData.secretCode);
+            // Store the access token for later use in MFA verification
+            localStorage.setItem("temp_access_token", responseData.access_token);
+            setShowMFASetup(true);
+            return;
+          }
+        } catch (mfaError) {
+          console.error("Error setting up MFA:", mfaError);
+          // Continue with login if MFA setup fails
+        }
+        
+        // Store tokens and redirect
+        localStorage.setItem("access_token", responseData.access_token);
+        localStorage.setItem("id_token", responseData.id_token || "");
+        localStorage.setItem("refresh_token", responseData.refresh_token || "");
+        setShowPasswordChange(false);
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      } else if (responseData.ChallengeName) {
+        // Handle additional challenges
+        if (responseData.ChallengeName === "MFA_SETUP") {
+          setSession(responseData.session || "");
+          setShowPasswordChange(false);
+          setMfaSecretCode(responseData.secretCode || "");
+          setShowMFASetup(true);
+        } else if (responseData.mfa_required) {
+          setSession(responseData.session || "");
+          setShowPasswordChange(false);
+          setShowMFA(true);
+        }
       } else {
-        throw new Error("Unexpected response format after password change");
+        throw new Error("Unexpected response format");
       }
     } catch (error: any) {
       setError(error.message || "Failed to change password");
@@ -455,7 +459,7 @@ export default function LoginPage() {
     
     try {
       // Get the access token from localStorage
-      const accessToken = localStorage.getItem("temp_access_token") || "";
+      const accessToken = localStorage.getItem("temp_access_token") || localStorage.getItem("access_token");
       
       if (!accessToken && !session) {
         throw new Error("Missing authentication credentials");
@@ -484,26 +488,18 @@ export default function LoginPage() {
         throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
       }
       
-      // MFA setup successful
+      // MFA setup successful, close dialog and proceed
+      setShowMFASetup(false);
+      
+      // Clean up temporary token
       localStorage.removeItem("temp_access_token");
       
-      // Store the actual tokens if they exist
-      if (responseData.access_token) {
-        localStorage.setItem("access_token", responseData.access_token);
-        localStorage.setItem("id_token", responseData.id_token || "");
-        localStorage.setItem("refresh_token", responseData.refresh_token || "");
-      }
-      
-      // Clear state and close dialog
-      setShowMFASetup(false);
-      setMfaSecretCode("");
-      setSetupMfaCode("");
-      
-      // If we have an access token, redirect to dashboard
-      if (localStorage.getItem("access_token")) {
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
-      } else {
+      // If we don't already have tokens stored in localStorage, redirect to login
+      if (!localStorage.getItem("access_token")) {
         setError("MFA setup successful. Please log in again.");
+      } else {
+        // We already have tokens, go to dashboard
+        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       }
     } catch (error: any) {
       setError(error.message || "Failed to set up MFA");
@@ -535,7 +531,7 @@ export default function LoginPage() {
         },
         body: JSON.stringify({ code: mfaCode, session, username: email }),
         mode: "cors",
-        credentials: "include",
+        credentials: "include",  // Added to include cookies if needed
       }).catch(fetchError => {
         console.error("MFA fetch error:", fetchError);
         throw new Error(`Network error: ${fetchError.message}`);
@@ -555,14 +551,9 @@ export default function LoginPage() {
         throw new Error(data?.detail || "Invalid MFA code");
       }
 
-      // Store tokens and redirect
       localStorage.setItem("access_token", data.access_token || "");
       localStorage.setItem("id_token", data.id_token || "");
       localStorage.setItem("refresh_token", data.refresh_token || "");
-      
-      // Clear state and close dialog
-      setShowMFA(false);
-      setMfaCode("");
 
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
     } catch (error: any) {
@@ -622,7 +613,6 @@ export default function LoginPage() {
                 placeholder="name@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="bg-background"
               />
             </div>
             <div className="space-y-2">
@@ -655,7 +645,7 @@ export default function LoginPage() {
       </Card>
 
       {/* Password Change Dialog */}
-      <Dialog open={showPasswordChange} onOpenChange={setShowPasswordChange}>
+      <Dialog open={showPasswordChange} onOpenChange={(open) => open && setShowPasswordChange(open)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Change Password Required</DialogTitle>
@@ -686,7 +676,7 @@ export default function LoginPage() {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Alert>
-              <AlertDescription className="text-xs">
+              <AlertDescription>
                 Your password must be at least 8 characters long and include uppercase and lowercase letters, numbers, and special characters.
               </AlertDescription>
             </Alert>
@@ -704,7 +694,7 @@ export default function LoginPage() {
       </Dialog>
 
       {/* MFA Setup Dialog */}
-      <Dialog open={showMFASetup} onOpenChange={setShowMFASetup}>
+      <Dialog open={showMFASetup} onOpenChange={(open) => open && setShowMFASetup(open)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
@@ -714,7 +704,7 @@ export default function LoginPage() {
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <Alert>
-              <AlertDescription className="text-xs">
+              <AlertDescription>
                 1. Install an authenticator app like Google Authenticator or Authy on your mobile device.
                 <br />
                 2. Scan the QR code or enter the secret key in your app.
@@ -774,7 +764,7 @@ export default function LoginPage() {
       </Dialog>
 
       {/* MFA Verification Dialog */}
-      <Dialog open={showMFA} onOpenChange={setShowMFA}>
+      <Dialog open={showMFA} onOpenChange={(open) => open && setShowMFA(open)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Enter Authentication Code</DialogTitle>
@@ -833,7 +823,6 @@ export default function LoginPage() {
                   placeholder="name@example.com"
                   value={forgotPasswordEmail}
                   onChange={(e) => setForgotPasswordEmail(e.target.value)}
-                  className="bg-background"
                 />
               </div>
               {forgotPasswordError && <p className="text-sm text-destructive">{forgotPasswordError}</p>}
@@ -854,7 +843,6 @@ export default function LoginPage() {
                   placeholder="Enter verification code"
                   value={forgotPasswordCode}
                   onChange={(e) => setForgotPasswordCode(e.target.value)}
-                  className="bg-background"
                 />
               </div>
               <div className="space-y-2">
