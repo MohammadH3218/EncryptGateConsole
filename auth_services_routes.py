@@ -5,6 +5,7 @@ import hashlib
 import base64
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, make_response
 from dotenv import load_dotenv
@@ -15,13 +16,21 @@ from base64 import b64encode
 from flask import Flask
 from flask_cors import CORS
 import traceback
+import json
 
 # Load environment variables
 load_dotenv()
 
-# Logging Configuration
-logging.basicConfig(level=logging.INFO)
+# Enhanced Logging Configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Create a separate file handler for MFA-related logs
+mfa_logger = logging.getLogger("mfa_operations")
+mfa_logger.setLevel(logging.DEBUG)
 
 # AWS Cognito Configuration
 AWS_REGION = os.getenv("REGION", "us-east-1")
@@ -32,6 +41,7 @@ CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
 # Create Cognito client with error handling
 try:
     cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
+    logger.info(f"Successfully initialized Cognito client for region {AWS_REGION}")
 except Exception as e:
     logger.error(f"Failed to initialize Cognito client: {e}")
     # Create a dummy client to prevent app crash, but it won't work
@@ -82,6 +92,8 @@ def generate_qr_code(secret_code, username, issuer="EncryptGate"):
         totp = pyotp.TOTP(secret_code)
         provisioning_uri = totp.provisioning_uri(name=username, issuer_name=issuer)
         
+        mfa_logger.debug(f"Generated provisioning URI: {provisioning_uri}")
+        
         # Generate QR code
         qr = qrcode.QRCode(
             version=1,
@@ -104,6 +116,48 @@ def generate_qr_code(secret_code, username, issuer="EncryptGate"):
     except Exception as e:
         logger.error(f"Error generating QR code: {e}")
         return None
+
+# Debug function to verify TOTP code matches
+def debug_totp_verification(secret_code, user_code):
+    """
+    Debug function to verify if a TOTP code matches the expected value
+    """
+    try:
+        totp = pyotp.TOTP(secret_code)
+        now = datetime.now()
+        
+        # Get current code
+        current_code = totp.now()
+        
+        # Get codes for adjacent time windows
+        previous_code = totp.at(now - timedelta(seconds=30))
+        next_code = totp.at(now + timedelta(seconds=30))
+        
+        # Verify the code directly
+        is_valid = totp.verify(user_code)
+        
+        # Log debug information
+        mfa_logger.debug(f"TOTP Debug Info:")
+        mfa_logger.debug(f"Secret code: {secret_code}")
+        mfa_logger.debug(f"User provided code: {user_code}")
+        mfa_logger.debug(f"Current expected code: {current_code}")
+        mfa_logger.debug(f"Previous window code: {previous_code}")
+        mfa_logger.debug(f"Next window code: {next_code}")
+        mfa_logger.debug(f"Direct verification result: {is_valid}")
+        mfa_logger.debug(f"Current timestamp: {int(time.time())}")
+        
+        # Return debug info
+        return {
+            "is_valid": is_valid,
+            "current_code": current_code,
+            "previous_code": previous_code,
+            "next_code": next_code,
+            "time_window": totp.interval,
+            "timestamp": int(time.time())
+        }
+    except Exception as e:
+        mfa_logger.error(f"Error in TOTP verification: {e}")
+        return {"error": str(e)}
 
 # Function for use in other modules - can be called directly with parameters
 def authenticate_user(username, password):
@@ -147,6 +201,7 @@ def authenticate_user(username, password):
 
         # Call Cognito API
         try:
+            logger.info(f"Initiating Cognito authentication for user: {username}")
             response = cognito_client.initiate_auth(
                 ClientId=CLIENT_ID,
                 AuthFlow="USER_PASSWORD_AUTH",
@@ -156,6 +211,7 @@ def authenticate_user(username, password):
                     "SECRET_HASH": secret_hash,
                 },
             )
+            logger.info(f"Cognito authentication response received - keys: {list(response.keys())}")
         except cognito_client.exceptions.NotAuthorizedException as auth_error:
             logger.warning(f"Authentication failed: Invalid credentials")
             return {"detail": "Invalid username or password."}, 401
@@ -234,6 +290,16 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         for key, value in challenge_responses.items():
             challenge_responses_with_auth[key] = value
         
+        # Log the challenge response details (sanitized)
+        safe_responses = challenge_responses_with_auth.copy()
+        if "NEW_PASSWORD" in safe_responses:
+            safe_responses["NEW_PASSWORD"] = "***REDACTED***"
+        if "SOFTWARE_TOKEN_MFA_CODE" in safe_responses:
+            # Keep the code for debugging, but mark it
+            safe_responses["SOFTWARE_TOKEN_MFA_CODE"] = f"{safe_responses['SOFTWARE_TOKEN_MFA_CODE']} (logged for debugging)"
+        
+        logger.info(f"Sending challenge response with parameters: {safe_responses}")
+        
         # Make the API call
         response = cognito_client.respond_to_auth_challenge(
             ClientId=CLIENT_ID,
@@ -242,10 +308,13 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
             ChallengeResponses=challenge_responses_with_auth
         )
         
+        logger.info(f"Challenge response received - keys: {list(response.keys())}")
+        
         # Process response
         auth_result = response.get("AuthenticationResult")
         if auth_result:
             # Authentication completed successfully
+            logger.info(f"Challenge {challenge_name} completed successfully")
             return {
                 "id_token": auth_result.get("IdToken"),
                 "access_token": auth_result.get("AccessToken"),
@@ -282,12 +351,12 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         logger.warning(f"Invalid password format")
         return {"detail": f"Password does not meet requirements: {str(pwd_error)}"}, 400
         
-    except cognito_client.exceptions.CodeMismatchException:
-        logger.warning("CodeMismatchException: Invalid verification code")
+    except cognito_client.exceptions.CodeMismatchException as code_error:
+        logger.warning(f"CodeMismatchException: Invalid verification code: {str(code_error)}")
         return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
         
     except Exception as e:
-        logger.error(f"Challenge response error: {e}")
+        logger.error(f"Challenge response error: {e}\n{traceback.format_exc()}")
         return {"detail": f"Challenge response failed: {str(e)}"}, 500
 
 # Set up MFA with access token - UPDATED IMPLEMENTATION
@@ -301,42 +370,73 @@ def setup_mfa(access_token):
     Returns:
         dict: MFA setup information including secret code
     """
-    logger.info("Setting up MFA")
+    mfa_logger.info("Setting up MFA - starting associate_software_token")
     
     try:
-        # Make the API call to associate software token
-        response = cognito_client.associate_software_token(
-            AccessToken=access_token
-        )
-        
-        logger.info("Software token association successful")
-        
-        # Get the secret code
-        secret_code = response.get("SecretCode")
-        if not secret_code:
-            logger.error("No secret code in response")
-            return {"detail": "Failed to generate MFA secret code"}, 500
-        
-        # Generate QR code
+        # Validate token format
+        if not access_token or not isinstance(access_token, str) or len(access_token) < 20:
+            mfa_logger.error(f"Invalid access token format: {type(access_token)}")
+            return {"detail": "Invalid access token format"}, 400
+            
         try:
-            # Try to get the username for a better QR code
+            # Get user details first to validate token and get username
             user_response = cognito_client.get_user(
                 AccessToken=access_token
             )
             username = user_response.get("Username", "user")
-        except Exception:
-            username = "user"  # Fallback if we can't get the username
+            mfa_logger.info(f"Retrieved username: {username} from access token")
+        except Exception as user_error:
+            mfa_logger.error(f"Failed to get user details: {user_error}")
+            return {"detail": f"Invalid access token: {str(user_error)}"}, 401
             
+        # Make the API call to associate software token
+        try:
+            associate_response = cognito_client.associate_software_token(
+                AccessToken=access_token
+            )
+            mfa_logger.info("Software token association successful")
+        except Exception as assoc_error:
+            mfa_logger.error(f"Failed to associate software token: {assoc_error}")
+            return {"detail": f"MFA setup failed: {str(assoc_error)}"}, 500
+        
+        # Get the secret code
+        secret_code = associate_response.get("SecretCode")
+        if not secret_code:
+            mfa_logger.error("No secret code in response")
+            return {"detail": "Failed to generate MFA secret code"}, 500
+        
+        mfa_logger.info(f"Generated secret code: {secret_code}")
+        
+        # Generate QR code
         qr_code = generate_qr_code(secret_code, username)
+        if not qr_code:
+            mfa_logger.warning("Failed to generate QR code, continuing with text secret only")
+        
+        # Verify the secret is in correct Base32 format
+        try:
+            # Basic validation that the secret is valid Base32
+            if not all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567' for c in secret_code):
+                mfa_logger.warning(f"Secret code is not valid Base32 format: {secret_code}")
+        except Exception as format_error:
+            mfa_logger.warning(f"Error validating secret format: {format_error}")
+        
+        # Generate a test TOTP code to validate the secret works
+        try:
+            totp = pyotp.TOTP(secret_code)
+            test_code = totp.now()
+            mfa_logger.info(f"Generated test TOTP code: {test_code} for verification")
+        except Exception as totp_error:
+            mfa_logger.error(f"Failed to generate test TOTP code: {totp_error}")
         
         return {
             "secretCode": secret_code,
             "qrCodeImage": qr_code,
-            "message": "MFA setup initiated successfully"
+            "message": "MFA setup initiated successfully",
+            "username": username  # Include username for better frontend experience
         }
         
     except Exception as e:
-        logger.error(f"Error setting up MFA: {e}")
+        mfa_logger.error(f"Error setting up MFA: {e}\n{traceback.format_exc()}")
         return {"detail": f"Failed to setup MFA: {str(e)}"}, 500
 
 # Verify MFA setup with access token - UPDATED IMPLEMENTATION
@@ -351,22 +451,55 @@ def verify_software_token_setup(access_token, code):
     Returns:
         dict: Success message or error
     """
-    logger.info("Verifying MFA setup")
+    mfa_logger.info("Verifying MFA setup")
+    
+    # Input validation
+    if not code or not isinstance(code, str):
+        mfa_logger.error(f"Invalid code format: {type(code)}")
+        return {"detail": "Verification code must be a 6-digit number"}, 400
+        
+    # Ensure code is exactly 6 digits
+    code = code.strip()
+    if not code.isdigit() or len(code) != 6:
+        mfa_logger.error(f"Invalid code format: {code}")
+        return {"detail": "Verification code must be exactly 6 digits"}, 400
     
     try:
+        # Get user info for logging
+        try:
+            user_info = cognito_client.get_user(AccessToken=access_token)
+            username = user_info.get("Username", "unknown")
+            mfa_logger.info(f"Verifying MFA setup for user: {username}")
+        except Exception as user_error:
+            mfa_logger.warning(f"Could not get username: {user_error}")
+            username = "unknown"
+        
+        # Try to get the secret code from the user's MFA settings for debugging
+        try:
+            # This call fails if no MFA is associated - just for debugging
+            mfa_settings = cognito_client.get_user_mfa_setting(AccessToken=access_token)
+            mfa_logger.debug(f"Current MFA settings: {mfa_settings}")
+        except Exception:
+            # Expected to fail if no MFA is set up yet
+            pass
+            
         # Make the API call to verify software token
+        mfa_logger.info(f"Calling verify_software_token with code: {code}")
+        
         response = cognito_client.verify_software_token(
             AccessToken=access_token,
-            UserCode=code
+            UserCode=code,
+            FriendlyDeviceName="EncryptGate Auth App"
         )
         
         # Check the status
         status = response.get("Status")
-        logger.info(f"MFA verification status: {status}")
+        mfa_logger.info(f"MFA verification status: {status}")
         
         if status == "SUCCESS":
             # Set the user's MFA preference to require TOTP
             try:
+                mfa_logger.info("Setting MFA preference")
                 cognito_client.set_user_mfa_preference(
                     AccessToken=access_token,
                     SoftwareTokenMfaSettings={
@@ -374,9 +507,9 @@ def verify_software_token_setup(access_token, code):
                         "PreferredMfa": True
                     }
                 )
-                logger.info("MFA preference set successfully")
+                mfa_logger.info("MFA preference set successfully")
             except Exception as pref_error:
-                logger.warning(f"MFA verified but couldn't set preference: {pref_error}")
+                mfa_logger.warning(f"MFA verified but couldn't set preference: {pref_error}")
                 # Continue anyway since the token was verified
             
             return {
@@ -384,18 +517,34 @@ def verify_software_token_setup(access_token, code):
                 "status": status
             }
         else:
+            mfa_logger.warning(f"Verification returned non-SUCCESS status: {status}")
             return {"detail": f"MFA verification failed with status: {status}"}, 400
         
-    except cognito_client.exceptions.CodeMismatchException:
-        logger.warning("Invalid verification code")
-        return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
-        
     except cognito_client.exceptions.EnableSoftwareTokenMFAException as e:
-        logger.error(f"Error enabling MFA: {e}")
+        mfa_logger.error(f"Error enabling MFA: {e}")
         return {"detail": "Error enabling MFA. Try again or contact support."}, 400
         
+    except cognito_client.exceptions.CodeMismatchException as code_error:
+        mfa_logger.warning(f"CodeMismatchException: {code_error}")
+        
+        # Call debug function to help troubleshoot
+        try:
+            # Try to get the secret code from a new association
+            debug_assoc = cognito_client.associate_software_token(
+                AccessToken=access_token
+            )
+            secret_code = debug_assoc.get("SecretCode")
+            
+            if secret_code:
+                debug_info = debug_totp_verification(secret_code, code)
+                mfa_logger.debug(f"TOTP Debug Info for code mismatch: {debug_info}")
+        except Exception as debug_error:
+            mfa_logger.error(f"Failed to get debug info: {debug_error}")
+        
+        return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
+        
     except Exception as e:
-        logger.error(f"Error verifying MFA setup: {e}")
+        mfa_logger.error(f"Error verifying MFA setup: {e}\n{traceback.format_exc()}")
         return {"detail": f"MFA verification failed: {str(e)}"}, 500
 
 # Verify MFA function
@@ -413,6 +562,17 @@ def verify_mfa(session, code, username):
     """
     logger.info(f"MFA verification initiated for user: {username}")
     
+    # Input validation
+    if not code or not isinstance(code, str):
+        logger.error(f"Invalid code format: {type(code)}")
+        return {"detail": "Verification code must be a 6-digit number"}, 400
+        
+    # Ensure code is exactly 6 digits
+    code = code.strip()
+    if not code.isdigit() or len(code) != 6:
+        logger.error(f"Invalid code format: {code}")
+        return {"detail": "Verification code must be exactly 6 digits"}, 400
+    
     try:
         # Generate secret hash
         try:
@@ -420,24 +580,32 @@ def verify_mfa(session, code, username):
         except Exception as hash_error:
             logger.error(f"Failed to generate secret hash for MFA: {hash_error}")
             return {"detail": "MFA verification failed: Unable to generate credentials"}, 500
-            
+        
+        # Prepare challenge responses    
+        challenge_responses = {
+            "USERNAME": username,
+            "SOFTWARE_TOKEN_MFA_CODE": code,
+            "SECRET_HASH": secret_hash
+        }
+        
+        logger.info(f"Sending MFA verification with code: {code}")
+        
         # Make the API call
         response = cognito_client.respond_to_auth_challenge(
             ClientId=CLIENT_ID,
             ChallengeName="SOFTWARE_TOKEN_MFA",
             Session=session,
-            ChallengeResponses={
-                "USERNAME": username,
-                "SOFTWARE_TOKEN_MFA_CODE": code,
-                "SECRET_HASH": secret_hash
-            }
+            ChallengeResponses=challenge_responses
         )
+        
+        logger.info(f"MFA verification response received - keys: {list(response.keys())}")
         
         auth_result = response.get("AuthenticationResult")
         if not auth_result:
             logger.error("No AuthenticationResult in MFA response")
             return {"detail": "Invalid MFA response from server"}, 500
             
+        logger.info("MFA verification successful")
         return {
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
@@ -446,12 +614,16 @@ def verify_mfa(session, code, username):
             "expires_in": auth_result.get("ExpiresIn"),
         }
         
-    except cognito_client.exceptions.CodeMismatchException:
-        logger.warning("MFA code mismatch")
+    except cognito_client.exceptions.CodeMismatchException as code_error:
+        logger.warning(f"MFA code mismatch: {code_error}")
         return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
         
+    except cognito_client.exceptions.ExpiredCodeException as expired_error:
+        logger.warning(f"MFA code expired: {expired_error}")
+        return {"detail": "The verification code has expired. Please generate a new code from your authenticator app."}, 400
+        
     except Exception as e:
-        logger.error(f"MFA verification error: {e}")
+        logger.error(f"MFA verification error: {e}\n{traceback.format_exc()}")
         return {"detail": f"MFA verification failed: {e}"}, 401
 
 # Initiate forgot password flow
@@ -600,6 +772,12 @@ def handle_cors_preflight():
     allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
     allowed_origins = [o.strip() for o in allowed_origins]
     
+    # Add localhost for development
+    if os.getenv("FLASK_ENV") == "development":
+        allowed_origins.extend(["http://localhost:3000", "http://localhost:8000"])
+    
+    logger.debug(f"CORS request from origin: {origin}, allowed origins: {allowed_origins}")
+    
     # Set CORS headers based on origin validation
     if origin in allowed_origins or "*" in allowed_origins:
         response.headers.add("Access-Control-Allow-Origin", origin)
@@ -686,6 +864,8 @@ def setup_mfa_endpoint():
         
         if not access_token:
             return jsonify({"detail": "Access token is required"}), 400
+        
+        mfa_logger.info(f"MFA setup requested with token: {access_token[:10]}...")
             
         # Call the setup_mfa function
         response = setup_mfa(access_token)
@@ -697,7 +877,7 @@ def setup_mfa_endpoint():
         # Otherwise, it's a successful response
         return jsonify(response)
     except Exception as e:
-        logger.error(f"Error in setup_mfa_endpoint: {e}")
+        mfa_logger.error(f"Error in setup_mfa_endpoint: {e}\n{traceback.format_exc()}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Updated route to verify MFA setup with better error handling for CodeMismatchException
@@ -709,35 +889,38 @@ def verify_mfa_setup_endpoint():
     try:
         data = request.json
         if not data:
+            mfa_logger.error("No JSON data provided")
             return jsonify({"detail": "No JSON data provided"}), 400
             
         access_token = data.get('access_token')
         code = data.get('code')
         
+        mfa_logger.info(f"MFA verification requested with token: {access_token[:10] if access_token else 'None'}, code: {code}")
+        
         # Enhanced error message with more details
         if not access_token:
-            logger.warning("Missing access_token in request")
+            mfa_logger.warning("Missing access_token in request")
             return jsonify({"detail": "Access token is required. Make sure you're properly authenticated."}), 400
             
         if not code:
-            logger.warning("Missing verification code in request")
+            mfa_logger.warning("Missing verification code in request")
             return jsonify({"detail": "Verification code is required"}), 400
         
-        try:    
-            # Call the verify_software_token_setup function
-            response = verify_software_token_setup(access_token, code)
+        # Call the verify_software_token_setup function
+        response = verify_software_token_setup(access_token, code)
+    
+        # Check if it's an error response (tuple with status code)
+        if isinstance(response, tuple):
+            return jsonify(response[0]), response[1]
         
-            # Check if it's an error response (tuple with status code)
-            if isinstance(response, tuple):
-                return jsonify(response[0]), response[1]
+        # Otherwise, it's a successful response
+        return jsonify(response)
             
-            # Otherwise, it's a successful response
-            return jsonify(response)
-        except cognito_client.exceptions.CodeMismatchException:
-            logger.warning("CodeMismatchException: Invalid verification code")
-            return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
+    except cognito_client.exceptions.CodeMismatchException as code_error:
+        mfa_logger.warning(f"CodeMismatchException: {code_error}")
+        return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
     except Exception as e:
-        logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
+        mfa_logger.error(f"Error in verify_mfa_setup_endpoint: {e}\n{traceback.format_exc()}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Updated route with more flexible parameter handling and improved error handling for CodeMismatchException
@@ -756,30 +939,22 @@ def confirm_mfa_setup_endpoint():
         code = data.get('code')
         access_token = data.get('access_token')
         
-        logger.info(f"MFA setup parameters received: username present: {bool(username)}, session present: {bool(session)}, code present: {bool(code)}, access_token present: {bool(access_token)}")
+        mfa_logger.info(f"MFA setup confirmation requested - username present: {bool(username)}, session present: {bool(session)}, code present: {bool(code)}, access_token present: {bool(access_token)}")
         
         # Check if we have access token (new flow) or session (old flow)
         if access_token:
-            logger.info("Using access token flow for MFA verification")
-            try:
-                # Call the verify_software_token_setup function
-                response = verify_software_token_setup(access_token, code)
-            except cognito_client.exceptions.CodeMismatchException:
-                logger.warning("CodeMismatchException: Invalid verification code")
-                return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
+            mfa_logger.info("Using access token flow for MFA verification")
+            # Call the verify_software_token_setup function
+            response = verify_software_token_setup(access_token, code)
         elif session and username and code:
-            logger.info(f"Using session flow for MFA verification")
-            try:
-                # Use the respond_to_auth_challenge function
-                response = respond_to_auth_challenge(
-                    username, 
-                    session, 
-                    "SOFTWARE_TOKEN_MFA", 
-                    {"SOFTWARE_TOKEN_MFA_CODE": code}
-                )
-            except cognito_client.exceptions.CodeMismatchException:
-                logger.warning("CodeMismatchException: Invalid verification code") 
-                return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
+            mfa_logger.info(f"Using session flow for MFA verification")
+            # Use the respond_to_auth_challenge function
+            response = respond_to_auth_challenge(
+                username, 
+                session, 
+                "SOFTWARE_TOKEN_MFA", 
+                {"SOFTWARE_TOKEN_MFA_CODE": code}
+            )
         else:
             missing_params = []
             if not access_token and not session:
@@ -790,7 +965,7 @@ def confirm_mfa_setup_endpoint():
                 missing_params.append("code")
                 
             error_msg = f"Missing required parameters: {', '.join(missing_params)}"
-            logger.warning(error_msg)
+            mfa_logger.warning(error_msg)
             return jsonify({"detail": error_msg}), 400
             
         # Check if it's an error response (tuple with status code)
@@ -799,11 +974,11 @@ def confirm_mfa_setup_endpoint():
         
         # Otherwise, it's a successful response
         return jsonify(response)
-    except cognito_client.exceptions.CodeMismatchException:
-        logger.warning("CodeMismatchException: Invalid verification code")
+    except cognito_client.exceptions.CodeMismatchException as code_error:
+        mfa_logger.warning(f"CodeMismatchException in confirm_mfa_setup_endpoint: {code_error}")
         return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
     except Exception as e:
-        logger.error(f"Error in confirm_mfa_setup_endpoint: {e}")
+        mfa_logger.error(f"Error in confirm_mfa_setup_endpoint: {e}\n{traceback.format_exc()}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 # Route for initiating forgot password
@@ -914,7 +1089,7 @@ def verify_mfa_endpoint():
     # Otherwise, it's a successful response
     return jsonify(auth_result)
 
-# MFA debugging routes
+# MFA debugging routes - only available in development
 @auth_services_routes.route("/test-mfa-process", methods=["POST"])
 def test_mfa_process():
     """Test endpoint to debug MFA setup process"""
@@ -993,7 +1168,8 @@ def test_mfa_process():
                                 "status": "SUCCESS",
                                 "message": "MFA setup completed successfully",
                                 "secret_code": secret_code,
-                                "username": username
+                                "username": username,
+                                "debug_totp": debug_totp_verification(secret_code, code)
                             }), 200
                             
                         except Exception as pref_error:
@@ -1006,14 +1182,16 @@ def test_mfa_process():
                         return jsonify({
                             "phase": "verify_token",
                             "status": status,
-                            "message": "Code verification not successful"
+                            "message": "Code verification not successful",
+                            "debug_totp": debug_totp_verification(secret_code, code)
                         }), 200
                         
                 except Exception as verify_error:
                     return jsonify({
                         "phase": "verify_token",
                         "error": str(verify_error),
-                        "status": "Failed to verify token"
+                        "status": "Failed to verify token",
+                        "debug_totp": debug_totp_verification(secret_code, code) if secret_code else "No secret available"
                     }), 200
             
             # If no code provided, just return the generated secret
@@ -1023,7 +1201,8 @@ def test_mfa_process():
                 "message": "MFA setup initialized successfully",
                 "secret_code": secret_code,
                 "username": username,
-                "next_step": "Enter this secret in your authenticator app and provide a code to complete setup"
+                "next_step": "Enter this secret in your authenticator app and provide a code to complete setup",
+                "test_code": pyotp.TOTP(secret_code).now() if secret_code else "No secret available"
             }), 200
                 
         except Exception as e:
@@ -1039,7 +1218,7 @@ def test_mfa_process():
             "message": str(e)
         }), 500
 
-# Helper route to inspect user MFA status
+# Helper route to inspect user MFA status - only available in development
 @auth_services_routes.route("/check-user-mfa-status", methods=["POST"])
 def check_user_mfa_status():
     """Check a user's MFA status"""
@@ -1098,16 +1277,86 @@ def check_user_mfa_status():
             "message": str(e)
         }), 500
 
-# Health Check Route
+# Universal debug endpoint - only available in development
+@auth_services_routes.route("/debug", methods=["POST"])
+def debug_endpoint():
+    """Universal debug endpoint for troubleshooting"""
+    if os.environ.get("FLASK_ENV") != "development":
+        return jsonify({"detail": "This endpoint is only available in development mode"}), 403
+        
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        debug_type = data.get('type')
+        if not debug_type:
+            return jsonify({"detail": "Debug type is required"}), 400
+            
+        # Debug TOTP code generation/verification
+        if debug_type == "totp":
+            secret = data.get('secret')
+            code = data.get('code')
+            
+            if not secret:
+                # Generate a new secret if not provided
+                secret = pyotp.random_base32()
+                
+            debug_info = {
+                "secret": secret,
+                "issuer": "EncryptGate Debug",
+                "uri": pyotp.TOTP(secret).provisioning_uri("debug@example.com", issuer_name="EncryptGate Debug"),
+                "current_code": pyotp.TOTP(secret).now(),
+                "time_remaining": 30 - (int(time.time()) % 30),
+                "timestamp": int(time.time())
+            }
+            
+            if code:
+                debug_info["verification"] = debug_totp_verification(secret, code)
+                
+            return jsonify(debug_info), 200
+            
+        # Debug AWS Cognito configuration
+        elif debug_type == "cognito_config":
+            return jsonify({
+                "region": AWS_REGION,
+                "user_pool_id_configured": bool(USER_POOL_ID),
+                "client_id_configured": bool(CLIENT_ID),
+                "client_secret_configured": bool(CLIENT_SECRET),
+                "environment": os.environ.get("FLASK_ENV", "unknown")
+            }), 200
+            
+        else:
+            return jsonify({"detail": "Unknown debug type"}), 400
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+# Health Check Route with enhanced diagnostics
 @auth_services_routes.route("/health", methods=["GET"])
 def health_check():
+    # Check Cognito connectivity
+    cognito_status = "unknown"
+    try:
+        # Minimal API call to check connectivity
+        cognito_client.list_user_pools(MaxResults=1)
+        cognito_status = "connected"
+    except Exception as e:
+        cognito_status = f"error: {str(e)}"
+    
     return jsonify({
         "status": "success", 
         "message": "Service is running",
+        "timestamp": datetime.utcnow().isoformat(),
         "aws_credentials": {
-            "region": "configured" if AWS_REGION else "missing",
+            "region": AWS_REGION or "missing",
             "user_pool_id": "configured" if USER_POOL_ID else "missing",
             "client_id": "configured" if CLIENT_ID else "missing",
             "client_secret": "configured" if CLIENT_SECRET else "missing"
-        }
+        },
+        "cognito_status": cognito_status,
+        "environment": os.environ.get("FLASK_ENV", "production")
     }), 200
