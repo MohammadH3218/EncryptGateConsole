@@ -24,7 +24,7 @@ export const useRequireAuth = () => {
 
   useEffect(() => {
     if (!checkAuth()) {
-      router.push("/login")
+      router.push("/admin/dashboard")
     }
   }, [router])
 }
