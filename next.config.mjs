@@ -29,6 +29,16 @@ const nextConfig = {
       },
     ];
   },
+  
+  async redirects() {
+    return [
+      {
+        source: '/',
+        destination: '/admin/dashboard',
+        permanent: false,
+      },
+    ];
+  },
 };
 
 mergeConfig(nextConfig, userConfig);
