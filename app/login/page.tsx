@@ -39,7 +39,6 @@ interface LoginResponse {
   role?: string;
   detail?: string;
   secretCode?: string;
-  qrCodeImage?: string;
   message?: string;
   status?: string;
   username?: string;
@@ -106,28 +105,22 @@ export default function LoginPage() {
     logApiCall("API URL Configuration", `Set API URL to ${finalUrl}`);
   }, [logApiCall]);
 
-  // Updated - Generate QR code URL when secret code is available
-  // This useEffect now handles both backend-provided and frontend-generated QR codes
+  // Generate QR code URL when secret code is available
   useEffect(() => {
     if (mfaSecretCode) {
-      // Check if the QR code was already provided by the backend
-      if (qrCodeUrl && qrCodeUrl.startsWith('data:image/png;base64,')) {
-        // We already have a base64 QR code from the backend
-        logApiCall("QR Code Setup", "Using server-provided QR code");
-      } else {
-        // No QR code from backend, generate one on the client
-        // Create a QR code URL for the authenticator app
-        const serviceName = "EncryptGate";
-        const otpauthUrl = `otpauth://totp/${serviceName}:${encodeURIComponent(email)}?secret=${mfaSecretCode}&issuer=${serviceName}`;
-        
-        // Generate QR code URL using a QR code API
-        const qrCodeApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
-        setQrCodeUrl(qrCodeApiUrl);
-        
-        logApiCall("QR Code Generation", `Generated QR code for secret: ${mfaSecretCode}`);
-      }
+      // Create a QR code URL for the authenticator app using the external API
+      const serviceName = "EncryptGate";
+      const otpauthUrl = `otpauth://totp/${serviceName}:${encodeURIComponent(email)}?secret=${mfaSecretCode}&issuer=${serviceName}`;
+      
+      // Generate QR code URL using a QR code API - this is reliable and works in browsers
+      const qrCodeApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
+      setQrCodeUrl(qrCodeApiUrl);
+      
+      // Log for debugging
+      console.log("Generated QR code for secret:", mfaSecretCode.substring(0, 5) + "...");
+      logApiCall("QR Code Generation", `Generated QR code for secret: ${mfaSecretCode}`);
     }
-  }, [mfaSecretCode, email, qrCodeUrl, logApiCall]);
+  }, [mfaSecretCode, email, logApiCall]);
 
   // Handle forgot password request
   const handleForgotPasswordRequest = async () => {
@@ -277,7 +270,6 @@ export default function LoginPage() {
     }
   };
 
-  // Updated - Handle login with improved MFA handling
   const handleLogin = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -292,8 +284,9 @@ export default function LoginPage() {
 
     try {
       logApiCall("Login Request", `Authenticating user: ${email}`);
+      console.log("Login attempt for:", email);
       
-      const response = await fetchWithRetry(loginEndpoint, {
+      const response = await fetch(loginEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -304,7 +297,6 @@ export default function LoginPage() {
           username: email,
           password,
         }),
-        mode: "cors",
         credentials: "include",
       }).catch(fetchError => {
         logApiCall("Login Network Error", fetchError.message);
@@ -315,6 +307,7 @@ export default function LoginPage() {
       try {
         responseData = await response.json();
         logApiCall("Login Response", `Status: ${response.status}, Response keys: ${Object.keys(responseData).join(', ')}`);
+        console.log("Login response:", response.status, Object.keys(responseData));
       } catch (jsonError) {
         logApiCall("Login JSON Parse Error", String(jsonError));
         throw new Error("Invalid response from server. Please try again.");
@@ -339,9 +332,13 @@ export default function LoginPage() {
       } else if (responseData.access_token) {
         // We have an access token, check if we need to set up MFA
         logApiCall("Login Flow", "Access token received, checking MFA setup");
+        console.log("Access token received, checking MFA setup");
+        
         try {
           const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
-          const mfaResponse = await fetchWithRetry(setupMfaEndpoint, {
+          console.log("Making MFA setup request to:", setupMfaEndpoint);
+          
+          const mfaResponse = await fetch(setupMfaEndpoint, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -351,31 +348,31 @@ export default function LoginPage() {
             body: JSON.stringify({
               access_token: responseData.access_token
             }),
-            mode: "cors",
             credentials: "include",
-          }, 1);
+          });
           
-          const mfaData = await mfaResponse.json();
-          logApiCall("MFA Setup Check", `Status: ${mfaResponse.status}, Has secret: ${!!mfaData.secretCode}`);
+          console.log("MFA setup response status:", mfaResponse.status);
           
-          if (mfaResponse.ok && mfaData.secretCode) {
-            // We have a secret code - show MFA setup
-            setMfaSecretCode(mfaData.secretCode);
+          if (mfaResponse.ok) {
+            const mfaData = await mfaResponse.json();
+            console.log("MFA setup data keys:", Object.keys(mfaData));
+            logApiCall("MFA Setup Check", `Status: ${mfaResponse.status}, Has secret: ${!!mfaData.secretCode}`);
             
-            // Check if we received QR code from backend
-            if (mfaData.qrCodeImage) {
-              setQrCodeUrl(mfaData.qrCodeImage);
-              logApiCall("QR Code Setup", "Using server-provided QR code");
+            if (mfaData.secretCode) {
+              // We have a secret code - show MFA setup
+              console.log("MFA secret received:", mfaData.secretCode.substring(0, 5) + "...");
+              setMfaSecretCode(mfaData.secretCode);
+              
+              // Store the access token for later use in MFA verification
+              localStorage.setItem("temp_access_token", responseData.access_token);
+              setShowMFASetup(true);
+              return;
             }
-            
-            // Store the access token for later use in MFA verification
-            localStorage.setItem("temp_access_token", responseData.access_token);
-            setShowMFASetup(true);
-            return;
           }
-        } catch (mfaError: any) {
+        } catch (mfaError) {
           // Continue with login if MFA setup fails - user is already authenticated
-          logApiCall("MFA Setup Check Error", mfaError.message || "Unknown error");
+          console.error("MFA setup error:", mfaError);
+          logApiCall("MFA Setup Check Error", mfaError instanceof Error ? mfaError.message : "Unknown error");
         }
         
         logApiCall("Login Flow", "Proceeding with login (MFA already set up or not required)");
@@ -390,13 +387,13 @@ export default function LoginPage() {
         throw new Error("Unexpected server response format");
       }
     } catch (error: any) {
+      console.error("Login error:", error);
       setError(error.message || "An error occurred. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Handle password change
   const handlePasswordChange = async () => {
     if (!apiBaseUrl || !session) {
       setError("Unable to change password.");
@@ -478,12 +475,6 @@ export default function LoginPage() {
             setShowPasswordChange(false);
             setMfaSecretCode(mfaData.secretCode);
             
-            // Check if we received QR code from backend
-            if (mfaData.qrCodeImage) {
-              setQrCodeUrl(mfaData.qrCodeImage);
-              logApiCall("QR Code Setup", "Using server-provided QR code");
-            }
-            
             // Store the access token for later use in MFA verification
             localStorage.setItem("temp_access_token", responseData.access_token);
             setShowMFASetup(true);
@@ -528,7 +519,6 @@ export default function LoginPage() {
     }
   };
 
-  // Updated - MFA setup with improved handling and debugging
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -577,11 +567,11 @@ export default function LoginPage() {
         };
         logApiCall("MFA Setup Verification", `Using session flow with code: ${setupMfaCode}`);
       }
+
+      // Log request details
+      console.log("MFA Setup request:", { endpoint, accessToken: accessToken ? "present" : "missing", code: setupMfaCode });
       
-      // Log before sending the request
-      logApiCall("MFA Setup Request", `Sending request to ${endpoint} with ${accessToken ? 'token' : 'session'}`);
-      
-      const response = await fetchWithRetry(endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -589,9 +579,11 @@ export default function LoginPage() {
           "Origin": window.location.origin
         },
         body: JSON.stringify(requestBody),
-        mode: "cors",
         credentials: "include",
-      }, 1);
+      });
+      
+      // Log response status
+      console.log("MFA Setup response status:", response.status);
       
       // Try to parse the response
       let responseData;
@@ -606,29 +598,8 @@ export default function LoginPage() {
       if (!response.ok) {
         // Check for specific error types from backend
         if (response.status === 400 && responseData.detail) {
-          logApiCall("MFA Setup Verification Error", responseData.detail);
-          
-          // Check if it's a code mismatch error
-          if (responseData.detail.includes("code is incorrect") || 
-              responseData.detail.includes("CodeMismatchException")) {
-            
-            // If this is the second attempt, suggest some troubleshooting steps
-            if (mfaSetupAttempts >= 2) {
-              throw new Error(`${responseData.detail} Please ensure:
-              1. Your device's time is correct and synced
-              2. You're using the latest code from your authenticator app
-              3. You've entered the secret key correctly`);
-            } else {
-              throw new Error(responseData.detail);
-            }
-          } else {
-            throw new Error(responseData.detail);
-          }
-        } else if (response.status === 500) {
-          logApiCall("MFA Setup Verification Server Error", responseData.detail || "Server error");
-          throw new Error("Server error while verifying code. Please try again with a new code.");
+          throw new Error(responseData.detail);
         } else {
-          logApiCall("MFA Setup Verification Error", responseData.detail || `Failed to verify MFA setup (${response.status})`);
           throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
         }
       }
@@ -670,7 +641,6 @@ export default function LoginPage() {
     }
   };
 
-  // Handle MFA verification
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -774,13 +744,6 @@ export default function LoginPage() {
       if (mfaResponse.ok && mfaData.secretCode) {
         // Update the secret code and clear the input
         setMfaSecretCode(mfaData.secretCode);
-        
-        // Check if we received QR code from backend
-        if (mfaData.qrCodeImage) {
-          setQrCodeUrl(mfaData.qrCodeImage);
-          logApiCall("QR Code Regenerated", "Using new server-provided QR code");
-        }
-        
         setSetupMfaCode("");
         setMfaSetupAttempts(0);
         return;
@@ -961,7 +924,7 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Updated MFA Setup Dialog with better QR code and secret key display */}
+      {/* MFA Setup Dialog - Simplified version that always shows QR code and secret */}
       <Dialog open={showMFASetup} onOpenChange={(open) => open && setShowMFASetup(open)}>
         <DialogContent>
           <DialogHeader>
@@ -981,46 +944,41 @@ export default function LoginPage() {
               </AlertDescription>
             </Alert>
             
-            {/* QR Code Display - Better styling and handling */}
-            <div className="flex flex-col items-center justify-center space-y-4">
-              {qrCodeUrl ? (
+            {/* QR Code Display - Always show when secret code is available */}
+            {mfaSecretCode && (
+              <div className="flex flex-col items-center justify-center space-y-4">
                 <div className="text-center">
                   <Label className="mb-2 block">Scan QR Code</Label>
                   <div className="bg-white p-4 rounded-md inline-block">
-                    <img 
-                      src={qrCodeUrl} 
-                      alt="QR Code for MFA setup" 
-                      className="w-48 h-48"
-                    />
+                    {qrCodeUrl ? (
+                      <img 
+                        src={qrCodeUrl} 
+                        alt="QR Code for MFA setup" 
+                        className="w-48 h-48"
+                      />
+                    ) : (
+                      <div className="w-48 h-48 flex items-center justify-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                      </div>
+                    )}
                   </div>
                 </div>
-              ) : (
-                mfaSecretCode && (
-                  <div className="text-center">
-                    <Label className="mb-2 block">QR Code</Label>
-                    <div className="w-48 h-48 flex items-center justify-center bg-gray-100 rounded-md">
-                      <span className="text-sm text-gray-500">Loading QR code...</span>
-                    </div>
-                  </div>
-                )
-              )}
-              
-              {/* Secret Key Display */}
-              {mfaSecretCode && (
-                <div className="w-full text-center">
+                
+                {/* Secret Key Display - Always show when available */}
+                <div className="w-full text-center mt-2">
                   <Label className="mb-2 block">Secret Key</Label>
-                  <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded-md font-mono text-center break-all">
+                  <div className="p-3 bg-muted rounded-md font-mono text-center break-all">
                     {mfaSecretCode}
                   </div>
                   <p className="text-xs text-muted-foreground mt-2">
                     Enter this code manually if you cannot scan the QR code
                   </p>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
             
             {/* Code Input */}
-            <div className="space-y-2">
+            <div className="space-y-2 mt-2">
               <Label htmlFor="setup-mfa-code">Authentication Code</Label>
               <Input
                 id="setup-mfa-code"

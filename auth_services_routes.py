@@ -27,16 +27,21 @@ logger = logging.getLogger(__name__)
 debug_logger = logging.getLogger('mfa_debug')
 debug_logger.setLevel(logging.DEBUG)
 
-# Create a file handler for detailed logs
-file_handler = logging.FileHandler('/tmp/mfa_debug.log', mode='a')
-file_handler.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(formatter)
-debug_logger.addHandler(file_handler)
+# Create a file handler for detailed logs if possible
+try:
+    file_handler = logging.FileHandler('/tmp/mfa_debug.log', mode='a')
+    file_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    debug_logger.addHandler(file_handler)
+except Exception as e:
+    # Fallback to console logging if file logging fails
+    print(f"Could not set up file logging: {e}")
 
 # Add console handler for immediate feedback
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.DEBUG)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 console_handler.setFormatter(formatter)
 debug_logger.addHandler(console_handler)
 
@@ -253,7 +258,7 @@ def respond_to_challenge():
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Challenge response failed: {str(e)}"}), 500
 
-# IMPROVED MFA Setup route - Returns QR code image and secret
+# SIMPLIFIED MFA Setup route
 @auth_services_routes.route("/setup-mfa", methods=["OPTIONS", "POST"])
 def setup_mfa_endpoint():
     if request.method == "OPTIONS":
@@ -267,14 +272,12 @@ def setup_mfa_endpoint():
 
     try:
         logger.info("Setting up MFA")
-        debug_logger.info(f"MFA setup requested with token starting with: {access_token[:10]}...")
+        debug_logger.info(f"MFA setup requested with token")
         
         # Call associate_software_token to get secret code
-        start_time = time.time()
         associate_response = cognito_client.associate_software_token(
             AccessToken=access_token
         )
-        debug_logger.info(f"associate_software_token call completed in {time.time() - start_time:.2f} seconds")
         
         secret_code = associate_response.get("SecretCode")
         
@@ -282,51 +285,25 @@ def setup_mfa_endpoint():
             logger.error("No secret code received from Cognito")
             return jsonify({"detail": "Failed to generate MFA secret code"}), 500
         
+        logger.info("Received secret code")
         debug_logger.info(f"Received secret code: {secret_code}")
         
-        # Get user details
+        # Get username from token
         try:
             user_info = cognito_client.get_user(AccessToken=access_token)
             username = user_info.get("Username", "user")
-            logger.info(f"Retrieved username: {username} for MFA setup")
+            logger.info(f"Retrieved username: {username}")
         except Exception as e:
             logger.warning(f"Could not get username: {e}")
             username = "user"
         
-        # Generate QR code
-        issuer = "EncryptGate"
-        otpauth_url = pyotp.totp.TOTP(secret_code).provisioning_uri(name=username, issuer_name=issuer)
-        
-        debug_logger.info(f"Generated TOTP URL: {otpauth_url}")
-        
-        # Create QR code image
-        qr = qrcode.make(otpauth_url)
-        buffer = BytesIO()
-        qr.save(buffer, format="PNG")
-        buffer.seek(0)
-        qr_code_base64 = b64encode(buffer.getvalue()).decode()
-        
-        debug_logger.info("Successfully generated QR code")
-        
-        # Test TOTP code to validate the secret works
-        try:
-            totp = pyotp.TOTP(secret_code)
-            test_code = totp.now()
-            debug_logger.info(f"Current valid code would be: {test_code}")
-            debug_logger.info(f"Time window info: current={int(time.time())}s, position={int(time.time()) % 30}s")
-        except Exception as totp_err:
-            debug_logger.warning(f"Error testing TOTP code: {totp_err}")
-        
-        # Create response with both secret code and QR code
-        response_data = {
+        # Just return the secret code - frontend will handle QR code generation
+        logger.info("Returning MFA setup data")
+        return jsonify({
             "secretCode": secret_code,
-            "qrCodeImage": f"data:image/png;base64,{qr_code_base64}",
             "message": "MFA setup initiated successfully",
             "username": username
-        }
-        
-        logger.info("Returning full MFA setup data")
-        return jsonify(response_data)
+        })
         
     except Exception as e:
         logger.error(f"MFA setup failed: {e}")
@@ -349,7 +326,6 @@ def verify_mfa():
 
     try:
         logger.info(f"Verifying MFA for user: {username} with code: {code}")
-        debug_logger.info(f"Verifying MFA with session: {session[:10]}... code: {code}")
         
         # Generate secret hash
         secret_hash = generate_client_secret_hash(username)
@@ -410,7 +386,6 @@ def verify_mfa_setup():
 
     try:
         logger.info(f"Verifying MFA setup with code: {code}")
-        debug_logger.info(f"Verifying MFA setup with token: {access_token[:10]}... code: {code}")
         
         # Log timing information for debugging
         current_time = int(time.time())
@@ -469,48 +444,13 @@ def verify_mfa_setup():
 # Health check endpoint
 @auth_services_routes.route("/health", methods=["GET"])
 def health_check():
-    # Check AWS credentials availability
-    aws_credentials = {
-        "region": AWS_REGION,
-        "client_id": bool(CLIENT_ID),
-        "client_secret": bool(CLIENT_SECRET),
-        "user_pool_id": bool(USER_POOL_ID)
-    }
-    
-    # Check Cognito connectivity
-    cognito_status = "unknown"
-    try:
-        # Minimal API call to check connectivity
-        cognito_client.list_user_pools(MaxResults=1)
-        cognito_status = "connected"
-    except Exception as e:
-        cognito_status = f"error: {str(e)}"
-    
     return jsonify({
         "status": "success", 
         "message": "Authentication service is running",
         "environment": os.environ.get("FLASK_ENV", "production"),
-        "aws_credentials": aws_credentials,
-        "cognito_status": cognito_status,
-        "timestamp": datetime.utcnow().isoformat()
-    }), 200
-
-# Debugging endpoint for MFA
-@auth_services_routes.route("/debug-mfa", methods=["GET"])
-def debug_mfa():
-    # Get current TOTP window information
-    current_time = int(time.time())
-    window = current_time // 30
-    position = current_time % 30
-    
-    return jsonify({
-        "server_time": current_time,
-        "formatted_time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
-        "totp_window": window,
-        "window_position": f"{position}/30 seconds",
-        "seconds_to_next_window": 30 - position,
-        "cognito_client_configured": bool(cognito_client),
-        "aws_region": AWS_REGION,
+        "region": AWS_REGION,
         "client_id_configured": bool(CLIENT_ID),
-        "client_secret_configured": bool(CLIENT_SECRET)
+        "client_secret_configured": bool(CLIENT_SECRET),
+        "user_pool_id_configured": bool(USER_POOL_ID),
+        "timestamp": datetime.utcnow().isoformat()
     }), 200
