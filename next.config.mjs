@@ -24,21 +24,11 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net',
   },
-  async rewrites() {
-    return [
-      // Forward API requests to backend
-      {
-        source: '/api/:path*',
-        destination: 'https://api.console-encryptgate.net/api/:path*',
-      },
-    ];
-  },
-  
   async redirects() {
     return [
       {
         source: '/',
-        destination: '/login',
+        destination: '/admin/dashboard',
         permanent: false,
       },
     ];

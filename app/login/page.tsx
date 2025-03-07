@@ -82,17 +82,13 @@ export default function LoginPage() {
     try {
       console.log("Attempting to login with:", email);
       
-      // Call authentication API - making direct call to backend
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net';
-      const response = await fetch(`${apiBaseUrl}/api/auth/authenticate`, {
+      // Use Next.js API route as proxy to avoid CORS issues
+      const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Origin": window.location.origin
         },
         body: JSON.stringify({ username: email, password }),
-        credentials: "include"
       });
       
       console.log("Login response status:", response.status);
@@ -157,23 +153,19 @@ export default function LoginPage() {
     setError("");
     
     try {
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net';
-      const response = await fetch(`${apiBaseUrl}/api/auth/respond-to-challenge`, {
+      const response = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Origin": window.location.origin
         },
         body: JSON.stringify({
           username: email,
-          session: session,
+          session,
           challengeName: "NEW_PASSWORD_REQUIRED",
           challengeResponses: {
             "NEW_PASSWORD": newPassword
           }
         }),
-        credentials: "include"
       });
       
       const data: AuthResponse = await response.json();
@@ -226,20 +218,16 @@ export default function LoginPage() {
     setError("");
     
     try {
-      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net';
-      const response = await fetch(`${apiBaseUrl}/api/auth/verify-mfa`, {
+      const response = await fetch("/api/auth/verify-mfa", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Origin": window.location.origin
         },
         body: JSON.stringify({
           username: email,
-          session: session,
+          session,
           code: mfaCode
         }),
-        credentials: "include"
       });
       
       const data: AuthResponse = await response.json();
@@ -260,6 +248,46 @@ export default function LoginPage() {
       setError(error.message || "Failed to verify MFA code");
       // Clear the code field for retry
       setMfaCode("");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  // Handle MFA Setup (if needed in the future)
+  const handleMFASetup = async () => {
+    if (!setupMfaCode) {
+      setError("Verification code is required");
+      return;
+    }
+    
+    setIsLoading(true);
+    setError("");
+    
+    try {
+      const response = await fetch("/api/auth/verify-mfa-setup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          access_token: localStorage.getItem("access_token"),
+          code: setupMfaCode
+        }),
+      });
+      
+      const data: AuthResponse = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.detail || "Failed to verify MFA setup");
+      }
+      
+      // MFA setup verified successfully
+      setShowMFASetup(false);
+      redirectToDashboard();
+    } catch (error: any) {
+      setError(error.message || "Failed to verify MFA setup");
+      // Clear the code field for retry
+      setSetupMfaCode("");
     } finally {
       setIsLoading(false);
     }
