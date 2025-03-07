@@ -21,9 +21,15 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
-  env: {
-    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net',
+  async rewrites() {
+    return [
+      {
+        source: '/api/auth/:path*',
+        destination: 'https://backend.console-encryptgate.net/api/auth/:path*',
+      },
+    ];
   },
+  
   async redirects() {
     return [
       {
