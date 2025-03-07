@@ -45,23 +45,29 @@ def generate_client_secret_hash(username: str) -> str:
     hash_result = base64.b64encode(hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()).decode()
     return hash_result
 
-# Handle CORS preflight requests
+# Enhanced CORS preflight handler
 def handle_cors_preflight():
     response = make_response()
     origin = request.headers.get("Origin", "")
     allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
     allowed_origins = [o.strip() for o in allowed_origins]
     
-    if origin in allowed_origins or "*" in allowed_origins:
+    # Log the preflight request for debugging
+    logger.info(f"CORS preflight request from origin: {origin}")
+    
+    # Always accept preflight requests with 200 status
+    if origin in allowed_origins:
         response.headers.add("Access-Control-Allow-Origin", origin)
     else:
-        response.headers.add("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        # Default to first allowed origin or wildcard
+        response.headers.add("Access-Control-Allow-Origin", allowed_origins[0] if allowed_origins else "*")
     
     response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
     response.headers.add("Access-Control-Allow-Credentials", "true")
     response.headers.add("Access-Control-Max-Age", "3600")
-    return response, 204
+    logger.info("Returning preflight response with 200 status")
+    return response, 200
 
 # Authentication route - KEEP SAME FLOW FROM WORKING VERSION
 @auth_services_routes.route("/authenticate", methods=["OPTIONS", "POST"])
@@ -117,7 +123,7 @@ def authenticate_user():
         logger.error(traceback.format_exc())
         return jsonify({"detail": "Authentication failed"}), 500
 
-# Password change route
+# Password change route with enhanced CORS handling
 @auth_services_routes.route("/change-password", methods=["OPTIONS", "POST"])
 def change_password():
     if request.method == "OPTIONS":
@@ -164,7 +170,7 @@ def change_password():
         logger.error(traceback.format_exc())
         return jsonify({"detail": "Password change failed"}), 500
 
-# MFA Setup route - Generate QR code and secret
+# MFA Setup route with enhanced CORS handling
 @auth_services_routes.route("/setup-mfa", methods=["OPTIONS", "POST"])
 def setup_mfa_endpoint():
     if request.method == "OPTIONS":
@@ -216,6 +222,69 @@ def setup_mfa_endpoint():
         logger.error(f"MFA setup failed: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": "Failed to setup MFA"}), 500
+
+# Auth challenge response handler with enhanced CORS
+@auth_services_routes.route("/respond-to-challenge", methods=["OPTIONS", "POST"])
+def respond_to_challenge():
+    # Make sure OPTIONS requests always get a 200 response with CORS headers
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+
+    data = request.json
+    if not data:
+        return jsonify({"detail": "No data provided"}), 400
+        
+    session = data.get('session')
+    challenge_name = data.get('challengeName')
+    username = data.get('username')
+    challenge_responses = data.get('challengeResponses', {})
+    
+    if not (username and session and challenge_name):
+        return jsonify({"detail": "Missing required parameters"}), 400
+    
+    try:
+        logger.info(f"Responding to {challenge_name} challenge for {username}")
+        
+        # Add username and secret hash to challenge responses
+        full_responses = {
+            "USERNAME": username,
+            "SECRET_HASH": generate_client_secret_hash(username)
+        }
+        
+        # Merge in any additional responses
+        for key, value in challenge_responses.items():
+            full_responses[key] = value
+        
+        response = cognito_client.respond_to_auth_challenge(
+            ClientId=CLIENT_ID,
+            ChallengeName=challenge_name,
+            Session=session,
+            ChallengeResponses=full_responses
+        )
+        
+        # Check if we got another challenge or auth results
+        if response.get("ChallengeName"):
+            next_challenge = response.get("ChallengeName")
+            logger.info(f"Received next challenge: {next_challenge}")
+            return jsonify({
+                "ChallengeName": next_challenge,
+                "session": response.get("Session"),
+                "mfa_required": next_challenge == "SOFTWARE_TOKEN_MFA"
+            })
+        
+        # Otherwise, return auth result
+        auth_result = response.get("AuthenticationResult", {})
+        return jsonify({
+            "message": f"{challenge_name} completed successfully",
+            "access_token": auth_result.get("AccessToken"),
+            "id_token": auth_result.get("IdToken"),
+            "refresh_token": auth_result.get("RefreshToken")
+        })
+        
+    except Exception as e:
+        logger.error(f"Challenge response failed: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({"detail": f"Challenge response failed: {str(e)}"}), 500
 
 # MFA verification - THIS IS THE CRITICAL PART THAT NEEDS TO BE EXACT
 @auth_services_routes.route("/verify-mfa", methods=["OPTIONS", "POST"])
@@ -271,7 +340,7 @@ def verify_mfa():
         logger.error(traceback.format_exc())
         return jsonify({"detail": "MFA verification failed"}), 401
 
-# MFA Setup verification
+# MFA Setup verification with enhanced CORS
 @auth_services_routes.route("/verify-mfa-setup", methods=["OPTIONS", "POST"])
 def verify_mfa_setup():
     if request.method == "OPTIONS":

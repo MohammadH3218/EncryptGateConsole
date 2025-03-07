@@ -2,7 +2,7 @@ import logging
 import os
 import sys
 import traceback
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -34,11 +34,25 @@ allowed_origins = [origin.strip() for origin in cors_origins.split(",")]
 logger.info(f"CORS Origins: {allowed_origins}")
 
 # Apply CORS to all routes with expanded configuration
+# We're using more permissive CORS settings here to ensure preflight requests work
 CORS(app, 
-     resources={r"/*": {"origins": allowed_origins}},
+     resources={r"/*": {"origins": "*"}},  # Allow all origins for preflight
      supports_credentials=True,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
+
+# Global before_request handler to catch OPTIONS requests
+@app.before_request
+def handle_options_requests():
+    if request.method == 'OPTIONS':
+        logger.info(f"Handling OPTIONS request for: {request.path} from origin: {request.headers.get('Origin')}")
+        response = make_response()
+        response.headers.add('Access-Control-Allow-Origin', request.headers.get('Origin', '*'))
+        response.headers.add('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+        response.headers.add('Access-Control-Allow-Headers', 'Authorization, Content-Type, Accept, Origin')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        response.headers.add('Access-Control-Max-Age', '3600')  # Cache preflight response for 1 hour
+        return response, 200
 
 # Ensure CORS headers are added to all responses
 @app.after_request
@@ -46,10 +60,14 @@ def add_cors_headers(response):
     origin = request.headers.get("Origin", "")
     logger.debug(f"Processing response for origin: {origin}")
     
-    if origin in allowed_origins or "*" in allowed_origins:
+    # Always allow the specific origins
+    if origin in allowed_origins:
         response.headers.set("Access-Control-Allow-Origin", origin)
+    elif "*" in allowed_origins:
+        response.headers.set("Access-Control-Allow-Origin", "*")
     else:
-        response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        # Default to the first allowed origin if none match
+        response.headers.set("Access-Control-Allow-Origin", allowed_origins[0] if allowed_origins else "*")
     
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
@@ -105,30 +123,9 @@ def debug_route():
     }
     return jsonify(debug_info), 200
 
-# === Helpers for CORS preflight requests ===
-def handle_preflight_request():
-    response = jsonify({"status": "success"})
-    origin = request.headers.get("Origin", "")
-    logger.info(f"Handling CORS preflight for origin: {origin}")
-    
-    if origin in allowed_origins or "*" in allowed_origins:
-        response.headers.set("Access-Control-Allow-Origin", origin)
-    else:
-        response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-        
-    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-    response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
-    response.headers.set("Access-Control-Allow-Credentials", "true")
-    response.headers.set("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
-    
-    return response, 204
-
 # === CORS status check route to help diagnose issues ===
 @app.route("/api/cors-check", methods=["GET", "OPTIONS"])
 def cors_check():
-    if request.method == "OPTIONS":
-        return handle_preflight_request()
-        
     origin = request.headers.get("Origin", "Unknown")
     is_allowed = origin in allowed_origins or "*" in allowed_origins
     
