@@ -24,6 +24,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Log environment information
+def log_environment_info():
+    logger.info("=== Environment Information ===")
+    logger.info(f"Python Version: {sys.version}")
+    logger.info(f"Current Directory: {os.getcwd()}")
+    logger.info(f"Environment: {os.environ.get('FLASK_ENV', 'production')}")
+    logger.info(f"API URL: {os.environ.get('API_URL', 'not set')}")
+    logger.info(f"CORS Origins: {os.environ.get('CORS_ORIGINS', 'not set')}")
+    
+    # Log AWS configuration without sensitive values
+    logger.info("AWS Configuration:")
+    logger.info(f"  Region: {os.environ.get('REGION', 'us-east-1')}")
+    logger.info(f"  Cognito UserPool ID configured: {'Yes' if os.environ.get('COGNITO_USERPOOL_ID') else 'No'}")
+    logger.info(f"  Cognito Client ID configured: {'Yes' if os.environ.get('COGNITO_CLIENT_ID') else 'No'}")
+    logger.info(f"  Cognito Client Secret configured: {'Yes' if os.environ.get('COGNITO_CLIENT_SECRET') else 'No'}")
+
+log_environment_info()
+
 # === API URL Configuration ===
 API_URL = os.getenv("API_URL", "http://localhost:8080")
 logger.info(f"API URL: {API_URL}")
@@ -138,6 +156,21 @@ def cors_check():
     })
     
     return response, 200
+
+# === Test API endpoint for checking authentication flow ===
+@app.route("/api/auth-check", methods=["GET"])
+def auth_check():
+    # Check if authorization header is present
+    auth_header = request.headers.get("Authorization")
+    
+    response_data = {
+        "status": "success",
+        "authenticated": auth_header is not None,
+        "auth_header_present": auth_header is not None,
+        "endpoint": "/api/auth-check"
+    }
+    
+    return jsonify(response_data), 200
 
 # === Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ===
 if __name__ == "__main__":

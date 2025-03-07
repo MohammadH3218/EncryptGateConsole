@@ -3,7 +3,7 @@ import logging
 import os
 import traceback
 
-# Import from auth_services_routes directly
+# Import directly from auth_services_routes for consistency
 from auth_services_routes import (
     authenticate_user,
     verify_mfa,
