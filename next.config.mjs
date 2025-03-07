@@ -21,64 +21,25 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
-  // Environment variables that will be available in the browser
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net',
   },
   async rewrites() {
     return [
-      // Auth API routes - proxy to backend
+      // Forward API requests to backend
       {
-        source: '/api/auth/:path*',
-        destination: 'https://api.console-encryptgate.net/api/auth/:path*',
-      },
-      // User API routes - proxy to backend
-      {
-        source: '/api/user/:path*',
-        destination: 'https://api.console-encryptgate.net/api/user/:path*',
+        source: '/api/:path*',
+        destination: 'https://api.console-encryptgate.net/api/:path*',
       },
     ];
   },
   
   async redirects() {
     return [
-      // Redirect root to dashboard
       {
         source: '/',
         destination: '/login',
         permanent: false,
-      },
-      // Redirect authenticated users based on role
-      {
-        source: '/dashboard',
-        destination: '/admin/dashboard',
-        permanent: false,
-      },
-    ];
-  },
-  // Security headers
-  async headers() {
-    return [
-      {
-        source: '/(.*)',
-        headers: [
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-          {
-            key: 'X-XSS-Protection',
-            value: '1; mode=block',
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'strict-origin-when-cross-origin',
-          },
-        ],
       },
     ];
   },

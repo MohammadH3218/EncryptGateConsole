@@ -33,7 +33,7 @@ interface AuthResponse {
   access_token?: string;
   refresh_token?: string;
   email?: string;
-  error?: string;
+  detail?: string;
   ChallengeName?: string;
   mfa_required?: boolean;
   session?: string;
@@ -80,20 +80,30 @@ export default function LoginPage() {
     setError("");
     
     try {
-      // Call authentication API
-      const response = await fetch("/api/auth/login", {
+      console.log("Attempting to login with:", email);
+      
+      // Call authentication API - making direct call to backend
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net';
+      const response = await fetch(`${apiBaseUrl}/api/auth/authenticate`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
         },
         body: JSON.stringify({ username: email, password }),
+        credentials: "include"
       });
+      
+      console.log("Login response status:", response.status);
       
       const data: AuthResponse = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.error || "Failed to authenticate");
+        throw new Error(data.detail || `Authentication failed with status ${response.status}`);
       }
+      
+      console.log("Login response data keys:", Object.keys(data));
       
       // Handle different authentication flows
       if (data.ChallengeName === "NEW_PASSWORD_REQUIRED") {
@@ -105,41 +115,18 @@ export default function LoginPage() {
         setSession(data.session || "");
         setShowMFA(true);
       } else if (data.access_token) {
-        // Successfully authenticated, check if MFA setup is needed
+        // Successfully authenticated
         localStorage.setItem("access_token", data.access_token);
         localStorage.setItem("id_token", data.id_token || "");
         localStorage.setItem("refresh_token", data.refresh_token || "");
         
-        // Check if MFA setup is needed
-        try {
-          const mfaResponse = await fetch("/api/auth/setup-mfa", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ access_token: data.access_token }),
-          });
-          
-          const mfaData: AuthResponse = await mfaResponse.json();
-          
-          if (mfaResponse.ok && mfaData.secretCode) {
-            // MFA setup is needed
-            setMfaSecretCode(mfaData.secretCode);
-            generateQRCode(mfaData.secretCode);
-            setShowMFASetup(true);
-          } else {
-            // MFA is already set up or not required
-            redirectToDashboard();
-          }
-        } catch (mfaError) {
-          // If MFA check fails, continue with login
-          console.error("MFA setup check failed:", mfaError);
-          redirectToDashboard();
-        }
+        // Redirect to dashboard
+        redirectToDashboard();
       } else {
         throw new Error("Unexpected response format");
       }
     } catch (error: any) {
+      console.error("Login error:", error);
       setError(error.message || "Authentication failed");
     } finally {
       setIsLoading(false);
@@ -170,22 +157,29 @@ export default function LoginPage() {
     setError("");
     
     try {
-      const response = await fetch("/api/auth/change-password", {
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net';
+      const response = await fetch(`${apiBaseUrl}/api/auth/respond-to-challenge`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
         },
         body: JSON.stringify({
           username: email,
-          session,
-          new_password: newPassword
+          session: session,
+          challengeName: "NEW_PASSWORD_REQUIRED",
+          challengeResponses: {
+            "NEW_PASSWORD": newPassword
+          }
         }),
+        credentials: "include"
       });
       
       const data: AuthResponse = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.error || "Failed to change password");
+        throw new Error(data.detail || "Failed to change password");
       }
       
       // Password changed successfully
@@ -199,29 +193,11 @@ export default function LoginPage() {
         setShowPasswordChange(false);
         
         // Check if MFA setup is needed
-        try {
-          const mfaResponse = await fetch("/api/auth/setup-mfa", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ access_token: data.access_token }),
-          });
-          
-          const mfaData: AuthResponse = await mfaResponse.json();
-          
-          if (mfaResponse.ok && mfaData.secretCode) {
-            // MFA setup is needed
-            setMfaSecretCode(mfaData.secretCode);
-            generateQRCode(mfaData.secretCode);
-            setShowMFASetup(true);
-          } else {
-            // MFA is already set up or not required
-            redirectToDashboard();
-          }
-        } catch (mfaError) {
-          // If MFA check fails, continue with login
-          console.error("MFA setup check failed:", mfaError);
+        if (data.mfa_required) {
+          setSession(data.session || "");
+          setShowMFA(true);
+        } else {
+          // Redirect to dashboard
           redirectToDashboard();
         }
       } else if (data.ChallengeName === "SOFTWARE_TOKEN_MFA") {
@@ -250,22 +226,26 @@ export default function LoginPage() {
     setError("");
     
     try {
-      const response = await fetch("/api/auth/verify-mfa", {
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'https://api.console-encryptgate.net';
+      const response = await fetch(`${apiBaseUrl}/api/auth/verify-mfa`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Origin": window.location.origin
         },
         body: JSON.stringify({
           username: email,
-          session,
+          session: session,
           code: mfaCode
         }),
+        credentials: "include"
       });
       
       const data: AuthResponse = await response.json();
       
       if (!response.ok) {
-        throw new Error(data.error || "Failed to verify MFA code");
+        throw new Error(data.detail || "Failed to verify MFA code");
       }
       
       // MFA verified successfully
@@ -280,52 +260,6 @@ export default function LoginPage() {
       setError(error.message || "Failed to verify MFA code");
       // Clear the code field for retry
       setMfaCode("");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  // Handle MFA setup verification
-  const handleMFASetup = async () => {
-    if (!setupMfaCode) {
-      setError("Verification code is required");
-      return;
-    }
-    
-    setIsLoading(true);
-    setError("");
-    
-    try {
-      const accessToken = localStorage.getItem("access_token");
-      
-      if (!accessToken) {
-        throw new Error("Authentication session expired");
-      }
-      
-      const response = await fetch("/api/auth/verify-mfa-setup", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          access_token: accessToken,
-          code: setupMfaCode
-        }),
-      });
-      
-      const data: AuthResponse = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to verify MFA setup");
-      }
-      
-      // MFA setup verified successfully
-      setShowMFASetup(false);
-      redirectToDashboard();
-    } catch (error: any) {
-      setError(error.message || "Failed to verify MFA setup");
-      // Clear the code field for retry
-      setSetupMfaCode("");
     } finally {
       setIsLoading(false);
     }
@@ -518,87 +452,6 @@ export default function LoginPage() {
                 </>
               ) : (
                 "Verify"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* MFA Setup Dialog */}
-      <Dialog open={showMFASetup} onOpenChange={setShowMFASetup}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
-            <DialogDescription>
-              For additional security, please set up two-factor authentication using an authenticator app.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <Alert>
-              <AlertDescription>
-                1. Install an authenticator app like Google Authenticator or Authy on your mobile device.
-                <br />
-                2. Scan the QR code or enter the secret key in your app.
-                <br />
-                3. Enter the 6-digit code from your authenticator app below.
-              </AlertDescription>
-            </Alert>
-            
-            {qrCodeUrl && (
-              <div className="flex flex-col items-center justify-center space-y-2">
-                <Label>Scan QR Code</Label>
-                <div className="bg-white p-2 rounded-md">
-                  <img 
-                    src={qrCodeUrl} 
-                    alt="QR Code for MFA setup" 
-                    className="w-48 h-48 mx-auto"
-                  />
-                </div>
-              </div>
-            )}
-            
-            {mfaSecretCode && (
-              <div className="space-y-2 text-center">
-                <Label>Secret Key</Label>
-                <div className="p-3 bg-muted rounded-md font-mono text-center break-all">
-                  {mfaSecretCode}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Enter this code manually if you cannot scan the QR code
-                </p>
-              </div>
-            )}
-            
-            <div className="space-y-2">
-              <Label htmlFor="setup-mfa-code">Authentication Code</Label>
-              <Input
-                id="setup-mfa-code"
-                placeholder="000000"
-                value={setupMfaCode}
-                onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
-                maxLength={6}
-                className="text-center text-2xl tracking-widest"
-              />
-            </div>
-            {error && (
-              <Alert variant="destructive">
-                <AlertDescription className="text-sm">{error}</AlertDescription>
-              </Alert>
-            )}
-          </div>
-          <DialogFooter>
-            <Button 
-              onClick={handleMFASetup} 
-              disabled={setupMfaCode.length !== 6 || isLoading}
-              className="w-full"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Verifying...
-                </>
-              ) : (
-                "Verify & Complete Setup"
               )}
             </Button>
           </DialogFooter>
