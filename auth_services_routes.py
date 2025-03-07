@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 debug_logger = logging.getLogger('mfa_debug')
 debug_logger.setLevel(logging.DEBUG)
 
-# Create a file handler for detailed logs if possible
 try:
     file_handler = logging.FileHandler('/tmp/mfa_debug.log', mode='a')
     file_handler.setLevel(logging.DEBUG)
@@ -35,10 +34,8 @@ try:
     file_handler.setFormatter(formatter)
     debug_logger.addHandler(file_handler)
 except Exception as e:
-    # Fallback to console logging if file logging fails
     print(f"Could not set up file logging: {e}")
 
-# Add console handler for immediate feedback
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -62,35 +59,53 @@ except Exception as e:
 # Create blueprint
 auth_services_routes = Blueprint('auth_services_routes', __name__)
 
-# Generate Client Secret Hash - THIS IS THE CRITICAL FUNCTION FROM THE WORKING VERSION
+# Generate Client Secret Hash - CRITICAL FUNCTION FROM THE WORKING VERSION
 def generate_client_secret_hash(username: str) -> str:
     message = username + CLIENT_ID
     secret = CLIENT_SECRET.encode("utf-8")
     hash_result = base64.b64encode(hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()).decode()
     return hash_result
 
-# Enhanced CORS preflight handler - ALWAYS RETURNS 200 OK FOR OPTIONS
+# --- NEW: Generate QR Code Function ---
+def generate_qr_code(secret_code, username, issuer="EncryptGate"):
+    """
+    Generate a base64-encoded PNG QR code for MFA setup.
+    """
+    try:
+        totp = pyotp.TOTP(secret_code)
+        provisioning_uri = totp.provisioning_uri(name=username, issuer_name=issuer)
+        qr = qrcode.QRCode(
+            version=1,
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(provisioning_uri)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buffered = BytesIO()
+        img.save(buffered)
+        img_str = b64encode(buffered.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
+    except Exception as e:
+        logger.error(f"Error generating QR code: {e}")
+        return None
+
+# Enhanced CORS preflight handler
 def handle_cors_preflight():
     response = make_response()
     origin = request.headers.get("Origin", "")
     allowed_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net").split(",")
     allowed_origins = [o.strip() for o in allowed_origins]
-    
-    # Log the preflight request for debugging
     logger.info(f"CORS preflight request from origin: {origin}")
-    
-    # Always accept preflight requests with 200 status
     if origin in allowed_origins or "*" in allowed_origins:
         response.headers.add("Access-Control-Allow-Origin", origin)
     else:
-        # Default to first allowed origin or wildcard
         response.headers.add("Access-Control-Allow-Origin", allowed_origins[0] if allowed_origins else "*")
-    
     response.headers.add("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.add("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
     response.headers.add("Access-Control-Allow-Credentials", "true")
     response.headers.add("Access-Control-Max-Age", "3600")
-    
     logger.info("Returning preflight response with 200 status")
     return response, 200
 
@@ -99,17 +114,13 @@ def handle_cors_preflight():
 def authenticate_user():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-
     data = request.json
     username = data.get('username')
     password = data.get('password')
-
     if not username or not password:
         return jsonify({"detail": "Username and password are required"}), 400
-
     try:
         logger.info(f"Authenticating user: {username}")
-        
         response = cognito_client.initiate_auth(
             ClientId=CLIENT_ID,
             AuthFlow="USER_PASSWORD_AUTH",
@@ -119,19 +130,13 @@ def authenticate_user():
                 "SECRET_HASH": generate_client_secret_hash(username),
             },
         )
-
         challenge_name = response.get("ChallengeName")
         session = response.get("Session")
-        
         logger.info(f"Authentication response received with challenge: {challenge_name}")
-        
         if challenge_name == "NEW_PASSWORD_REQUIRED":
             return jsonify({"ChallengeName": challenge_name, "session": session})
-
         if challenge_name == "SOFTWARE_TOKEN_MFA":
             return jsonify({"mfa_required": True, "session": session})
-
-        # Return authentication result
         auth_result = response.get("AuthenticationResult", {})
         return jsonify({
             "access_token": auth_result.get("AccessToken"),
@@ -140,7 +145,6 @@ def authenticate_user():
             "token_type": auth_result.get("TokenType"),
             "expires_in": auth_result.get("ExpiresIn")
         })
-
     except cognito_client.exceptions.NotAuthorizedException:
         return jsonify({"detail": "Invalid username or password."}), 401
     except Exception as e:
@@ -148,23 +152,19 @@ def authenticate_user():
         logger.error(traceback.format_exc())
         return jsonify({"detail": "Authentication failed"}), 500
 
-# Password change route with enhanced CORS handling
+# Password change route with enhanced CORS
 @auth_services_routes.route("/change-password", methods=["OPTIONS", "POST"])
 def change_password():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-
     data = request.json
     session = data.get('session')
     new_password = data.get('new_password')
     username = data.get('username')
-
     if not session or not new_password:
         return jsonify({"detail": "Session and new password are required"}), 400
-
     try:
         logger.info(f"Changing password for user: {username}")
-        
         response = cognito_client.respond_to_auth_challenge(
             ClientId=CLIENT_ID,
             ChallengeName="NEW_PASSWORD_REQUIRED",
@@ -175,13 +175,10 @@ def change_password():
                 "SECRET_HASH": generate_client_secret_hash(username),
             },
         )
-
         if response.get("ChallengeName") == "MFA_SETUP":
             return jsonify({"message": "MFA setup required", "session": response["Session"]})
-
         if response.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
             return jsonify({"mfa_required": True, "session": response["Session"]})
-
         auth_result = response.get("AuthenticationResult", {})
         return jsonify({
             "message": "Password changed successfully",
@@ -189,7 +186,6 @@ def change_password():
             "id_token": auth_result.get("IdToken"),
             "refresh_token": auth_result.get("RefreshToken")
         })
-
     except Exception as e:
         logger.error(f"Password change failed: {e}")
         logger.error(traceback.format_exc())
@@ -198,43 +194,31 @@ def change_password():
 # Auth challenge response handler with enhanced CORS
 @auth_services_routes.route("/respond-to-challenge", methods=["OPTIONS", "POST"])
 def respond_to_challenge():
-    # Make sure OPTIONS requests always get a 200 response with CORS headers
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-
     data = request.json
     if not data:
         return jsonify({"detail": "No data provided"}), 400
-        
     session = data.get('session')
     challenge_name = data.get('challengeName')
     username = data.get('username')
     challenge_responses = data.get('challengeResponses', {})
-    
     if not (username and session and challenge_name):
         return jsonify({"detail": "Missing required parameters"}), 400
-    
     try:
         logger.info(f"Responding to {challenge_name} challenge for {username}")
-        
-        # Add username and secret hash to challenge responses
         full_responses = {
             "USERNAME": username,
             "SECRET_HASH": generate_client_secret_hash(username)
         }
-        
-        # Merge in any additional responses
         for key, value in challenge_responses.items():
             full_responses[key] = value
-        
         response = cognito_client.respond_to_auth_challenge(
             ClientId=CLIENT_ID,
             ChallengeName=challenge_name,
             Session=session,
             ChallengeResponses=full_responses
         )
-        
-        # Check if we got another challenge or auth results
         if response.get("ChallengeName"):
             next_challenge = response.get("ChallengeName")
             logger.info(f"Received next challenge: {next_challenge}")
@@ -243,8 +227,6 @@ def respond_to_challenge():
                 "session": response.get("Session"),
                 "mfa_required": next_challenge == "SOFTWARE_TOKEN_MFA"
             })
-        
-        # Otherwise, return auth result
         auth_result = response.get("AuthenticationResult", {})
         return jsonify({
             "message": f"{challenge_name} completed successfully",
@@ -252,43 +234,32 @@ def respond_to_challenge():
             "id_token": auth_result.get("IdToken"),
             "refresh_token": auth_result.get("RefreshToken")
         })
-        
     except Exception as e:
         logger.error(f"Challenge response failed: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Challenge response failed: {str(e)}"}), 500
 
-# SIMPLIFIED MFA Setup route
+# --- UPDATED MFA Setup route with QR Code generation ---
 @auth_services_routes.route("/setup-mfa", methods=["OPTIONS", "POST"])
 def setup_mfa_endpoint():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-
     data = request.json
     access_token = data.get('access_token')
-
     if not access_token:
         return jsonify({"detail": "Access token is required"}), 400
-
     try:
         logger.info("Setting up MFA")
         debug_logger.info(f"MFA setup requested with token")
-        
-        # Call associate_software_token to get secret code
         associate_response = cognito_client.associate_software_token(
             AccessToken=access_token
         )
-        
         secret_code = associate_response.get("SecretCode")
-        
         if not secret_code:
             logger.error("No secret code received from Cognito")
             return jsonify({"detail": "Failed to generate MFA secret code"}), 500
-        
         logger.info("Received secret code")
         debug_logger.info(f"Received secret code: {secret_code}")
-        
-        # Get username from token
         try:
             user_info = cognito_client.get_user(AccessToken=access_token)
             username = user_info.get("Username", "user")
@@ -296,47 +267,37 @@ def setup_mfa_endpoint():
         except Exception as e:
             logger.warning(f"Could not get username: {e}")
             username = "user"
-        
-        # Just return the secret code - frontend will handle QR code generation
-        logger.info("Returning MFA setup data")
+        # Generate the QR code image using the helper function
+        qr_code_image = generate_qr_code(secret_code, username)
+        logger.info("Returning MFA setup data with QR code")
         return jsonify({
             "secretCode": secret_code,
+            "qrCodeImage": qr_code_image,
             "message": "MFA setup initiated successfully",
             "username": username
         })
-        
     except Exception as e:
         logger.error(f"MFA setup failed: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Failed to setup MFA: {str(e)}"}), 500
 
-# MFA verification - THIS IS THE CRITICAL PART FROM THE WORKING VERSION
+# MFA verification route
 @auth_services_routes.route("/verify-mfa", methods=["OPTIONS", "POST"])
 def verify_mfa():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-
     data = request.json
     session = data.get('session')
     code = data.get('code')
     username = data.get('username')
-
     if not (session and code and username):
         return jsonify({"detail": "Session, username, and code are required"}), 400
-
     try:
         logger.info(f"Verifying MFA for user: {username} with code: {code}")
-        
-        # Generate secret hash
         secret_hash = generate_client_secret_hash(username)
-        
         logger.info(f"Generated secret hash for MFA verification")
-        
-        # Log timing information for debugging
         current_time = int(time.time())
         debug_logger.info(f"Server time: {current_time}s, position in window: {current_time % 30}s")
-        
-        # Make the API call to verify MFA
         start_time = time.time()
         response = cognito_client.respond_to_auth_challenge(
             ClientId=CLIENT_ID,
@@ -349,10 +310,7 @@ def verify_mfa():
             },
         )
         debug_logger.info(f"MFA verification completed in {time.time() - start_time:.2f} seconds")
-        
         logger.info("MFA verification successful")
-        
-        # Return auth result
         auth_result = response.get("AuthenticationResult", {})
         return jsonify({
             "id_token": auth_result.get("IdToken"),
@@ -361,7 +319,6 @@ def verify_mfa():
             "token_type": auth_result.get("TokenType"),
             "expires_in": auth_result.get("ExpiresIn")
         })
-
     except cognito_client.exceptions.CodeMismatchException:
         logger.warning(f"MFA code mismatch for user: {username}")
         debug_logger.warning(f"CodeMismatchException for code: {code}")
@@ -371,27 +328,20 @@ def verify_mfa():
         logger.error(traceback.format_exc())
         return jsonify({"detail": "MFA verification failed"}), 401
 
-# MFA Setup verification with enhanced CORS
+# MFA Setup verification route
 @auth_services_routes.route("/verify-mfa-setup", methods=["OPTIONS", "POST"])
 def verify_mfa_setup():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-
     data = request.json
     access_token = data.get('access_token')
     code = data.get('code')
-
     if not access_token or not code:
         return jsonify({"detail": "Access token and code are required"}), 400
-
     try:
         logger.info(f"Verifying MFA setup with code: {code}")
-        
-        # Log timing information for debugging
         current_time = int(time.time())
         debug_logger.info(f"Server time: {current_time}s, position in window: {current_time % 30}s")
-        
-        # Verify the software token
         start_time = time.time()
         response = cognito_client.verify_software_token(
             AccessToken=access_token,
@@ -399,14 +349,10 @@ def verify_mfa_setup():
             FriendlyDeviceName="EncryptGate Auth App"
         )
         debug_logger.info(f"verify_software_token call completed in {time.time() - start_time:.2f} seconds")
-        
         status = response.get("Status")
         debug_logger.info(f"MFA verification status: {status}")
-        
         if status != "SUCCESS":
             return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
-        
-        # Set MFA preference
         try:
             cognito_client.set_user_mfa_preference(
                 AccessToken=access_token,
@@ -419,20 +365,16 @@ def verify_mfa_setup():
         except Exception as pref_error:
             logger.warning(f"MFA verified but couldn't set preference: {pref_error}")
             debug_logger.warning(f"MFA preference setting failed: {pref_error}")
-        
-        # Get user information
         try:
             user_info = cognito_client.get_user(AccessToken=access_token)
             username = user_info.get("Username", "user")
         except Exception:
             username = "user"
-        
         return jsonify({
             "message": "MFA setup verified successfully",
             "status": status,
             "username": username
         })
-        
     except cognito_client.exceptions.CodeMismatchException as code_error:
         debug_logger.warning(f"CodeMismatchException: {code_error}")
         return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
