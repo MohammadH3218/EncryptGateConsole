@@ -216,6 +216,10 @@ def authenticate_user(username, password):
                     "mfa_required": challenge_name == "SOFTWARE_TOKEN_MFA"
                 }
                 
+                # Log session for debugging
+                session_value = response.get("Session", "")
+                logger.info(f"Returning session token (length: {len(session_value)}, first 20 chars: {session_value[:20] if session_value else 'None'})")
+                
                 return response_data
             else:
                 logger.error("No AuthenticationResult or ChallengeName in response")
@@ -239,6 +243,7 @@ def authenticate_user(username, password):
 def respond_to_auth_challenge(username, session, challenge_name, challenge_responses):
     """Responds to an authentication challenge like NEW_PASSWORD_REQUIRED"""
     logger.info(f"Responding to {challenge_name} challenge for user: {username}")
+    logger.info(f"Session length: {len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
     
     try:
         # Generate secret hash
@@ -473,6 +478,7 @@ def verify_software_token_setup(access_token, code):
 def verify_mfa(session, code, username):
     """Verifies a multi-factor authentication code."""
     logger.info(f"MFA verification initiated for user: {username}")
+    logger.info(f"Session length: {len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
     
     # Input validation
     if not code or not isinstance(code, str):
@@ -487,6 +493,7 @@ def verify_mfa(session, code, username):
     
     # Validate session format
     if not session or not isinstance(session, str) or len(session) < 20:
+        logger.error(f"Invalid session format: length {len(session) if session else 0}")
         return {"detail": "Invalid session format"}, 400
     
     try:
@@ -667,6 +674,9 @@ def respond_to_challenge_endpoint():
         challenge_name = data.get('challengeName')
         challenge_responses = data.get('challengeResponses', {})
         
+        # Log session information
+        logger.info(f"Session received in respond-to-challenge: length={len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
+        
         if not (username and session and challenge_name):
             return jsonify({"detail": "Username, session, and challengeName are required"}), 400
             
@@ -748,7 +758,7 @@ def verify_mfa_setup_endpoint():
         logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Updated route to use direct verify_software_token approach with session
+# Fixed session handling for MFA setup with better error handling
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -765,139 +775,105 @@ def confirm_mfa_setup_endpoint():
         username = data.get('username')
         session = data.get('session')
         code = data.get('code')
-        access_token = data.get('access_token')
         
+        # Enhanced session validation and logging
+        logger.info(f"Received session token: length={len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
         logger.info(f"MFA setup parameters: username={username}, code length={len(code) if code else 0}")
         
         # Validate input parameters
         if not code:
             logger.error("MFA code is missing")
             return jsonify({"detail": "Verification code is required"}), 400
+            
+        if not session:
+            logger.error("Session token is missing")
+            return jsonify({"detail": "Session token is required. Your session may have expired. Please log in again."}), 400
+            
+        if not username:
+            logger.error("Username is missing")
+            return jsonify({"detail": "Username is required"}), 400
         
-        # Use direct verify_software_token with session (matching PowerShell approach)
-        if session:
-            logger.info("Using session flow for MFA verification")
+        # First attempt direct verification with the session token
+        try:
+            logger.info(f"Calling verify_software_token with session, code: {code}")
             
-            try:
-                # Use verify_software_token directly with session like the PowerShell command
-                response = cognito_client.verify_software_token(
-                    Session=session,
-                    UserCode=code
-                )
+            verify_response = cognito_client.verify_software_token(
+                Session=session,
+                UserCode=code
+            )
+            
+            # Check the status
+            status = verify_response.get("Status")
+            logger.info(f"MFA verification status: {status}")
+            
+            if status == "SUCCESS":
+                # Now we need to respond to the MFA_SETUP challenge
+                new_session = verify_response.get("Session")
+                logger.info(f"Got new session after verification: length={len(new_session) if new_session else 0}")
                 
-                # Check the status
-                status = response.get("Status")
-                logger.info(f"MFA verification status: {status}")
-                
-                if status == "SUCCESS":
-                    # Continue the authentication flow if needed
-                    try:
-                        if username:
-                            secret_hash = generate_client_secret_hash(username)
-                            challenge_responses = {
-                                "USERNAME": username,
-                                "SECRET_HASH": secret_hash
-                            }
-                            
-                            logger.info("MFA verified successfully, completing authentication flow")
-                            
-                            # Respond to the MFA_SETUP challenge
-                            auth_response = cognito_client.respond_to_auth_challenge(
-                                ClientId=CLIENT_ID,
-                                ChallengeName="MFA_SETUP",
-                                Session=response.get("Session"),
-                                ChallengeResponses=challenge_responses
-                            )
-                            
-                            # Check if we received authentication tokens
-                            if auth_response and "AuthenticationResult" in auth_response:
-                                auth_result = auth_response.get("AuthenticationResult")
-                                logger.info("Authentication successful - received tokens")
-                                return jsonify({
-                                    "id_token": auth_result.get("IdToken"),
-                                    "access_token": auth_result.get("AccessToken"),
-                                    "refresh_token": auth_result.get("RefreshToken"),
-                                    "token_type": auth_result.get("TokenType"),
-                                    "expires_in": auth_result.get("ExpiresIn"),
-                                })
-                    except Exception as flow_error:
-                        logger.warning(f"MFA verified but error in completion flow: {flow_error}")
+                try:
+                    # Generate secret hash
+                    secret_hash = generate_client_secret_hash(username)
                     
-                    # Return success response without tokens if we couldn't complete the flow
+                    # Respond to MFA_SETUP challenge to complete the flow
+                    logger.info("Responding to MFA_SETUP challenge to complete authentication")
+                    
+                    auth_response = cognito_client.respond_to_auth_challenge(
+                        ClientId=CLIENT_ID,
+                        ChallengeName="MFA_SETUP",
+                        Session=new_session,
+                        ChallengeResponses={
+                            "USERNAME": username,
+                            "SECRET_HASH": secret_hash
+                        }
+                    )
+                    
+                    # Check if we received authentication tokens
+                    if "AuthenticationResult" in auth_response:
+                        auth_result = auth_response.get("AuthenticationResult")
+                        logger.info("MFA setup complete - received tokens")
+                        return jsonify({
+                            "id_token": auth_result.get("IdToken"),
+                            "access_token": auth_result.get("AccessToken"),
+                            "refresh_token": auth_result.get("RefreshToken"),
+                            "token_type": auth_result.get("TokenType"),
+                            "expires_in": auth_result.get("ExpiresIn"),
+                            "message": "MFA setup verified successfully"
+                        })
+                    else:
+                        logger.warning("No authentication result after responding to MFA_SETUP challenge")
+                        # Return success anyway since we verified the MFA
+                        return jsonify({
+                            "message": "MFA setup verified successfully. Please log in again.",
+                            "status": status
+                        })
+                except Exception as respond_error:
+                    logger.error(f"Error responding to MFA_SETUP challenge: {respond_error}")
+                    # Return success anyway since we verified the MFA
                     return jsonify({
-                        "message": "MFA setup verified successfully",
+                        "message": "MFA setup verified, but couldn't complete login. Please log in again.",
                         "status": status
                     })
-                else:
-                    logger.warning(f"Verification returned non-SUCCESS status: {status}")
-                    return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
+            else:
+                logger.warning(f"Verification returned non-SUCCESS status: {status}")
+                return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
+                
+        except cognito_client.exceptions.NotAuthorizedException as auth_error:
+            logger.error(f"NotAuthorizedException: {auth_error}")
+            return jsonify({"detail": "Your session has expired. Please log in again to restart the MFA setup process."}), 401
             
-            except cognito_client.exceptions.CodeMismatchException as code_error:
-                logger.warning(f"CodeMismatchException: {code_error}")
-                return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
-                
-            except Exception as e:
-                logger.error(f"Error verifying MFA setup: {e}")
-                return jsonify({"detail": f"MFA verification failed: {str(e)}"}), 500
-                
-        # Handle access token flow
-        elif access_token:
-            logger.info("Using access token flow for MFA verification")
+        except cognito_client.exceptions.CodeMismatchException as code_error:
+            logger.warning(f"CodeMismatchException: {code_error}")
+            return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
             
-            try:
-                response = cognito_client.verify_software_token(
-                    AccessToken=access_token,
-                    UserCode=code,
-                    FriendlyDeviceName="EncryptGate Auth App"
-                )
-                
-                # Check the status
-                status = response.get("Status")
-                logger.info(f"MFA verification status: {status}")
-                
-                if status == "SUCCESS":
-                    logger.info("MFA verification successful, setting MFA preference")
-                    # Set the user's MFA preference to require TOTP
-                    try:
-                        cognito_client.set_user_mfa_preference(
-                            AccessToken=access_token,
-                            SoftwareTokenMfaSettings={
-                                "Enabled": True,
-                                "PreferredMfa": True
-                            }
-                        )
-                        logger.info("MFA preference set successfully")
-                    except Exception as pref_error:
-                        logger.warning(f"MFA verified but couldn't set preference: {pref_error}")
-                    
-                    return jsonify({
-                        "message": "MFA setup verified successfully",
-                        "status": status
-                    })
-                else:
-                    logger.warning(f"Verification returned non-SUCCESS status: {status}")
-                    return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
-            
-            except cognito_client.exceptions.CodeMismatchException as code_error:
-                logger.warning(f"CodeMismatchException: {code_error}")
-                return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
-                
-            except Exception as e:
-                logger.error(f"Error verifying MFA setup: {e}")
-                return jsonify({"detail": f"MFA verification failed: {str(e)}"}), 500
-        else:
-            missing_params = []
-            if not access_token and not session:
-                missing_params.append("access_token or session")
-            if not username and not access_token:
-                missing_params.append("username")
-            
-            error_msg = f"Missing required parameters: {', '.join(missing_params)}"
-            logger.warning(error_msg)
-            return jsonify({"detail": error_msg}), 400
+        except Exception as e:
+            logger.error(f"Error in verify_software_token: {e}")
+            logger.error(traceback.format_exc())
+            return jsonify({"detail": f"MFA verification failed: {str(e)}"}), 500
             
     except Exception as e:
         logger.error(f"Unhandled exception in confirm_mfa_setup_endpoint: {e}")
+        logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 @auth_services_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
@@ -909,6 +885,9 @@ def verify_mfa_endpoint():
     session = data.get('session')
     code = data.get('code')
     username = data.get('username')
+
+    # Log session information
+    logger.info(f"Session received in verify-mfa: length={len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
 
     if not (session and code and username):
         return jsonify({"detail": "Session, username, and code are required"}), 400

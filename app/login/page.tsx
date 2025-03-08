@@ -316,11 +316,18 @@ export default function LoginPage() {
         throw new Error(responseData?.detail || `Authentication failed (${response.status})`);
       }
 
+      // Immediately save session if available - THIS IS CRITICAL FOR MFA FLOW
+      if (responseData.session) {
+        setSession(responseData.session);
+        console.log("Saved session token length:", responseData.session.length);
+        console.log("Session token first 20 chars:", responseData.session.substring(0, 20));
+        logApiCall("Session Token", `Received and stored session token (length: ${responseData.session.length})`);
+      }
+
       // Handle different authentication flows
       if (responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
         // Handle password change requirement
         logApiCall("Login Flow", "NEW_PASSWORD_REQUIRED challenge detected");
-        setSession(responseData.session || "");
         setShowPasswordChange(true);
       } else if (responseData.access_token) {
         // We have an access token, check if we need to set up MFA
@@ -367,7 +374,6 @@ export default function LoginPage() {
       } else if (responseData.mfa_required) {
         // Standard MFA verification
         logApiCall("Login Flow", "MFA verification required");
-        setSession(responseData.session || "");
         setShowMFA(true);
       } else {
         logApiCall("Login Flow Error", "Unexpected server response format");
@@ -403,6 +409,8 @@ export default function LoginPage() {
       const challengeEndpoint = `${apiBaseUrl}/api/auth/respond-to-challenge`;
       
       logApiCall("Password Change Request", "Sending NEW_PASSWORD_REQUIRED challenge response");
+      console.log("Using session token length:", session.length);
+      console.log("Session token first 20 chars:", session.substring(0, 20));
       
       const response = await fetchWithRetry(challengeEndpoint, {
         method: "POST",
@@ -430,6 +438,14 @@ export default function LoginPage() {
       if (!response.ok) {
         logApiCall("Password Change Error", responseData.detail || `Failed to change password (${response.status})`);
         throw new Error(responseData.detail || `Failed to change password (${response.status})`);
+      }
+      
+      // Save new session if available - CRITICAL FOR MFA FLOW
+      if (responseData.session) {
+        setSession(responseData.session);
+        console.log("Updated session token length:", responseData.session.length);
+        console.log("Updated session token first 20 chars:", responseData.session.substring(0, 20));
+        logApiCall("Session Token", `Updated session token (length: ${responseData.session.length})`);
       }
       
       // Handle different response types
@@ -482,13 +498,11 @@ export default function LoginPage() {
         // Handle additional challenges
         if (responseData.ChallengeName === "MFA_SETUP") {
           logApiCall("Password Change Flow", "MFA setup challenge received");
-          setSession(responseData.session || "");
           setShowPasswordChange(false);
           setMfaSecretCode(responseData.secretCode || "");
           setShowMFASetup(true);
         } else if (responseData.mfa_required) {
           logApiCall("Password Change Flow", "MFA verification required");
-          setSession(responseData.session || "");
           setShowPasswordChange(false);
           setShowMFA(true);
         }
@@ -516,39 +530,31 @@ export default function LoginPage() {
       return;
     }
     
+    // Log critical session info first
+    console.log("Session token for MFA setup:");
+    console.log("- Available:", !!session);
+    console.log("- Length:", session ? session.length : 0);
+    console.log("- First 20 chars:", session ? session.substring(0, 20) : "N/A");
+    
+    // Validate the session before proceeding
+    if (!session) {
+      setError("Your session has expired. Please log in again to restart the MFA setup process.");
+      return;
+    }
+    
     setIsLoading(true);
     setError("");
     
     try {
-      // Get the access token from localStorage
-      const accessToken = localStorage.getItem("temp_access_token") || localStorage.getItem("access_token");
+      // Always use the session-based flow for MFA verification
+      const endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
+      const requestBody = {
+        username: email,
+        session: session,
+        code: setupMfaCode
+      };
       
-      // Increment MFA setup attempts counter
-      setMfaSetupAttempts(prev => prev + 1);
-      
-      let endpoint;
-      let requestBody;
-      
-      // Prioritize using the session flow which matches the PowerShell approach
-      if (session) {
-        endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
-        requestBody = {
-          username: email,
-          session: session,
-          code: setupMfaCode
-        };
-        if (debugMode) logApiCall("MFA Setup Verification", `Using session flow with code: ${setupMfaCode}`);
-      } else if (accessToken) {
-        // Fallback to access token flow
-        endpoint = `${apiBaseUrl}/api/auth/verify-mfa-setup`;
-        requestBody = {
-          access_token: accessToken,
-          code: setupMfaCode
-        };
-        if (debugMode) logApiCall("MFA Setup Verification", `Using access token flow with code: ${setupMfaCode}`);
-      } else {
-        throw new Error("Authentication session expired. Please log in again.");
-      }
+      logApiCall("MFA Setup Verification", `Sending verification request with code ${setupMfaCode}, session length ${session.length}`);
       
       const response = await fetchWithRetry(endpoint, {
         method: "POST",
@@ -566,7 +572,7 @@ export default function LoginPage() {
       let responseData;
       try {
         responseData = await response.json();
-        if (debugMode) logApiCall("MFA Setup Verification Response", `Status: ${response.status}`);
+        logApiCall("MFA Setup Verification Response", `Status: ${response.status}`);
       } catch (parseError) {
         throw new Error("Unable to parse server response. Please try again.");
       }
@@ -577,19 +583,13 @@ export default function LoginPage() {
           // Check if it's a code mismatch error
           if (responseData.detail.includes("code is incorrect") || 
               responseData.detail.includes("CodeMismatchException")) {
-            
-            // If this is the second attempt, suggest some troubleshooting steps
-            if (mfaSetupAttempts >= 2) {
-              throw new Error(`${responseData.detail} Please ensure:
-              1. Your device's time is correct and synced
-              2. You're using the latest code from your authenticator app
-              3. You've entered the secret key correctly`);
-            } else {
-              throw new Error(responseData.detail);
-            }
+            throw new Error(responseData.detail);
           } else {
             throw new Error(responseData.detail);
           }
+        } else if (response.status === 401) {
+          // Session expired - need to log in again
+          throw new Error("Your session has expired. Please log in again to restart the MFA setup process.");
         } else {
           throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
         }
@@ -617,12 +617,19 @@ export default function LoginPage() {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to set up MFA";
       setError(errorMessage);
-      if (debugMode) logApiCall("MFA Setup Error", errorMessage);
+      logApiCall("MFA Setup Error", errorMessage);
       
       // If there's an issue with the verification code, clear the input
       // so the user can try again with a new code
       if (errorMessage.includes("code") || errorMessage.includes("verification")) {
         setSetupMfaCode("");
+      }
+      
+      // If session expired, close the dialog so user can log in again
+      if (errorMessage.includes("session has expired")) {
+        setTimeout(() => {
+          setShowMFASetup(false);
+        }, 3000);
       }
     } finally {
       setIsLoading(false);
@@ -639,9 +646,14 @@ export default function LoginPage() {
     setIsLoading(true);
     
     const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
+    
+    // Log session information for debugging
+    console.log("Session token for MFA verification:");
+    console.log("- Length:", session ? session.length : 0);
+    console.log("- First 20 chars:", session ? session.substring(0, 20) : "N/A");
 
     try {
-      logApiCall("MFA Verification", `Verifying MFA code: ${mfaCode} for user: ${email}`);
+      logApiCall("MFA Verification", `Verifying MFA code: ${mfaCode}, session length: ${session.length}`);
       
       const response = await fetchWithRetry(mfaEndpoint, {
         method: "POST",
@@ -672,6 +684,10 @@ export default function LoginPage() {
           // Clear the mfa code field on code mismatch errors
           setMfaCode("");
           logApiCall("MFA Verification Error", data.detail || "Invalid MFA code");
+        } else if (response.status === 401 && data.detail && data.detail.includes("session")) {
+          // Session expired error
+          logApiCall("MFA Verification Error", "Session expired");
+          throw new Error("Your session has expired. Please log in again.");
         }
         throw new Error(data?.detail || "Invalid MFA code");
       }
@@ -685,6 +701,13 @@ export default function LoginPage() {
     } catch (error: any) {
       setError(error.message || "MFA verification failed. Please try again.");
       logApiCall("MFA Verification Error", error.message || "Unknown error");
+      
+      // If session expired, close the dialog so user can log in again
+      if (error.message.includes("session has expired")) {
+        setTimeout(() => {
+          setShowMFA(false);
+        }, 3000);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -745,6 +768,36 @@ export default function LoginPage() {
       setIsLoading(false);
     }
   };
+
+  // Toggle debug mode for development
+  const toggleDebugMode = () => {
+    setDebugMode(prev => {
+      const newMode = !prev;
+      console.log("Debug mode:", newMode ? "ON" : "OFF");
+      // Automatically log session info when debug mode is turned on
+      if (newMode) {
+        console.log("Current session token info:");
+        console.log("- Available:", !!session);
+        console.log("- Length:", session ? session.length : 0);
+        if (session) console.log("- First 20 chars:", session.substring(0, 20));
+      }
+      return newMode;
+    });
+  };
+
+  // Add key listener for Ctrl+Shift+D to toggle debug mode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        toggleDebugMode();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
@@ -843,6 +896,10 @@ export default function LoginPage() {
                 <details>
                   <summary>Debug Info</summary>
                   <div className="mt-2 p-2 bg-muted rounded overflow-auto max-h-60">
+                    <div className="mb-2">
+                      <strong>Session:</strong>{" "}
+                      {session ? `${session.substring(0, 30)}... (length: ${session.length})` : "No session"}
+                    </div>
                     <pre>{JSON.stringify(apiCallLog, null, 2)}</pre>
                   </div>
                 </details>
@@ -1159,13 +1216,13 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Activate Debug Mode with keyboard shortcut */}
+      {/* Debug Mode Button (hidden) */}
       <div className="hidden">
         <button
-          onClick={() => setDebugMode(prev => !prev)}
+          onClick={toggleDebugMode}
           onKeyDown={(e) => {
             if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-              setDebugMode(prev => !prev);
+              toggleDebugMode();
             }
           }}
         >
