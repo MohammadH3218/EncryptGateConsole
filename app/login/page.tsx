@@ -535,6 +535,8 @@ export default function LoginPage() {
     console.log("- Available:", !!session);
     console.log("- Length:", session ? session.length : 0);
     console.log("- First 20 chars:", session ? session.substring(0, 20) : "N/A");
+    console.log(`Sending MFA verification with session token length: ${session.length}`);
+    
     
     // Validate the session before proceeding
     if (!session) {

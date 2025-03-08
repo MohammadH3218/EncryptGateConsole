@@ -758,7 +758,7 @@ def verify_mfa_setup_endpoint():
         logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Fixed session handling for MFA setup with better error handling
+# Fixed MFA setup implementation that correctly uses the session token flow
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -793,8 +793,9 @@ def confirm_mfa_setup_endpoint():
             logger.error("Username is missing")
             return jsonify({"detail": "Username is required"}), 400
         
-        # First attempt direct verification with the session token
+        # Use the exact flow that worked in PowerShell
         try:
+            # Step 1: First verify the software token with the session
             logger.info(f"Calling verify_software_token with session, code: {code}")
             
             verify_response = cognito_client.verify_software_token(
@@ -807,21 +808,26 @@ def confirm_mfa_setup_endpoint():
             logger.info(f"MFA verification status: {status}")
             
             if status == "SUCCESS":
-                # Now we need to respond to the MFA_SETUP challenge
+                # Step 2: Get the NEW session from the verification response
                 new_session = verify_response.get("Session")
                 logger.info(f"Got new session after verification: length={len(new_session) if new_session else 0}")
                 
+                if not new_session:
+                    logger.error("No new session token returned from verify_software_token")
+                    return jsonify({"detail": "Failed to get new session token"}), 500
+                
+                # Step 3: Use the NEW session (not the original) to respond to the MFA_SETUP challenge
                 try:
                     # Generate secret hash
                     secret_hash = generate_client_secret_hash(username)
                     
                     # Respond to MFA_SETUP challenge to complete the flow
-                    logger.info("Responding to MFA_SETUP challenge to complete authentication")
+                    logger.info("Responding to MFA_SETUP challenge with NEW session token")
                     
                     auth_response = cognito_client.respond_to_auth_challenge(
                         ClientId=CLIENT_ID,
                         ChallengeName="MFA_SETUP",
-                        Session=new_session,
+                        Session=new_session,  # Using the NEW session from verify_software_token
                         ChallengeResponses={
                             "USERNAME": username,
                             "SECRET_HASH": secret_hash
