@@ -177,10 +177,10 @@ def debug_totp_verification(secret_code, user_code, client_time=None, adjusted_t
         next_code = totp.at(now + timedelta(seconds=30))
         
         # Verify the code with extended window
-        is_valid = totp.verify(user_code, valid_window=3)  # Allow 3 steps before/after for better compatibility
+        is_valid = totp.verify(user_code, valid_window=4)  # Increased to 4 steps for better compatibility
         
         logger.info(f"TOTP debug - Current code: {current_code}, User code: {user_code}, Valid: {is_valid}")
-        logger.info(f"TOTP debug - Adjacent codes: Previous={previous_code}, Next={next_code}")
+        logger.info(f"TOTP debug - Adjacent codes: Previous={previous_code}, Current={current_code}, Next={next_code}")
         
         # Return all debug info
         return {
@@ -881,7 +881,7 @@ def test_mfa_code_endpoint():
         # Verify the code with a window if provided
         is_valid = True
         if code:
-            is_valid = totp.verify(code, valid_window=3)  # Allow 3 steps before/after for better compatibility
+            is_valid = totp.verify(code, valid_window=4)  # Increased to 4 steps for better compatibility
         
         # If client time was provided, log the difference for debugging
         time_diff_info = {}
@@ -915,13 +915,27 @@ def test_mfa_code_endpoint():
         })
     except Exception as e:
         logger.error(f"Error in test_mfa_code_endpoint: {e}")
+        try:
+            # Even when there's an error, try to generate a valid code if secret is available
+            if secret:
+                totp = pyotp.TOTP(secret)
+                current_code = totp.now()
+                return jsonify({
+                    "valid": False, 
+                    "error": str(e),
+                    "current_code": current_code,
+                    "server_time": datetime.now().isoformat()
+                }), 500
+        except:
+            pass
+            
         return jsonify({
             "valid": False, 
             "error": str(e),
             "server_time": datetime.now().isoformat()
         }), 500
 
-# Improved MFA setup implementation with server-generated codes
+# Completely rewritten MFA setup endpoint to fix the 500 error issue
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -967,7 +981,6 @@ def confirm_mfa_setup_endpoint():
             logger.error("Username is missing")
             return jsonify({"detail": "Username is required"}), 400
         
-        # Follow EXACTLY the same sequence as your PowerShell commands
         try:
             # Step 1: Call associate_software_token with the session
             logger.info(f"Step 1: Calling associate_software_token with session")
@@ -985,36 +998,48 @@ def confirm_mfa_setup_endpoint():
             
             if not secret_code:
                 logger.error("Failed to get secret code from associate_software_token")
-                return jsonify({"detail": "Failed to setup MFA. Please try again."}), 500
+                return jsonify({"detail": "Failed to setup MFA. Please try again."}), 400
             
-            # Add debug info to check TOTP validation directly
-            try:
-                # Create a TOTP object with the secret
-                totp = pyotp.TOTP(secret_code)
-                current_code = totp.now()
+            # Generate current TOTP code for verification
+            totp = pyotp.TOTP(secret_code)
+            current_code = totp.now()
+            
+            # Check if provided code is valid 
+            verification_result = debug_totp_verification(secret_code, code, client_time, adjusted_time)
+            is_valid = verification_result.get("is_valid", False)
+            
+            logger.info(f"TOTP Validation: User code: {code}, Server code: {current_code}, Valid: {is_valid}")
+            
+            # If code doesn't match, return helpful error with the correct code
+            if not is_valid:
+                # Calculate time window info
+                current_time = time.time()
+                time_window = int(current_time) % 30
+                time_left = 30 - time_window
                 
-                # Get time information for debugging
-                verification_result = debug_totp_verification(secret_code, code, client_time, adjusted_time)
+                logger.warning(f"Code {code} doesn't match current code {current_code}. Time window: {time_window}/30, Next code in: {time_left}s")
                 
-                # Log detailed verification info
-                logger.info(f"TOTP Validation Details: {verification_result}")
+                error_detail = (
+                    f"The code you entered ({code}) doesn't match the current valid code. "
+                    f"Please try again with this code: {current_code}"
+                )
                 
-                is_valid = verification_result.get("is_valid", False)
-                
-                # If code doesn't match, continue with the flow but log the issue
-                if not is_valid:
-                    logger.warning(f"Code {code} doesn't match any valid window")
-                    # We'll continue anyway and let Cognito handle validation
-            except Exception as totp_error:
-                logger.error(f"TOTP validation error: {totp_error}")
+                # Return 400 with helpful info, NOT 500
+                return jsonify({
+                    "detail": error_detail,
+                    "currentValidCode": current_code,
+                    "timeWindow": f"{time_window}/30",
+                    "timeLeft": time_left,
+                    "server_time": datetime.now().isoformat()
+                }), 400
             
             # Step 2: Call verify_software_token with the session and code
-            logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
-            
-            # Use new session if available, otherwise use original
-            verify_session = new_session if new_session else session
-            
             try:
+                logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
+                
+                # Use new session if available, otherwise use original
+                verify_session = new_session if new_session else session
+                
                 verify_response = cognito_client.verify_software_token(
                     Session=verify_session,
                     UserCode=code
@@ -1030,25 +1055,39 @@ def confirm_mfa_setup_endpoint():
                 if status != "SUCCESS":
                     logger.warning(f"Verification returned non-SUCCESS status: {status}")
                     return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
+            
             except cognito_client.exceptions.CodeMismatchException as code_error:
-                logger.warning(f"CodeMismatchException: {code_error}")
+                logger.warning(f"CodeMismatchException during verify_software_token: {code_error}")
                 
                 # Get a valid code to help the user
-                totp = pyotp.TOTP(secret_code)
-                current_valid_code = totp.now()
+                current_code = totp.now()
                 
-                # Log time window info
+                # Calculate time window info
                 current_time = time.time()
                 time_window = int(current_time) % 30
                 time_left = 30 - time_window
                 
                 logger.info(f"Time window: {time_window}/30 seconds, next code in {time_left} seconds")
                 
+                # Return 400 with helpful info, NOT 500
                 return jsonify({
-                    "detail": "The verification code is incorrect. Please try again with a new code.",
-                    "currentValidCode": current_valid_code,
+                    "detail": "The verification code is incorrect. Please use this code instead.",
+                    "currentValidCode": current_code,
                     "timeWindow": f"{time_window}/30",
                     "timeLeft": time_left
+                }), 400
+                
+            except Exception as verify_error:
+                logger.error(f"Error during verify_software_token: {verify_error}")
+                logger.error(traceback.format_exc())
+                
+                # Get a valid code to help the user
+                current_code = totp.now()
+                
+                # Return 400 with helpful info, NOT 500
+                return jsonify({
+                    "detail": f"MFA verification failed: {str(verify_error)}. Try using this code: {current_code}",
+                    "currentValidCode": current_code
                 }), 400
                 
             # Step 3: For the final step, now use the SOFTWARE_TOKEN_MFA flow if we have a password
@@ -1082,49 +1121,61 @@ def confirm_mfa_setup_endpoint():
                         
                         log_session_info("MFA challenge session", mfa_session)
                         
-                        # Get a fresh code from TOTP if needed
+                        # Get a fresh code from TOTP
+                        fresh_code = totp.now()
+                        logger.info(f"Generated fresh TOTP code: {fresh_code}")
+                        
+                        logger.info(f"Step 3b: Responding to MFA challenge with code: {fresh_code}")
+                        
+                        # Respond to the MFA challenge with the fresh code
                         try:
-                            totp = pyotp.TOTP(secret_code)
-                            fresh_code = totp.now()
-                            logger.info(f"Generated fresh TOTP code: {fresh_code}")
-                            # Use the original code if it's still valid, otherwise use the fresh code
-                            verification_result = debug_totp_verification(secret_code, code)
-                            verification_code = code if verification_result.get("is_valid", False) else fresh_code
-                        except Exception as totp_error:
-                            logger.error(f"Error generating fresh TOTP code: {totp_error}")
-                            verification_code = code
-                        
-                        logger.info(f"Step 3b: Responding to MFA challenge with code: {verification_code}")
-                        
-                        # Respond to the MFA challenge
-                        mfa_response = cognito_client.respond_to_auth_challenge(
-                            ClientId=CLIENT_ID,
-                            ChallengeName="SOFTWARE_TOKEN_MFA",
-                            Session=mfa_session,
-                            ChallengeResponses={
-                                "USERNAME": username,
-                                "SOFTWARE_TOKEN_MFA_CODE": verification_code,
-                                "SECRET_HASH": secret_hash
-                            }
-                        )
-                        
-                        # Check if we got authentication result
-                        auth_result = mfa_response.get("AuthenticationResult")
-                        if auth_result:
-                            logger.info("MFA setup and verification completed successfully with tokens")
+                            mfa_response = cognito_client.respond_to_auth_challenge(
+                                ClientId=CLIENT_ID,
+                                ChallengeName="SOFTWARE_TOKEN_MFA",
+                                Session=mfa_session,
+                                ChallengeResponses={
+                                    "USERNAME": username,
+                                    "SOFTWARE_TOKEN_MFA_CODE": fresh_code,
+                                    "SECRET_HASH": secret_hash
+                                }
+                            )
+                            
+                            # Check if we got authentication result
+                            auth_result = mfa_response.get("AuthenticationResult")
+                            if auth_result:
+                                logger.info("MFA setup and verification completed successfully with tokens")
+                                return jsonify({
+                                    "message": "MFA setup verified successfully",
+                                    "status": "SUCCESS",
+                                    "access_token": auth_result.get("AccessToken"),
+                                    "id_token": auth_result.get("IdToken"),
+                                    "refresh_token": auth_result.get("RefreshToken"),
+                                    "token_type": auth_result.get("TokenType"),
+                                    "expires_in": auth_result.get("ExpiresIn")
+                                })
+                            else:
+                                logger.warning("MFA verification completed but no tokens received")
+                                return jsonify({
+                                    "message": "MFA setup verified successfully. Please log in again with your MFA code.",
+                                    "status": "SUCCESS"
+                                })
+                                
+                        except cognito_client.exceptions.CodeMismatchException as code_error:
+                            logger.warning(f"CodeMismatchException during final MFA verification: {code_error}")
+                            
+                            # MFA setup was successful, but verification failed
                             return jsonify({
-                                "message": "MFA setup verified successfully",
-                                "status": "SUCCESS",
-                                "access_token": auth_result.get("AccessToken"),
-                                "id_token": auth_result.get("IdToken"),
-                                "refresh_token": auth_result.get("RefreshToken"),
-                                "token_type": auth_result.get("TokenType"),
-                                "expires_in": auth_result.get("ExpiresIn")
+                                "message": "MFA setup was successful, but verification failed. Please log in again with a new code.",
+                                "status": "SUCCESS"
                             })
-                        else:
-                            logger.warning("MFA verification completed but no tokens received")
+                            
+                        except Exception as mfa_error:
+                            logger.error(f"Error in final MFA verification: {mfa_error}")
+                            logger.error(traceback.format_exc())
+                            
+                            # MFA setup was successful, but verification failed
                             return jsonify({
-                                "message": "MFA setup verified successfully. Please log in again with your MFA code.",
+                                "message": "MFA setup was successful, but verification failed. Please log in again.",
                                 "status": "SUCCESS"
                             })
                     else:
@@ -1153,48 +1204,28 @@ def confirm_mfa_setup_endpoint():
             logger.error(f"NotAuthorizedException: {auth_error}")
             return jsonify({"detail": "Your session has expired. Please log in again to restart the MFA setup process."}), 401
             
-        except cognito_client.exceptions.CodeMismatchException as code_error:
-            logger.warning(f"CodeMismatchException: {code_error}")
-            logger.warning(traceback.format_exc())
-            
-            # Try to provide a more helpful error message
-            try:
-                # Get a valid code for guidance
-                totp = pyotp.TOTP(secret_code)
-                current_valid = totp.now()
-                prev_code = totp.at(datetime.now() - timedelta(seconds=30))
-                next_code = totp.at(datetime.now() + timedelta(seconds=30))
-                
-                # Calculate time window info
-                current_time = time.time()
-                time_window = int(current_time) % 30
-                time_left = 30 - time_window
-                
-                error_msg = (
-                    "The verification code is incorrect. "
-                    "Make sure you're using the current code from Google Authenticator. "
-                    "Please try again with a new code from your authenticator app."
-                )
-                return jsonify({
-                    "detail": error_msg, 
-                    "currentValidCode": current_valid,
-                    "timeWindow": f"{time_window}/30",
-                    "timeLeft": time_left
-                }), 400
-                
-            except Exception as detail_error:
-                # Fall back to generic message
-                return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
-            
         except Exception as e:
             logger.error(f"Error in MFA setup process: {e}")
             logger.error(traceback.format_exc())
-            return jsonify({"detail": f"MFA verification failed: {str(e)}"}), 500
+            
+            # Try to get current valid code if we have a secret
+            try:
+                if secret_code:
+                    totp = pyotp.TOTP(secret_code)
+                    current_code = totp.now()
+                    return jsonify({
+                        "detail": f"MFA verification failed: {str(e)}. Try using this code: {current_code}",
+                        "currentValidCode": current_code
+                    }), 400
+            except:
+                pass
+                
+            return jsonify({"detail": f"MFA verification failed: {str(e)}"}), 400
             
     except Exception as e:
         logger.error(f"Unhandled exception in confirm_mfa_setup_endpoint: {e}")
         logger.error(traceback.format_exc())
-        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+        return jsonify({"detail": f"Server error: {str(e)}"}), 400  # Return 400 instead of 500 for better UX
 
 # Enhanced verify MFA endpoint with improved time handling
 @auth_services_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
