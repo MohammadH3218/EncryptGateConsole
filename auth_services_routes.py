@@ -758,7 +758,7 @@ def verify_mfa_setup_endpoint():
         logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Fixed MFA setup implementation that correctly uses the session token flow
+# Fixed MFA setup implementation that follows the exact PowerShell flow
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -775,6 +775,7 @@ def confirm_mfa_setup_endpoint():
         username = data.get('username')
         session = data.get('session')
         code = data.get('code')
+        password = data.get('password', '')  # Optional for final initiate-auth step
         
         # Enhanced session validation and logging
         logger.info(f"Received session token: length={len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
@@ -793,76 +794,100 @@ def confirm_mfa_setup_endpoint():
             logger.error("Username is missing")
             return jsonify({"detail": "Username is required"}), 400
         
-        # Use the exact flow that worked in PowerShell
+        # Follow EXACTLY the same sequence as your PowerShell commands
         try:
-            # Step 1: First verify the software token with the session
-            logger.info(f"Calling verify_software_token with session, code: {code}")
+            # Step 1: Call associate_software_token with the session
+            logger.info(f"Step 1: Calling associate_software_token with session")
+            
+            associate_response = cognito_client.associate_software_token(
+                Session=session
+            )
+            
+            # Get the secret code and possibly a new session
+            secret_code = associate_response.get("SecretCode")
+            new_session = associate_response.get("Session")
+            
+            logger.info(f"Got secret code: {secret_code}")
+            logger.info(f"New session after associate_software_token: length={len(new_session) if new_session else 0}")
+            
+            if not secret_code:
+                logger.error("Failed to get secret code from associate_software_token")
+                return jsonify({"detail": "Failed to setup MFA. Please try again."}), 500
+            
+            # Step 2: Call verify_software_token with the session and code
+            logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
+            
+            # Use new session if available, otherwise use original
+            verify_session = new_session if new_session else session
             
             verify_response = cognito_client.verify_software_token(
-                Session=session,
+                Session=verify_session,
                 UserCode=code
             )
             
             # Check the status
             status = verify_response.get("Status")
-            logger.info(f"MFA verification status: {status}")
+            verify_session = verify_response.get("Session")  # Get possibly new session
             
-            if status == "SUCCESS":
-                # Step 2: Get the NEW session from the verification response
-                new_session = verify_response.get("Session")
-                logger.info(f"Got new session after verification: length={len(new_session) if new_session else 0}")
+            logger.info(f"MFA verification status: {status}")
+            logger.info(f"Session after verify_software_token: length={len(verify_session) if verify_session else 0}")
+            
+            if status != "SUCCESS":
+                logger.warning(f"Verification returned non-SUCCESS status: {status}")
+                return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
                 
-                if not new_session:
-                    logger.error("No new session token returned from verify_software_token")
-                    return jsonify({"detail": "Failed to get new session token"}), 500
+            # Step 3: For the final step, we need to do a fresh initiate-auth with SOFTWARE_TOKEN_MFA
+            # This matches your last PowerShell command
+            if password:
+                # We have the password, so we can complete the full flow
+                logger.info(f"Step 3: Final step - initiate_auth with SOFTWARE_TOKEN_MFA flow")
                 
-                # Step 3: Use the NEW session (not the original) to respond to the MFA_SETUP challenge
                 try:
                     # Generate secret hash
                     secret_hash = generate_client_secret_hash(username)
                     
-                    # Respond to MFA_SETUP challenge to complete the flow
-                    logger.info("Responding to MFA_SETUP challenge with NEW session token")
-                    
-                    auth_response = cognito_client.respond_to_auth_challenge(
+                    # Final authentication with MFA
+                    final_auth_response = cognito_client.initiate_auth(
                         ClientId=CLIENT_ID,
-                        ChallengeName="MFA_SETUP",
-                        Session=new_session,  # Using the NEW session from verify_software_token
-                        ChallengeResponses={
+                        AuthFlow="USER_PASSWORD_AUTH",  # Note: AWS doesn't support direct SOFTWARE_TOKEN_MFA flow
+                        AuthParameters={
                             "USERNAME": username,
+                            "PASSWORD": password,
                             "SECRET_HASH": secret_hash
                         }
                     )
                     
-                    # Check if we received authentication tokens
-                    if "AuthenticationResult" in auth_response:
-                        auth_result = auth_response.get("AuthenticationResult")
-                        logger.info("MFA setup complete - received tokens")
+                    # Check if we got MFA challenge (which we should since MFA is now enabled)
+                    if final_auth_response.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
+                        # Now respond to the MFA challenge
+                        mfa_session = final_auth_response.get("Session")
+                        
+                        # Get a fresh code from the user or notify them
+                        # Here we'll just tell them MFA is set up successfully
+                        logger.info("MFA setup complete - need fresh login with MFA code")
                         return jsonify({
-                            "id_token": auth_result.get("IdToken"),
-                            "access_token": auth_result.get("AccessToken"),
-                            "refresh_token": auth_result.get("RefreshToken"),
-                            "token_type": auth_result.get("TokenType"),
-                            "expires_in": auth_result.get("ExpiresIn"),
-                            "message": "MFA setup verified successfully"
+                            "message": "MFA setup verified successfully. Please log in again with your MFA code.",
+                            "status": "SUCCESS"
                         })
                     else:
-                        logger.warning("No authentication result after responding to MFA_SETUP challenge")
-                        # Return success anyway since we verified the MFA
+                        # Unexpected flow but MFA setup was successful
                         return jsonify({
                             "message": "MFA setup verified successfully. Please log in again.",
-                            "status": status
+                            "status": "SUCCESS"
                         })
-                except Exception as respond_error:
-                    logger.error(f"Error responding to MFA_SETUP challenge: {respond_error}")
-                    # Return success anyway since we verified the MFA
+                except Exception as final_auth_error:
+                    logger.error(f"Error in final authentication step: {final_auth_error}")
+                    # MFA setup was still successful
                     return jsonify({
                         "message": "MFA setup verified, but couldn't complete login. Please log in again.",
-                        "status": status
+                        "status": "SUCCESS"
                     })
             else:
-                logger.warning(f"Verification returned non-SUCCESS status: {status}")
-                return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
+                # No password provided, but MFA setup was successful
+                return jsonify({
+                    "message": "MFA setup verified successfully. Please log in again with your MFA code.",
+                    "status": "SUCCESS"
+                })
                 
         except cognito_client.exceptions.NotAuthorizedException as auth_error:
             logger.error(f"NotAuthorizedException: {auth_error}")
@@ -873,7 +898,7 @@ def confirm_mfa_setup_endpoint():
             return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
             
         except Exception as e:
-            logger.error(f"Error in verify_software_token: {e}")
+            logger.error(f"Error in MFA setup process: {e}")
             logger.error(traceback.format_exc())
             return jsonify({"detail": f"MFA verification failed: {str(e)}"}), 500
             
