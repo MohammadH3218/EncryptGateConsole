@@ -63,6 +63,20 @@ except Exception as e:
 # Blueprint for auth routes
 auth_services_routes = Blueprint('auth_services_routes', __name__)
 
+# Helper function to log session information
+def log_session_info(step_name, session_token):
+    """Log detailed session token information for debugging"""
+    if not session_token:
+        logger.info(f"[SESSION DEBUG] {step_name}: No session token available")
+        return
+    
+    try:
+        logger.info(f"[SESSION DEBUG] {step_name}: Session token length: {len(session_token)}")
+        logger.info(f"[SESSION DEBUG] {step_name}: First 20 chars: {session_token[:20]}")
+        logger.info(f"[SESSION DEBUG] {step_name}: Last 20 chars: {session_token[-20:]}")
+    except Exception as e:
+        logger.error(f"[SESSION DEBUG] Error logging session info: {str(e)}")
+
 # Generate Client Secret Hash
 def generate_client_secret_hash(username: str) -> str:
     try:
@@ -218,7 +232,7 @@ def authenticate_user(username, password):
                 
                 # Log session for debugging
                 session_value = response.get("Session", "")
-                logger.info(f"Returning session token (length: {len(session_value)}, first 20 chars: {session_value[:20] if session_value else 'None'})")
+                log_session_info("Initial auth session", session_value)
                 
                 return response_data
             else:
@@ -243,7 +257,7 @@ def authenticate_user(username, password):
 def respond_to_auth_challenge(username, session, challenge_name, challenge_responses):
     """Responds to an authentication challenge like NEW_PASSWORD_REQUIRED"""
     logger.info(f"Responding to {challenge_name} challenge for user: {username}")
-    logger.info(f"Session length: {len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
+    log_session_info("respond_to_auth_challenge input", session)
     
     try:
         # Generate secret hash
@@ -300,6 +314,9 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
                 "session": response.get("Session"),
                 "mfa_required": next_challenge == "SOFTWARE_TOKEN_MFA"
             }
+            
+            # Log new session
+            log_session_info("New session after challenge response", response.get("Session"))
             
             # Include MFA secret code if this is an MFA setup challenge
             if next_challenge == "MFA_SETUP":
@@ -478,7 +495,7 @@ def verify_software_token_setup(access_token, code):
 def verify_mfa(session, code, username):
     """Verifies a multi-factor authentication code."""
     logger.info(f"MFA verification initiated for user: {username}")
-    logger.info(f"Session length: {len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
+    log_session_info("verify_mfa input session", session)
     
     # Input validation
     if not code or not isinstance(code, str):
@@ -675,7 +692,7 @@ def respond_to_challenge_endpoint():
         challenge_responses = data.get('challengeResponses', {})
         
         # Log session information
-        logger.info(f"Session received in respond-to-challenge: length={len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
+        log_session_info("respond-to-challenge endpoint", session)
         
         if not (username and session and challenge_name):
             return jsonify({"detail": "Username, session, and challengeName are required"}), 400
@@ -758,6 +775,40 @@ def verify_mfa_setup_endpoint():
         logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
+# Add endpoint to test MFA codes against the secret
+@auth_services_routes.route("/test-mfa-code", methods=["POST", "OPTIONS"])
+def test_mfa_code_endpoint():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        secret = data.get('secret')
+        code = data.get('code')
+        
+        if not secret or not code:
+            return jsonify({"valid": False, "error": "Missing secret or code"}), 400
+        
+        # Create a TOTP object with the secret
+        totp = pyotp.TOTP(secret)
+        current_time = time.time()
+        current_code = totp.now()
+        
+        # Verify the code with a window
+        is_valid = totp.verify(code, valid_window=1)  # Allow 1 step before/after for time sync issues
+        
+        return jsonify({
+            "valid": is_valid,
+            "provided_code": code,
+            "current_code": current_code,
+            "timestamp": int(current_time),
+            "time_window": f"{int(current_time) % 30}/30 seconds",
+            "server_time": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error in test_mfa_code_endpoint: {e}")
+        return jsonify({"valid": False, "error": str(e)}), 500
+
 # Fixed MFA setup implementation that follows the exact PowerShell flow
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
@@ -778,8 +829,8 @@ def confirm_mfa_setup_endpoint():
         password = data.get('password', '')  # Added password parameter
         
         # Enhanced session validation and logging
-        logger.info(f"Received session token: length={len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
-        logger.info(f"MFA setup parameters: username={username}, code length={len(code) if code else 0}")
+        log_session_info("confirm-mfa-setup initial session", session)
+        logger.info(f"MFA setup parameters: username={username}, code length={len(code) if code else 0}, password provided={bool(password)}")
         
         # Validate input parameters
         if not code:
@@ -808,7 +859,7 @@ def confirm_mfa_setup_endpoint():
             new_session = associate_response.get("Session")
             
             logger.info(f"Got secret code: {secret_code}")
-            logger.info(f"New session after associate_software_token: length={len(new_session) if new_session else 0}")
+            log_session_info("Session after associate_software_token", new_session)
             
             if not secret_code:
                 logger.error("Failed to get secret code from associate_software_token")
@@ -816,6 +867,22 @@ def confirm_mfa_setup_endpoint():
             
             # Step 2: Call verify_software_token with the session and code
             logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
+            
+            # Add debug info to check TOTP validation directly
+            try:
+                # Create a TOTP object with the secret
+                totp = pyotp.TOTP(secret_code)
+                current_code = totp.now()
+                is_valid = totp.verify(code, valid_window=1)  # Allow 1 step before/after
+                logger.info(f"TOTP Validation: Current code = {current_code}, User code = {code}, Valid = {is_valid}")
+                logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
+                
+                # Check adjacent time windows
+                prev_window = totp.at(datetime.now() - timedelta(seconds=30))
+                next_window = totp.at(datetime.now() + timedelta(seconds=30))
+                logger.info(f"Adjacent codes: Previous = {prev_window}, Next = {next_window}")
+            except Exception as totp_error:
+                logger.error(f"TOTP validation error: {totp_error}")
             
             # Use new session if available, otherwise use original
             verify_session = new_session if new_session else session
@@ -830,7 +897,7 @@ def confirm_mfa_setup_endpoint():
             verify_session = verify_response.get("Session")  # Get possibly new session
             
             logger.info(f"MFA verification status: {status}")
-            logger.info(f"Session after verify_software_token: length={len(verify_session) if verify_session else 0}")
+            log_session_info("Session after verify_software_token", verify_session)
             
             if status != "SUCCESS":
                 logger.warning(f"Verification returned non-SUCCESS status: {status}")
@@ -845,7 +912,8 @@ def confirm_mfa_setup_endpoint():
                     # Generate secret hash
                     secret_hash = generate_client_secret_hash(username)
                     
-                    # Final authentication with MFA - UPDATED to use SOFTWARE_TOKEN_MFA flow
+                    # First do USER_PASSWORD_AUTH to get a session
+                    logger.info("Step 3a: Initiating auth with USER_PASSWORD_AUTH to get MFA challenge")
                     final_auth_response = cognito_client.initiate_auth(
                         ClientId=CLIENT_ID,
                         AuthFlow="USER_PASSWORD_AUTH",
@@ -856,21 +924,37 @@ def confirm_mfa_setup_endpoint():
                         }
                     )
                     
+                    # Log response keys
+                    logger.info(f"initiate_auth response keys: {list(final_auth_response.keys())}")
+                    
                     # Check if we got MFA challenge (which we should since MFA is now enabled)
                     if final_auth_response.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
                         # Now respond to the MFA challenge with a fresh code
                         mfa_session = final_auth_response.get("Session")
                         
-                        logger.info(f"Got MFA challenge with session length: {len(mfa_session) if mfa_session else 0}")
+                        log_session_info("MFA challenge session", mfa_session)
                         
-                        # Respond to the MFA challenge using the same code
+                        # Get a fresh code from TOTP
+                        try:
+                            totp = pyotp.TOTP(secret_code)
+                            fresh_code = totp.now()
+                            logger.info(f"Generated fresh TOTP code: {fresh_code}")
+                            # Use the fresh code or the original code if it's still valid
+                            verification_code = fresh_code if totp.verify(code) else code
+                        except Exception as totp_error:
+                            logger.error(f"Error generating fresh TOTP code: {totp_error}")
+                            verification_code = code
+                        
+                        logger.info(f"Step 3b: Responding to MFA challenge with code: {verification_code}")
+                        
+                        # Respond to the MFA challenge
                         mfa_response = cognito_client.respond_to_auth_challenge(
                             ClientId=CLIENT_ID,
                             ChallengeName="SOFTWARE_TOKEN_MFA",
                             Session=mfa_session,
                             ChallengeResponses={
                                 "USERNAME": username,
-                                "SOFTWARE_TOKEN_MFA_CODE": code,
+                                "SOFTWARE_TOKEN_MFA_CODE": verification_code,
                                 "SECRET_HASH": secret_hash
                             }
                         )
@@ -896,7 +980,7 @@ def confirm_mfa_setup_endpoint():
                             })
                     else:
                         # Unexpected flow but MFA setup was successful
-                        logger.info("MFA setup successful, but no MFA challenge received")
+                        logger.info(f"MFA setup successful, but no MFA challenge received. Response: {final_auth_response}")
                         return jsonify({
                             "message": "MFA setup verified successfully. Please log in again.",
                             "status": "SUCCESS"
@@ -922,6 +1006,7 @@ def confirm_mfa_setup_endpoint():
             
         except cognito_client.exceptions.CodeMismatchException as code_error:
             logger.warning(f"CodeMismatchException: {code_error}")
+            logger.warning(traceback.format_exc())
             return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
             
         except Exception as e:
@@ -945,7 +1030,7 @@ def verify_mfa_endpoint():
     username = data.get('username')
 
     # Log session information
-    logger.info(f"Session received in verify-mfa: length={len(session) if session else 0}, first 20 chars: {session[:20] if session else 'None'}")
+    log_session_info("verify-mfa endpoint", session)
 
     if not (session and code and username):
         return jsonify({"detail": "Session, username, and code are required"}), 400

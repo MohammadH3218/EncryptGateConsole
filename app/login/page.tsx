@@ -93,6 +93,29 @@ export default function LoginPage() {
     }
   }, [debugMode]);
 
+  // Helper function to log session token info
+  const logSessionInfo = useCallback((label: string, sessionToken?: string) => {
+    const token = sessionToken || session;
+    if (!token) {
+      console.log(`[SESSION INFO] ${label}: No session token available`);
+      return;
+    }
+    
+    console.log(`[SESSION INFO] ${label}:`);
+    console.log(`- Length: ${token.length}`);
+    console.log(`- First 20 chars: ${token.substring(0, 20)}`);
+    console.log(`- Last 20 chars: ${token.substring(token.length - 20)}`);
+    console.log(`- Current timestamp: ${new Date().toISOString()}`);
+    
+    if (debugMode) {
+      setApiCallLog(prev => [...prev, { 
+        timestamp: new Date().toISOString(),
+        action: "Session Info", 
+        result: `${label}: Length=${token.length}, First 20 chars=${token.substring(0, 20)}`
+      }]);
+    }
+  }, [session, debugMode, setApiCallLog]);
+
   // Fetch API URL from the backend with fallback
   useEffect(() => {
     const configuredUrl = process.env.NEXT_PUBLIC_API_URL;
@@ -120,6 +143,33 @@ export default function LoginPage() {
       logApiCall("QR Code Generation", `Generated QR code for secret: ${mfaSecretCode}`);
     }
   }, [mfaSecretCode, email, logApiCall]);
+
+  // Test MFA code against the server's time
+  const testMfaCode = async (code: string): Promise<boolean> => {
+    if (!apiBaseUrl || !mfaSecretCode) return false;
+    
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({
+          secret: mfaSecretCode,
+          code: code
+        }),
+      });
+      
+      const result = await response.json();
+      logApiCall("MFA Code Test", JSON.stringify(result));
+      
+      return result.valid;
+    } catch (error) {
+      logApiCall("MFA Code Test Error", String(error));
+      return false;
+    }
+  };
 
   // Handle forgot password request
   const handleForgotPasswordRequest = async () => {
@@ -319,9 +369,7 @@ export default function LoginPage() {
       // Immediately save session if available - THIS IS CRITICAL FOR MFA FLOW
       if (responseData.session) {
         setSession(responseData.session);
-        console.log("Saved session token length:", responseData.session.length);
-        console.log("Session token first 20 chars:", responseData.session.substring(0, 20));
-        logApiCall("Session Token", `Received and stored session token (length: ${responseData.session.length})`);
+        logSessionInfo("Initial login session", responseData.session);
       }
 
       // Store password temporarily for MFA setup if needed
@@ -417,8 +465,7 @@ export default function LoginPage() {
       const challengeEndpoint = `${apiBaseUrl}/api/auth/respond-to-challenge`;
       
       logApiCall("Password Change Request", "Sending NEW_PASSWORD_REQUIRED challenge response");
-      console.log("Using session token length:", session.length);
-      console.log("Session token first 20 chars:", session.substring(0, 20));
+      logSessionInfo("Password change session");
       
       const response = await fetchWithRetry(challengeEndpoint, {
         method: "POST",
@@ -451,9 +498,7 @@ export default function LoginPage() {
       // Save new session if available - CRITICAL FOR MFA FLOW
       if (responseData.session) {
         setSession(responseData.session);
-        console.log("Updated session token length:", responseData.session.length);
-        console.log("Updated session token first 20 chars:", responseData.session.substring(0, 20));
-        logApiCall("Session Token", `Updated session token (length: ${responseData.session.length})`);
+        logSessionInfo("Updated session after password change", responseData.session);
       }
 
       // Update stored password for MFA setup
@@ -531,7 +576,7 @@ export default function LoginPage() {
     }
   };
 
-  // Updated handleMFASetup function to include the password
+  // Updated handleMFASetup function to include the password and better session handling
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -543,15 +588,25 @@ export default function LoginPage() {
       return;
     }
     
+    // Validate MFA code with server time first
+    try {
+      const isValid = await testMfaCode(setupMfaCode);
+      if (!isValid) {
+        setError("This code doesn't match. Please make sure your device time is synced and try with a new code.");
+        setSetupMfaCode("");
+        return;
+      }
+    } catch (error) {
+      // Continue even if the test fails - the real verification will happen on the server
+      logApiCall("MFA Code Validation", "Pre-validation failed, but continuing with setup");
+    }
+    
     // Log critical session info first
-    console.log("Session token for MFA setup:");
-    console.log("- Available:", !!session);
-    console.log("- Length:", session ? session.length : 0);
-    console.log("- First 20 chars:", session ? session.substring(0, 20) : "N/A");
+    logSessionInfo("MFA setup session");
     
     // Get the password from session storage
     const savedPassword = sessionStorage.getItem("temp_password") || "";
-    console.log("Password available for MFA setup:", !!savedPassword);
+    logApiCall("MFA Setup", `Password available for MFA setup: ${!!savedPassword}`);
     
     // Validate the session before proceeding
     if (!session) {
@@ -572,7 +627,16 @@ export default function LoginPage() {
         password: savedPassword // Include the password here!
       };
       
-      logApiCall("MFA Setup Verification", `Sending verification request with code ${setupMfaCode}, session length ${session.length}, password included: ${!!savedPassword}`);
+      logApiCall("MFA Setup Verification", 
+        `Sending verification request with code ${setupMfaCode}, session length ${session.length}, password included: ${!!savedPassword}`);
+      
+      // Log the full request for debugging
+      if (debugMode) {
+        console.log("MFA Setup Request Body:", JSON.stringify({
+          ...requestBody,
+          password: savedPassword ? "[REDACTED]" : ""
+        }));
+      }
       
       const response = await fetchWithRetry(endpoint, {
         method: "POST",
@@ -590,7 +654,8 @@ export default function LoginPage() {
       let responseData;
       try {
         responseData = await response.json();
-        logApiCall("MFA Setup Verification Response", `Status: ${response.status}, Keys: ${Object.keys(responseData).join(', ')}`);
+        logApiCall("MFA Setup Verification Response", 
+          `Status: ${response.status}, Keys: ${Object.keys(responseData).join(', ')}`);
       } catch (parseError) {
         throw new Error("Unable to parse server response. Please try again.");
       }
@@ -668,9 +733,7 @@ export default function LoginPage() {
     const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
     
     // Log session information for debugging
-    console.log("Session token for MFA verification:");
-    console.log("- Length:", session ? session.length : 0);
-    console.log("- First 20 chars:", session ? session.substring(0, 20) : "N/A");
+    logSessionInfo("MFA verification session");
 
     try {
       logApiCall("MFA Verification", `Verifying MFA code: ${mfaCode}, session length: ${session.length}`);
@@ -793,6 +856,35 @@ export default function LoginPage() {
     }
   };
 
+  // Helper function to update with a fresh code
+  const refreshMfaCode = async () => {
+    if (!mfaSecretCode) return;
+    
+    // Test the TOTP validation
+    try {
+      const testResponse = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          secret: mfaSecretCode, 
+          code: setupMfaCode || "000000" // Just to get the current code
+        })
+      });
+      
+      const testResult = await testResponse.json();
+      logApiCall("MFA Fresh Code", JSON.stringify(testResult));
+      
+      if (testResult.current_code) {
+        setSetupMfaCode(testResult.current_code);
+        return testResult.current_code;
+      }
+    } catch (error) {
+      logApiCall("MFA Fresh Code Error", String(error));
+    }
+    
+    return null;
+  };
+
   // Toggle debug mode for development
   const toggleDebugMode = () => {
     setDebugMode(prev => {
@@ -800,10 +892,7 @@ export default function LoginPage() {
       console.log("Debug mode:", newMode ? "ON" : "OFF");
       // Automatically log session info when debug mode is turned on
       if (newMode) {
-        console.log("Current session token info:");
-        console.log("- Available:", !!session);
-        console.log("- Length:", session ? session.length : 0);
-        if (session) console.log("- First 20 chars:", session.substring(0, 20));
+        logSessionInfo("Current session token");
         console.log("Temporary password stored:", !!sessionStorage.getItem("temp_password"));
       }
       return newMode;
@@ -929,6 +1018,36 @@ export default function LoginPage() {
                       <strong>Temp Password:</strong>{" "}
                       {sessionStorage.getItem("temp_password") ? "Available" : "Not available"}
                     </div>
+                    <div className="mb-2">
+                      <strong>Server Time:</strong>{" "}
+                      <button 
+                        onClick={async () => {
+                          try {
+                            const resp = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+                              method: "POST", 
+                              headers: {"Content-Type": "application/json"},
+                              body: JSON.stringify({secret: "AAAAAAAAAA", code: "000000"})
+                            });
+                            const data = await resp.json();
+                            console.log("Server time:", data.server_time);
+                            alert(`Server time: ${data.server_time}\nLocal time: ${new Date().toISOString()}`);
+                          } catch (e) {
+                            console.error("Error getting server time:", e);
+                          }
+                        }} 
+                        className="text-blue-500 underline"
+                      >
+                        Check
+                      </button>
+                    </div>
+                    <button 
+                      onClick={async () => {
+                        await refreshMfaCode();
+                      }}
+                      className="mb-2 text-blue-500 underline"
+                    >
+                      Get Fresh MFA Code
+                    </button>
                     <pre>{JSON.stringify(apiCallLog, null, 2)}</pre>
                   </div>
                 </details>
@@ -1053,6 +1172,9 @@ export default function LoginPage() {
                 maxLength={6}
                 className="text-center text-2xl tracking-widest"
               />
+              <p className="text-xs text-center text-muted-foreground">
+                Make sure to enter the current code shown in your app
+              </p>
             </div>
             {error && (
               <Alert variant="destructive">
@@ -1063,11 +1185,25 @@ export default function LoginPage() {
           <DialogFooter className="flex flex-col gap-3 sm:flex-row">
             <Button 
               variant="outline"
+              onClick={async () => {
+                // Try to get a fresh code from the server
+                const freshCode = await refreshMfaCode();
+                if (freshCode) {
+                  setError("Using a server-generated code - click Verify to continue");
+                }
+              }}
+              disabled={isLoading}
+              className="sm:w-auto w-full"
+            >
+              Get Current Code
+            </Button>
+            <Button 
+              variant="outline"
               onClick={handleRegenerateMfaSetup}
               disabled={isLoading}
               className="sm:w-auto w-full"
             >
-              Regenerate Code
+              Regenerate
             </Button>
             <Button 
               onClick={handleMFASetup} 
