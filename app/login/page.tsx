@@ -504,7 +504,7 @@ export default function LoginPage() {
     }
   };
 
-  // Updated handleMFASetup function with improved error handling and debugging
+  // Updated handleMFASetup function with improved error handling and prioritized session flow
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -523,35 +523,31 @@ export default function LoginPage() {
       // Get the access token from localStorage
       const accessToken = localStorage.getItem("temp_access_token") || localStorage.getItem("access_token");
       
-      // Check if we have a session - we'll use this as a fallback if access_token is not available
-      if (!accessToken && !session) {
-        throw new Error("Authentication session expired. Please log in again.");
-      }
-      
       // Increment MFA setup attempts counter
       setMfaSetupAttempts(prev => prev + 1);
       
       let endpoint;
       let requestBody;
       
-      // Determine which API endpoint and request structure to use based on available credentials
-      if (accessToken) {
-        // Use the access token flow
-        endpoint = `${apiBaseUrl}/api/auth/verify-mfa-setup`;
-        requestBody = {
-          access_token: accessToken,
-          code: setupMfaCode
-        };
-        logApiCall("MFA Setup Verification", `Using access token flow with code: ${setupMfaCode}`);
-      } else {
-        // Use the session-based flow
+      // Prioritize using the session flow which matches the PowerShell approach
+      if (session) {
         endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
         requestBody = {
           username: email,
           session: session,
           code: setupMfaCode
         };
-        logApiCall("MFA Setup Verification", `Using session flow with code: ${setupMfaCode}`);
+        if (debugMode) logApiCall("MFA Setup Verification", `Using session flow with code: ${setupMfaCode}`);
+      } else if (accessToken) {
+        // Fallback to access token flow
+        endpoint = `${apiBaseUrl}/api/auth/verify-mfa-setup`;
+        requestBody = {
+          access_token: accessToken,
+          code: setupMfaCode
+        };
+        if (debugMode) logApiCall("MFA Setup Verification", `Using access token flow with code: ${setupMfaCode}`);
+      } else {
+        throw new Error("Authentication session expired. Please log in again.");
       }
       
       const response = await fetchWithRetry(endpoint, {
@@ -570,17 +566,14 @@ export default function LoginPage() {
       let responseData;
       try {
         responseData = await response.json();
-        logApiCall("MFA Setup Verification Response", `Status: ${response.status}, Response: ${JSON.stringify(responseData)}`);
+        if (debugMode) logApiCall("MFA Setup Verification Response", `Status: ${response.status}`);
       } catch (parseError) {
-        logApiCall("MFA Setup Verification Parse Error", String(parseError));
         throw new Error("Unable to parse server response. Please try again.");
       }
       
       if (!response.ok) {
         // Check for specific error types from backend
         if (response.status === 400 && responseData.detail) {
-          logApiCall("MFA Setup Verification Error", responseData.detail);
-          
           // Check if it's a code mismatch error
           if (responseData.detail.includes("code is incorrect") || 
               responseData.detail.includes("CodeMismatchException")) {
@@ -597,18 +590,13 @@ export default function LoginPage() {
           } else {
             throw new Error(responseData.detail);
           }
-        } else if (response.status === 500) {
-          logApiCall("MFA Setup Verification Server Error", responseData.detail || "Server error");
-          throw new Error("Server error while verifying code. Please try again with a new code.");
         } else {
-          logApiCall("MFA Setup Verification Error", responseData.detail || `Failed to verify MFA setup (${response.status})`);
           throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
         }
       }
       
       // MFA setup successful, close dialog and process the result
       setShowMFASetup(false);
-      logApiCall("MFA Setup Verification", "MFA setup successful");
       
       // Clean up temporary token
       localStorage.removeItem("temp_access_token");
@@ -621,17 +609,15 @@ export default function LoginPage() {
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
         
         // Redirect to dashboard
-        logApiCall("MFA Setup Flow", "Redirecting to dashboard");
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       } else {
         // We didn't get tokens, inform user to log in again
-        logApiCall("MFA Setup Flow", "MFA setup successful, prompting user to log in again");
         setSuccessMessage("MFA setup successful. Please log in again.");
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to set up MFA";
       setError(errorMessage);
-      logApiCall("MFA Setup Error", errorMessage);
+      if (debugMode) logApiCall("MFA Setup Error", errorMessage);
       
       // If there's an issue with the verification code, clear the input
       // so the user can try again with a new code
