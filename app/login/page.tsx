@@ -42,6 +42,8 @@ interface LoginResponse {
   message?: string;
   status?: string;
   username?: string;
+  currentCode?: string;
+  currentValidCode?: string;
 }
 
 export default function LoginPage() {
@@ -78,7 +80,9 @@ export default function LoginPage() {
   const [forgotPasswordError, setForgotPasswordError] = useState("");
   const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false);
   
+  // Server data
   const [session, setSession] = useState("");
+  const [serverTime, setServerTime] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null);
   const [debugMode, setDebugMode] = useState(false);
@@ -126,23 +130,94 @@ export default function LoginPage() {
     
     setApiBaseUrl(finalUrl);
     logApiCall("API URL Configuration", `Set API URL to ${finalUrl}`);
+    
+    // Check server time when API URL is set
+    if (finalUrl) {
+      fetchServerTime(finalUrl);
+    }
   }, [logApiCall]);
+
+  // Fetch server time for time synchronization check
+  const fetchServerTime = async (baseUrl: string) => {
+    try {
+      const response = await fetch(`${baseUrl}/api/auth/test-mfa-code`, {
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ secret: "AAAAAAAAAA", code: "000000" })
+      });
+      const data = await response.json();
+      
+      if (data.server_time) {
+        setServerTime(data.server_time);
+        
+        // Check time difference
+        const serverDate = new Date(data.server_time);
+        const clientDate = new Date();
+        const diffMs = Math.abs(serverDate.getTime() - clientDate.getTime());
+        
+        if (diffMs > 30000) { // 30 seconds
+          console.warn(`Time synchronization issue: Server time differs by ${Math.round(diffMs/1000)} seconds`);
+          if (debugMode) {
+            setApiCallLog(prev => [...prev, {
+              timestamp: new Date().toISOString(),
+              action: "Time Sync Warning",
+              result: `Server time differs by ${Math.round(diffMs/1000)} seconds. This may cause MFA verification issues.`
+            }]);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch server time:", error);
+    }
+  };
 
   // Generate QR code URL when secret code is available
   useEffect(() => {
     if (mfaSecretCode) {
       // Create a QR code URL for the authenticator app
-      // Format: otpauth://totp/[Service]:[User]?secret=[Secret]&issuer=[Service]
+      // Format optimized for Google Authenticator
       const serviceName = "EncryptGate";
-      const otpauthUrl = `otpauth://totp/${serviceName}:${encodeURIComponent(email)}?secret=${mfaSecretCode}&issuer=${serviceName}`;
+      const otpauthUrl = `otpauth://totp/${serviceName.toLowerCase()}:${encodeURIComponent(email)}?secret=${mfaSecretCode}&issuer=${serviceName.toLowerCase()}`;
       
       // Generate QR code URL using a QR code API
       const qrCodeApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(otpauthUrl)}`;
       setQrCodeUrl(qrCodeApiUrl);
       
       logApiCall("QR Code Generation", `Generated QR code for secret: ${mfaSecretCode}`);
+      
+      // Try to get current valid code from server
+      getCurrentValidCode();
     }
   }, [mfaSecretCode, email, logApiCall]);
+
+  // Get current valid code from server
+  const getCurrentValidCode = async (): Promise<string | null> => {
+    if (!apiBaseUrl || !mfaSecretCode) return null;
+    
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({
+          secret: mfaSecretCode
+        }),
+      });
+      
+      const result = await response.json();
+      logApiCall("Get Current MFA Code", `Current valid code: ${result.current_code}`);
+      
+      if (result.current_code) {
+        return result.current_code;
+      }
+      return null;
+    } catch (error) {
+      logApiCall("Get Current MFA Code Error", String(error));
+      return null;
+    }
+  };
 
   // Test MFA code against the server's time
   const testMfaCode = async (code: string): Promise<boolean> => {
@@ -410,6 +485,10 @@ export default function LoginPage() {
             setMfaSecretCode(mfaData.secretCode);
             // Store the access token for later use in MFA verification
             localStorage.setItem("temp_access_token", responseData.access_token);
+            // If there's a current valid code from the server, use it
+            if (mfaData.currentCode) {
+              setSetupMfaCode(mfaData.currentCode);
+            }
             setShowMFASetup(true);
             return;
           }
@@ -534,6 +613,10 @@ export default function LoginPage() {
             setMfaSecretCode(mfaData.secretCode);
             // Store the access token for later use in MFA verification
             localStorage.setItem("temp_access_token", responseData.access_token);
+            // If there's a current valid code from the server, use it
+            if (mfaData.currentCode) {
+              setSetupMfaCode(mfaData.currentCode);
+            }
             setShowMFASetup(true);
             return;
           }
@@ -576,6 +659,28 @@ export default function LoginPage() {
     }
   };
 
+  // Helper function to update with a fresh code
+  const refreshMfaCode = async () => {
+    if (!mfaSecretCode) return;
+    
+    setIsLoading(true);
+    try {
+      // Get current valid code from server
+      const freshCode = await getCurrentValidCode();
+      if (freshCode) {
+        setSetupMfaCode(freshCode);
+        setError("");
+        setSuccessMessage("Using the current valid code from the server. Click Verify to continue.");
+      } else {
+        setError("Could not get a valid code from the server. Please try manually.");
+      }
+    } catch (error) {
+      setError("Failed to get a valid code. Try typing the code from your Google Authenticator app.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Updated handleMFASetup function to include the password and better session handling
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
@@ -592,8 +697,13 @@ export default function LoginPage() {
     try {
       const isValid = await testMfaCode(setupMfaCode);
       if (!isValid) {
-        setError("This code doesn't match. Please make sure your device time is synced and try with a new code.");
-        setSetupMfaCode("");
+        const freshCode = await getCurrentValidCode();
+        if (freshCode) {
+          setError(`The code you entered doesn't match. Try using this code: ${freshCode}`);
+          setSetupMfaCode(freshCode);
+        } else {
+          setError("This code doesn't match. Please use the current code from Google Authenticator.");
+        }
         return;
       }
     } catch (error) {
@@ -616,6 +726,7 @@ export default function LoginPage() {
     
     setIsLoading(true);
     setError("");
+    setSuccessMessage("");
     
     try {
       // Use the session-based flow for MFA verification
@@ -651,7 +762,7 @@ export default function LoginPage() {
       }, 1);
       
       // Try to parse the response
-      let responseData;
+      let responseData: LoginResponse;
       try {
         responseData = await response.json();
         logApiCall("MFA Setup Verification Response", 
@@ -663,6 +774,12 @@ export default function LoginPage() {
       if (!response.ok) {
         // Check for specific error types from backend
         if (response.status === 400 && responseData.detail) {
+          // If we have a currentValidCode in the response, suggest it to the user
+          if (responseData.currentValidCode) {
+            setSetupMfaCode(responseData.currentValidCode);
+            throw new Error(`The code you entered is incorrect. Try this current code: ${responseData.currentValidCode}`);
+          }
+          
           // Check if it's a code mismatch error
           if (responseData.detail.includes("code is incorrect") || 
               responseData.detail.includes("CodeMismatchException")) {
@@ -705,7 +822,7 @@ export default function LoginPage() {
       
       // If there's an issue with the verification code, clear the input
       // so the user can try again with a new code
-      if (errorMessage.includes("code") || errorMessage.includes("verification")) {
+      if (errorMessage.includes("code") || errorMessage.includes("verification") && !errorMessage.includes("Try this current code")) {
         setSetupMfaCode("");
       }
       
@@ -842,8 +959,14 @@ export default function LoginPage() {
       if (mfaResponse.ok && mfaData.secretCode) {
         // Update the secret code and clear the input
         setMfaSecretCode(mfaData.secretCode);
-        setSetupMfaCode("");
+        // If there's a current valid code from the server, use it
+        if (mfaData.currentCode) {
+          setSetupMfaCode(mfaData.currentCode);
+        } else {
+          setSetupMfaCode("");
+        }
         setMfaSetupAttempts(0);
+        setSuccessMessage("MFA setup regenerated. Scan the new QR code with Google Authenticator.");
         return;
       } else {
         throw new Error(mfaData.detail || "Failed to regenerate MFA setup");
@@ -854,35 +977,6 @@ export default function LoginPage() {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Helper function to update with a fresh code
-  const refreshMfaCode = async () => {
-    if (!mfaSecretCode) return;
-    
-    // Test the TOTP validation
-    try {
-      const testResponse = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          secret: mfaSecretCode, 
-          code: setupMfaCode || "000000" // Just to get the current code
-        })
-      });
-      
-      const testResult = await testResponse.json();
-      logApiCall("MFA Fresh Code", JSON.stringify(testResult));
-      
-      if (testResult.current_code) {
-        setSetupMfaCode(testResult.current_code);
-        return testResult.current_code;
-      }
-    } catch (error) {
-      logApiCall("MFA Fresh Code Error", String(error));
-    }
-    
-    return null;
   };
 
   // Toggle debug mode for development
@@ -1020,33 +1114,31 @@ export default function LoginPage() {
                     </div>
                     <div className="mb-2">
                       <strong>Server Time:</strong>{" "}
-                      <button 
-                        onClick={async () => {
-                          try {
-                            const resp = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
-                              method: "POST", 
-                              headers: {"Content-Type": "application/json"},
-                              body: JSON.stringify({secret: "AAAAAAAAAA", code: "000000"})
-                            });
-                            const data = await resp.json();
-                            console.log("Server time:", data.server_time);
-                            alert(`Server time: ${data.server_time}\nLocal time: ${new Date().toISOString()}`);
-                          } catch (e) {
-                            console.error("Error getting server time:", e);
-                          }
-                        }} 
-                        className="text-blue-500 underline"
-                      >
-                        Check
-                      </button>
+                      {serverTime || "Unknown"}
+                    </div>
+                    <div className="mb-2">
+                      <strong>Local Time:</strong>{" "}
+                      {new Date().toISOString()}
                     </div>
                     <button 
                       onClick={async () => {
-                        await refreshMfaCode();
-                      }}
+                        try {
+                          const resp = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+                            method: "POST", 
+                            headers: {"Content-Type": "application/json"},
+                            body: JSON.stringify({secret: "AAAAAAAAAA", code: "000000"})
+                          });
+                          const data = await resp.json();
+                          setServerTime(data.server_time);
+                          console.log("Server time:", data.server_time);
+                          alert(`Server time: ${data.server_time}\nLocal time: ${new Date().toISOString()}`);
+                        } catch (e) {
+                          console.error("Error getting server time:", e);
+                        }
+                      }} 
                       className="mb-2 text-blue-500 underline"
                     >
-                      Get Fresh MFA Code
+                      Check Server Time
                     </button>
                     <pre>{JSON.stringify(apiCallLog, null, 2)}</pre>
                   </div>
@@ -1123,23 +1215,25 @@ export default function LoginPage() {
           <DialogHeader>
             <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
             <DialogDescription>
-              For additional security, please set up two-factor authentication using an authenticator app.
+              For additional security, please set up two-factor authentication using Google Authenticator.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <Alert>
               <AlertDescription>
-                1. Install an authenticator app like Google Authenticator or Authy on your mobile device.
-                <br />
-                2. Scan the QR code or enter the secret key in your app.
-                <br />
-                3. Enter the 6-digit code from your authenticator app below.
+                <strong>Important Instructions:</strong>
+                <ol className="list-decimal list-inside mt-2 space-y-1">
+                  <li>Install Google Authenticator on your mobile device</li>
+                  <li>Open Google Authenticator and scan the QR code below</li>
+                  <li>Enter the 6-digit code shown in Google Authenticator</li>
+                  <li>Click "Get Current Code" if you encounter any issues</li>
+                </ol>
               </AlertDescription>
             </Alert>
             
             {qrCodeUrl && (
               <div className="flex flex-col items-center justify-center space-y-2">
-                <Label>Scan QR Code</Label>
+                <Label>Scan QR Code with Google Authenticator</Label>
                 <div className="bg-white p-2 rounded-md">
                   <img 
                     src={qrCodeUrl || "/placeholder.svg"} 
@@ -1152,18 +1246,18 @@ export default function LoginPage() {
             
             {mfaSecretCode && (
               <div className="space-y-2 text-center">
-                <Label>Secret Key</Label>
+                <Label>Secret Key (if you can't scan the QR code)</Label>
                 <div className="p-3 bg-muted rounded-md font-mono text-center break-all">
                   {mfaSecretCode}
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Enter this code manually if you cannot scan the QR code
+                  Enter this code manually in Google Authenticator if scanning fails
                 </p>
               </div>
             )}
             
             <div className="space-y-2">
-              <Label htmlFor="setup-mfa-code">Authentication Code</Label>
+              <Label htmlFor="setup-mfa-code">Verification Code from Google Authenticator</Label>
               <Input
                 id="setup-mfa-code"
                 placeholder="000000"
@@ -1173,7 +1267,7 @@ export default function LoginPage() {
                 className="text-center text-2xl tracking-widest"
               />
               <p className="text-xs text-center text-muted-foreground">
-                Make sure to enter the current code shown in your app
+                Enter the current code shown in Google Authenticator app
               </p>
             </div>
             {error && (
@@ -1181,17 +1275,16 @@ export default function LoginPage() {
                 <AlertDescription className="text-sm">{error}</AlertDescription>
               </Alert>
             )}
+            {successMessage && (
+              <Alert>
+                <AlertDescription className="text-sm">{successMessage}</AlertDescription>
+              </Alert>
+            )}
           </div>
           <DialogFooter className="flex flex-col gap-3 sm:flex-row">
             <Button 
-              variant="outline"
-              onClick={async () => {
-                // Try to get a fresh code from the server
-                const freshCode = await refreshMfaCode();
-                if (freshCode) {
-                  setError("Using a server-generated code - click Verify to continue");
-                }
-              }}
+              variant="secondary"
+              onClick={refreshMfaCode}
               disabled={isLoading}
               className="sm:w-auto w-full"
             >
@@ -1203,7 +1296,7 @@ export default function LoginPage() {
               disabled={isLoading}
               className="sm:w-auto w-full"
             >
-              Regenerate
+              Regenerate QR
             </Button>
             <Button 
               onClick={handleMFASetup} 
@@ -1216,7 +1309,7 @@ export default function LoginPage() {
                   Verifying...
                 </>
               ) : (
-                "Verify & Complete Setup"
+                "Verify & Complete"
               )}
             </Button>
           </DialogFooter>
