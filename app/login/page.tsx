@@ -324,6 +324,12 @@ export default function LoginPage() {
         logApiCall("Session Token", `Received and stored session token (length: ${responseData.session.length})`);
       }
 
+      // Store password temporarily for MFA setup if needed
+      if (responseData.mfa_required || responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
+        sessionStorage.setItem("temp_password", password);
+        logApiCall("Password Storage", "Stored password temporarily for MFA setup");
+      }
+
       // Handle different authentication flows
       if (responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
         // Handle password change requirement
@@ -370,6 +376,8 @@ export default function LoginPage() {
         localStorage.setItem("access_token", responseData.access_token);
         localStorage.setItem("id_token", responseData.id_token || "");
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
+        // Clear temporary password
+        sessionStorage.removeItem("temp_password");
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       } else if (responseData.mfa_required) {
         // Standard MFA verification
@@ -447,6 +455,9 @@ export default function LoginPage() {
         console.log("Updated session token first 20 chars:", responseData.session.substring(0, 20));
         logApiCall("Session Token", `Updated session token (length: ${responseData.session.length})`);
       }
+
+      // Update stored password for MFA setup
+      sessionStorage.setItem("temp_password", newPassword);
       
       // Handle different response types
       if (responseData.access_token) {
@@ -493,6 +504,8 @@ export default function LoginPage() {
         localStorage.setItem("id_token", responseData.id_token || "");
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
         setShowPasswordChange(false);
+        // Clear temporary password
+        sessionStorage.removeItem("temp_password");
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       } else if (responseData.ChallengeName) {
         // Handle additional challenges
@@ -518,7 +531,7 @@ export default function LoginPage() {
     }
   };
 
-  // Updated handleMFASetup function with improved error handling and prioritized session flow
+  // Updated handleMFASetup function to include the password
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -535,8 +548,10 @@ export default function LoginPage() {
     console.log("- Available:", !!session);
     console.log("- Length:", session ? session.length : 0);
     console.log("- First 20 chars:", session ? session.substring(0, 20) : "N/A");
-    console.log(`Sending MFA verification with session token length: ${session.length}`);
     
+    // Get the password from session storage
+    const savedPassword = sessionStorage.getItem("temp_password") || "";
+    console.log("Password available for MFA setup:", !!savedPassword);
     
     // Validate the session before proceeding
     if (!session) {
@@ -548,15 +563,16 @@ export default function LoginPage() {
     setError("");
     
     try {
-      // Always use the session-based flow for MFA verification
+      // Use the session-based flow for MFA verification
       const endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
       const requestBody = {
         username: email,
         session: session,
-        code: setupMfaCode
+        code: setupMfaCode,
+        password: savedPassword // Include the password here!
       };
       
-      logApiCall("MFA Setup Verification", `Sending verification request with code ${setupMfaCode}, session length ${session.length}`);
+      logApiCall("MFA Setup Verification", `Sending verification request with code ${setupMfaCode}, session length ${session.length}, password included: ${!!savedPassword}`);
       
       const response = await fetchWithRetry(endpoint, {
         method: "POST",
@@ -574,7 +590,7 @@ export default function LoginPage() {
       let responseData;
       try {
         responseData = await response.json();
-        logApiCall("MFA Setup Verification Response", `Status: ${response.status}`);
+        logApiCall("MFA Setup Verification Response", `Status: ${response.status}, Keys: ${Object.keys(responseData).join(', ')}`);
       } catch (parseError) {
         throw new Error("Unable to parse server response. Please try again.");
       }
@@ -600,8 +616,9 @@ export default function LoginPage() {
       // MFA setup successful, close dialog and process the result
       setShowMFASetup(false);
       
-      // Clean up temporary token
+      // Clean up temporary token and password
       localStorage.removeItem("temp_access_token");
+      sessionStorage.removeItem("temp_password");
       
       // Check if we received tokens in the response
       if (responseData.access_token) {
@@ -631,6 +648,7 @@ export default function LoginPage() {
       if (errorMessage.includes("session has expired")) {
         setTimeout(() => {
           setShowMFASetup(false);
+          sessionStorage.removeItem("temp_password");
         }, 3000);
       }
     } finally {
@@ -697,6 +715,9 @@ export default function LoginPage() {
       localStorage.setItem("access_token", data.access_token || "");
       localStorage.setItem("id_token", data.id_token || "");
       localStorage.setItem("refresh_token", data.refresh_token || "");
+      
+      // Clear temporary password
+      sessionStorage.removeItem("temp_password");
 
       logApiCall("MFA Verification", "Successful, redirecting to dashboard");
       router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
@@ -708,6 +729,7 @@ export default function LoginPage() {
       if (error.message.includes("session has expired")) {
         setTimeout(() => {
           setShowMFA(false);
+          sessionStorage.removeItem("temp_password");
         }, 3000);
       }
     } finally {
@@ -782,6 +804,7 @@ export default function LoginPage() {
         console.log("- Available:", !!session);
         console.log("- Length:", session ? session.length : 0);
         if (session) console.log("- First 20 chars:", session.substring(0, 20));
+        console.log("Temporary password stored:", !!sessionStorage.getItem("temp_password"));
       }
       return newMode;
     });
@@ -901,6 +924,10 @@ export default function LoginPage() {
                     <div className="mb-2">
                       <strong>Session:</strong>{" "}
                       {session ? `${session.substring(0, 30)}... (length: ${session.length})` : "No session"}
+                    </div>
+                    <div className="mb-2">
+                      <strong>Temp Password:</strong>{" "}
+                      {sessionStorage.getItem("temp_password") ? "Available" : "Not available"}
                     </div>
                     <pre>{JSON.stringify(apiCallLog, null, 2)}</pre>
                   </div>
