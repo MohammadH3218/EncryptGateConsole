@@ -37,8 +37,6 @@ interface LoginResponse {
   username?: string
   currentCode?: string
   currentValidCode?: string
-  timeWindow?: string
-  timeLeft?: string
 }
 
 export default function LoginPage() {
@@ -214,20 +212,6 @@ export default function LoginPage() {
     }
   }, [mfaSecretCode, email, logApiCall])
 
-  // When MFA setup dialog is shown, automatically get a valid code
-  useEffect(() => {
-    if (showMFASetup && mfaSecretCode) {
-      // Immediately get a valid code from the server
-      getCurrentValidCode().then(code => {
-        if (code) {
-          setSetupMfaCode(code)
-          setError("")
-          setSuccessMessage("Using the server's valid code. Click Verify to continue.")
-        }
-      })
-    }
-  }, [showMFASetup, mfaSecretCode])
-
   // Updated getCurrentValidCode function with improved time sync handling
   const getCurrentValidCode = async (): Promise<string | null> => {
     if (!apiBaseUrl || !mfaSecretCode) return null;
@@ -240,7 +224,6 @@ export default function LoginPage() {
       const requestBody: any = {
         secret: mfaSecretCode,
         client_time: new Date().toISOString(),
-        get_current_code: true, // Signal we explicitly want the current code
       }
       
       // Add properly adjusted time if offset exists
@@ -250,10 +233,6 @@ export default function LoginPage() {
         const serverTime = new Date(serverTimeMs)
         
         requestBody.adjusted_time = serverTime.toISOString()
-        
-        console.log(`Time offset applied: ${offsetMs}ms`)
-        console.log(`Client time: ${requestBody.client_time}`)
-        console.log(`Adjusted time: ${requestBody.adjusted_time}`)
         
         logApiCall("Get Current MFA Code", `Using adjusted time: ${requestBody.adjusted_time}`)
       }
@@ -271,7 +250,6 @@ export default function LoginPage() {
       logApiCall("Get Current MFA Code", `Response: ${JSON.stringify(result)}`)
 
       if (result.current_code) {
-        console.log(`Server generated code: ${result.current_code}, Time window: ${result.time_window || "unknown"}`)
         return result.current_code
       }
       return null
@@ -571,7 +549,6 @@ export default function LoginPage() {
             // If there's a current valid code from the server, use it
             if (mfaData.currentCode) {
               setSetupMfaCode(mfaData.currentCode)
-              setSuccessMessage("Using the server's valid code. Click Verify to continue.")
             }
             setShowMFASetup(true)
             return
@@ -711,7 +688,6 @@ export default function LoginPage() {
             // If there's a current valid code from the server, use it
             if (mfaData.currentCode) {
               setSetupMfaCode(mfaData.currentCode)
-              setSuccessMessage("Using the server's valid code. Click Verify to continue.")
             }
             setShowMFASetup(true)
             return
@@ -757,7 +733,7 @@ export default function LoginPage() {
 
   // Add a function to synchronize time with server
   const synchronizeTime = async () => {
-    if (!apiBaseUrl) return null
+    if (!apiBaseUrl) return
 
     try {
       const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
@@ -804,7 +780,7 @@ export default function LoginPage() {
     }
   }, [apiBaseUrl])
 
-  // Improved MFA setup function with error handling for 500 errors
+  // Updated handleMFASetup function with improved server time handling
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.")
@@ -881,35 +857,21 @@ export default function LoginPage() {
         )
       }
 
-      let response
-      try {
-        response = await fetchWithRetry(
-          endpoint,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-              Origin: window.location.origin,
-            },
-            body: JSON.stringify(requestBody),
-            mode: "cors",
-            credentials: "include",
+      const response = await fetchWithRetry(
+        endpoint,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            Origin: window.location.origin,
           },
-          2,  // Increased retries
-        )
-      } catch (fetchError: any) {
-        // If the fetch fails, try to get a valid code before giving up
-        logApiCall("MFA Setup Fetch Error", fetchError.message || "Unknown error")
-        
-        const validCode = await getCurrentValidCode()
-        if (validCode) {
-          setSetupMfaCode(validCode)
-          throw new Error(`Network error. Please try using this server-generated code: ${validCode}`)
-        } else {
-          throw fetchError
-        }
-      }
+          body: JSON.stringify(requestBody),
+          mode: "cors",
+          credentials: "include",
+        },
+        1,
+      )
 
       // Try to parse the response
       let responseData: LoginResponse
@@ -920,20 +882,13 @@ export default function LoginPage() {
           `Status: ${response.status}, Keys: ${Object.keys(responseData).join(", ")}`,
         )
       } catch (parseError) {
-        // If response fails to parse, try to get a valid code before giving up
-        const validCode = await getCurrentValidCode()
-        if (validCode) {
-          setSetupMfaCode(validCode)
-          throw new Error(`Error parsing response. Please try using this server-generated code: ${validCode}`)
-        } else {
-          throw new Error("Unable to parse server response. Please try again.")
-        }
+        throw new Error("Unable to parse server response. Please try again.")
       }
 
       if (!response.ok) {
-        // Handle different error types
-        if (responseData.detail) {
-          // If we have a currentValidCode in the response, use it
+        // Check for specific error types from backend
+        if (response.status === 400 && responseData.detail) {
+          // If we have a currentValidCode in the response, suggest it to the user
           if (responseData.currentValidCode) {
             setSetupMfaCode(responseData.currentValidCode)
             throw new Error(
@@ -960,15 +915,6 @@ export default function LoginPage() {
         } else if (response.status === 401) {
           // Session expired - need to log in again
           throw new Error("Your session has expired. Please log in again to restart the MFA setup process.")
-        } else if (response.status === 500) {
-          // Server error - try to get a valid code
-          const validCode = await getCurrentValidCode()
-          if (validCode) {
-            setSetupMfaCode(validCode)
-            throw new Error(`Server error. Please try using this server-generated code: ${validCode}`)
-          } else {
-            throw new Error(`Server error (${response.status}). Please try again.`)
-          }
         } else {
           throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`)
         }
@@ -999,7 +945,8 @@ export default function LoginPage() {
       setError(errorMessage)
       logApiCall("MFA Setup Error", errorMessage)
 
-      // If there's an issue with the verification code, try to get a new valid code
+      // If there's an issue with the verification code, clear the input
+      // so the user can try again with a new code
       if (
         errorMessage.includes("code") &&
         !errorMessage.includes("Try this current code")
