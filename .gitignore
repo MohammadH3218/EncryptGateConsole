@@ -26,6 +26,4 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 # Elastic Beanstalk Files
-.elasticbeanstalk/*
-!.elasticbeanstalk/*.cfg.yml
 !.elasticbeanstalk/*.global.yml

@@ -141,33 +141,13 @@ def generate_qr_code(secret_code, username, issuer="EncryptGate"):
         logger.error(f"Error generating QR code: {e}")
         return None
 
-# Enhanced TOTP verification function with detailed debugging and time checks
-def debug_totp_verification(secret_code, user_code, client_time=None, adjusted_time=None):
-    """Debug function to verify if a TOTP code matches the expected value with time checks"""
+# Debug function to verify TOTP code matches
+def debug_totp_verification(secret_code, user_code):
+    """Debug function to verify if a TOTP code matches the expected value"""
     try:
         totp = pyotp.TOTP(secret_code)
         now = datetime.now()
         current_time = time.time()
-        
-        logger.info(f"TOTP debug - Server time: {now.isoformat()}, Time window: {int(current_time) % 30}/30 seconds")
-        
-        # Log client time information if provided
-        if client_time:
-            try:
-                client_datetime = datetime.fromisoformat(client_time.replace('Z', '+00:00'))
-                time_diff = (now - client_datetime).total_seconds()
-                logger.info(f"TOTP debug - Client time: {client_time}, Difference: {time_diff:.1f} seconds")
-            except Exception as e:
-                logger.warning(f"TOTP debug - Could not parse client time: {str(e)}")
-        
-        # Log adjusted time information if provided
-        if adjusted_time:
-            try:
-                adjusted_datetime = datetime.fromisoformat(adjusted_time.replace('Z', '+00:00'))
-                adjusted_diff = (now - adjusted_datetime).total_seconds()
-                logger.info(f"TOTP debug - Adjusted time: {adjusted_time}, Difference: {adjusted_diff:.1f} seconds")
-            except Exception as e:
-                logger.warning(f"TOTP debug - Could not parse adjusted time: {str(e)}")
         
         # Get current code
         current_code = totp.now()
@@ -177,12 +157,9 @@ def debug_totp_verification(secret_code, user_code, client_time=None, adjusted_t
         next_code = totp.at(now + timedelta(seconds=30))
         
         # Verify the code with extended window
-        is_valid = totp.verify(user_code, valid_window=3)  # Allow 3 steps before/after for better compatibility
+        is_valid = totp.verify(user_code, valid_window=2)  # Allow 2 steps before/after
         
-        logger.info(f"TOTP debug - Current code: {current_code}, User code: {user_code}, Valid: {is_valid}")
-        logger.info(f"TOTP debug - Adjacent codes: Previous={previous_code}, Next={next_code}")
-        
-        # Return all debug info
+        # Return debug info
         return {
             "is_valid": is_valid,
             "current_code": current_code,
@@ -194,12 +171,7 @@ def debug_totp_verification(secret_code, user_code, client_time=None, adjusted_t
             "server_time": datetime.now().isoformat()
         }
     except Exception as e:
-        logger.error(f"TOTP debug error: {str(e)}")
-        return {
-            "error": str(e),
-            "server_time": datetime.now().isoformat(),
-            "current_code": pyotp.TOTP(secret_code).now() if secret_code else None
-        }
+        return {"error": str(e)}
 
 # Function for use in other modules - can be called directly with parameters
 def authenticate_user(username, password):
@@ -388,7 +360,7 @@ def respond_to_auth_challenge(username, session, challenge_name, challenge_respo
         logger.error(f"Challenge response error: {e}")
         return {"detail": f"Challenge response failed: {str(e)}"}, 500
 
-# Set up MFA with access token - improved to always return current code
+# Set up MFA with access token
 def setup_mfa(access_token):
     """Set up MFA for a user with access token"""
     mfa_logger.info("Setting up MFA")
@@ -437,14 +409,6 @@ def setup_mfa(access_token):
             totp = pyotp.TOTP(secret_code)
             current_code = totp.now()
             mfa_logger.info(f"Current valid TOTP code: {current_code}")
-            
-            # Get adjacent codes for time window debugging
-            now = datetime.now()
-            previous_code = totp.at(now - timedelta(seconds=30))
-            next_code = totp.at(now + timedelta(seconds=30))
-            
-            mfa_logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
-            mfa_logger.info(f"Adjacent codes: Previous={previous_code}, Current={current_code}, Next={next_code}")
         except Exception as totp_error:
             mfa_logger.error(f"Failed to generate current TOTP code: {totp_error}")
             current_code = None
@@ -454,8 +418,7 @@ def setup_mfa(access_token):
             "qrCodeImage": qr_code,
             "message": "MFA setup initiated successfully",
             "username": username,
-            "currentCode": current_code,
-            "server_time": datetime.now().isoformat()
+            "currentCode": current_code
         }
         
     except Exception as e:
@@ -537,34 +500,6 @@ def verify_software_token_setup(access_token, code):
             
         except cognito_client.exceptions.CodeMismatchException as code_error:
             mfa_logger.warning(f"CodeMismatchException: {code_error}")
-            
-            # Try to provide the current valid code for better UX
-            try:
-                # Get user attributes to find the MFA secret
-                user_attrs = user_info.get("UserAttributes", [])
-                secret_attr = next((attr for attr in user_attrs if attr.get("Name") == "custom:mfa_secret"), None)
-                
-                if secret_attr and secret_attr.get("Value"):
-                    secret = secret_attr.get("Value")
-                    totp = pyotp.TOTP(secret)
-                    current_code = totp.now()
-                    return {"detail": "The verification code is incorrect. Try using this current code instead.", 
-                            "currentValidCode": current_code}, 400
-                else:
-                    # If we can't find the user's secret, generate a new one
-                    associate_response = cognito_client.associate_software_token(
-                        AccessToken=access_token
-                    )
-                    secret = associate_response.get("SecretCode")
-                    if secret:
-                        totp = pyotp.TOTP(secret)
-                        current_code = totp.now()
-                        return {"detail": "The verification code is incorrect. Try using this current code instead.",
-                                "currentValidCode": current_code,
-                                "secretCode": secret}, 400
-            except Exception as e:
-                mfa_logger.error(f"Error generating helpful MFA code: {e}")
-            
             return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
             
         except botocore.exceptions.ClientError as client_error:
@@ -577,17 +512,11 @@ def verify_software_token_setup(access_token, code):
         mfa_logger.error(f"Error verifying MFA setup: {e}")
         return {"detail": f"MFA verification failed: {str(e)}"}, 500
 
-# Improved verify MFA function with time handling
-def verify_mfa(session, code, username, client_time=None, adjusted_time=None):
-    """Verifies a multi-factor authentication code with time reconciliation"""
+# Verify MFA function
+def verify_mfa(session, code, username):
+    """Verifies a multi-factor authentication code."""
     logger.info(f"MFA verification initiated for user: {username}")
     log_session_info("verify_mfa input session", session)
-    
-    # Log time information
-    if client_time:
-        logger.info(f"Client time provided: {client_time}")
-    if adjusted_time:
-        logger.info(f"Adjusted time provided: {adjusted_time}")
     
     # Input validation
     if not code or not isinstance(code, str):
@@ -632,30 +561,6 @@ def verify_mfa(session, code, username, client_time=None, adjusted_time=None):
             )
             
             logger.info(f"MFA verification response received")
-        except cognito_client.exceptions.CodeMismatchException as code_error:
-            logger.warning(f"MFA code mismatch: {code_error}")
-            
-            # Try to get a valid code for the user to try
-            try:
-                # Since we don't have the secret here, we can't generate a valid code
-                # But we can suggest the user try again with a fresh code from their app
-                # Get the current server time window info for debugging
-                current_time = time.time()
-                time_window = int(current_time) % 30
-                time_left = 30 - time_window
-                
-                server_time = datetime.now().isoformat()
-                
-                return {
-                    "detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app.",
-                    "server_time": server_time,
-                    "time_window": f"{time_window}/30 seconds",
-                    "time_left": f"{time_left} seconds until next code"
-                }, 400
-            except Exception as e:
-                logger.error(f"Error generating time info: {e}")
-                return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
-                
         except Exception as api_error:
             logger.error(f"Cognito API call failed: {api_error}")
             return {"detail": f"MFA verification failed: {str(api_error)}"}, 500
@@ -691,6 +596,55 @@ def verify_mfa(session, code, username, client_time=None, adjusted_time=None):
     except Exception as e:
         logger.error(f"MFA verification error: {e}")
         return {"detail": f"MFA verification failed: {e}"}, 401
+
+# Confirm User Signup
+def confirm_signup(email, temp_password, new_password):
+    """Confirms a user's signup by setting a new permanent password."""
+    try:
+        logger.info(f"Confirming signup for {email}")
+        
+        # Authenticate user to confirm signup
+        try:
+            auth_response = cognito_client.initiate_auth(
+                ClientId=CLIENT_ID,
+                AuthFlow="USER_PASSWORD_AUTH",
+                AuthParameters={
+                    "USERNAME": email,
+                    "PASSWORD": temp_password,
+                    "SECRET_HASH": generate_client_secret_hash(email),
+                },
+            )
+        except Exception as auth_error:
+            logger.error(f"Error during initiate_auth for signup confirmation: {auth_error}")
+            return None
+
+        # Check if a new password is required
+        if auth_response.get("ChallengeName") == "NEW_PASSWORD_REQUIRED":
+            try:
+                response = cognito_client.respond_to_auth_challenge(
+                    ClientId=CLIENT_ID,
+                    ChallengeName="NEW_PASSWORD_REQUIRED",
+                    Session=auth_response.get("Session"),
+                    ChallengeResponses={
+                        "USERNAME": email,
+                        "NEW_PASSWORD": new_password,
+                        "SECRET_HASH": generate_client_secret_hash(email),
+                    },
+                )
+                logger.info(f"Signup confirmation successful for {email}")
+                return response
+            except Exception as challenge_error:
+                logger.error(f"Error during respond_to_auth_challenge for signup confirmation: {challenge_error}")
+                return None
+
+        logger.error("Unexpected signup flow state")
+        return None
+    except cognito_client.exceptions.NotAuthorizedException:
+        logger.warning("Invalid temporary password provided")
+        return None
+    except Exception as e:
+        logger.error(f"Error confirming signup: {e}")
+        return None
 
 # Enhanced CORS handler for preflight requests
 def handle_cors_preflight():
@@ -842,7 +796,7 @@ def verify_mfa_setup_endpoint():
         logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Enhanced MFA test endpoint to always return current code
+# Add endpoint to test MFA codes against the secret
 @auth_services_routes.route("/test-mfa-code", methods=["POST", "OPTIONS"])
 def test_mfa_code_endpoint():
     if request.method == "OPTIONS":
@@ -852,10 +806,6 @@ def test_mfa_code_endpoint():
         data = request.json
         secret = data.get('secret')
         code = data.get('code')
-        
-        # Get time information from client for debugging
-        client_time = data.get('client_time')
-        adjusted_time = data.get('adjusted_time')
         
         if not secret:
             return jsonify({
@@ -869,49 +819,18 @@ def test_mfa_code_endpoint():
         current_time = time.time()
         current_code = totp.now()
         
-        # Get adjacent codes for time window debugging
-        now = datetime.now()
-        previous_code = totp.at(now - timedelta(seconds=30))
-        next_code = totp.at(now + timedelta(seconds=30))
-        
-        # Calculate remaining time in the current window
-        time_window = int(current_time) % 30
-        time_left = 30 - time_window
-        
         # Verify the code with a window if provided
         is_valid = True
         if code:
-            is_valid = totp.verify(code, valid_window=3)  # Allow 3 steps before/after for better compatibility
-        
-        # If client time was provided, log the difference for debugging
-        time_diff_info = {}
-        if client_time:
-            try:
-                client_datetime = datetime.fromisoformat(client_time.replace('Z', '+00:00'))
-                time_diff = (now - client_datetime).total_seconds()
-                time_diff_info["client_time_diff"] = f"{time_diff:.1f} seconds"
-            except Exception as e:
-                time_diff_info["client_time_error"] = str(e)
-        
-        if adjusted_time:
-            try:
-                adjusted_datetime = datetime.fromisoformat(adjusted_time.replace('Z', '+00:00'))
-                adjusted_diff = (now - adjusted_datetime).total_seconds()
-                time_diff_info["adjusted_time_diff"] = f"{adjusted_diff:.1f} seconds"
-            except Exception as e:
-                time_diff_info["adjusted_time_error"] = str(e)
+            is_valid = totp.verify(code, valid_window=2)  # Allow 2 steps before/after for time sync issues
         
         return jsonify({
             "valid": is_valid,
             "provided_code": code if code else "Not provided",
             "current_code": current_code,
-            "previous_code": previous_code,
-            "next_code": next_code,
             "timestamp": int(current_time),
-            "time_window": f"{time_window}/30 seconds",
-            "time_left": f"{time_left} seconds until next code",
-            "server_time": datetime.now().isoformat(),
-            **time_diff_info
+            "time_window": f"{int(current_time) % 30}/30 seconds",
+            "server_time": datetime.now().isoformat()
         })
     except Exception as e:
         logger.error(f"Error in test_mfa_code_endpoint: {e}")
@@ -921,7 +840,7 @@ def test_mfa_code_endpoint():
             "server_time": datetime.now().isoformat()
         }), 500
 
-# Improved MFA setup implementation with server-generated codes
+# Fixed MFA setup implementation that follows the exact PowerShell flow
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
     if request.method == "OPTIONS":
@@ -940,19 +859,9 @@ def confirm_mfa_setup_endpoint():
         code = data.get('code')
         password = data.get('password', '')  # Added password parameter
         
-        # Get time information from client for debugging
-        client_time = data.get('client_time')
-        adjusted_time = data.get('adjusted_time')
-        
         # Enhanced session validation and logging
         log_session_info("confirm-mfa-setup initial session", session)
         logger.info(f"MFA setup parameters: username={username}, code length={len(code) if code else 0}, password provided={bool(password)}")
-        
-        # Log time information if provided
-        if client_time:
-            logger.info(f"Client time provided: {client_time}")
-        if adjusted_time:
-            logger.info(f"Adjusted time provided: {adjusted_time}")
         
         # Validate input parameters
         if not code:
@@ -992,19 +901,24 @@ def confirm_mfa_setup_endpoint():
                 # Create a TOTP object with the secret
                 totp = pyotp.TOTP(secret_code)
                 current_code = totp.now()
+                is_valid = totp.verify(code, valid_window=2)  # Allow 2 steps before/after
+                logger.info(f"TOTP Validation: Current code = {current_code}, User code = {code}, Valid = {is_valid}")
+                logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
                 
-                # Get time information for debugging
-                verification_result = debug_totp_verification(secret_code, code, client_time, adjusted_time)
+                # Check adjacent time windows
+                prev_window = totp.at(datetime.now() - timedelta(seconds=30))
+                next_window = totp.at(datetime.now() + timedelta(seconds=30))
+                logger.info(f"Adjacent codes: Previous = {prev_window}, Current = {current_code}, Next = {next_window}")
                 
-                # Log detailed verification info
-                logger.info(f"TOTP Validation Details: {verification_result}")
-                
-                is_valid = verification_result.get("is_valid", False)
-                
-                # If code doesn't match, continue with the flow but log the issue
+                # If code doesn't match, return specific error
                 if not is_valid:
-                    logger.warning(f"Code {code} doesn't match any valid window")
-                    # We'll continue anyway and let Cognito handle validation
+                    # Check if the code is at least close
+                    close_codes = [prev_window, current_code, next_window]
+                    if code in close_codes:
+                        logger.info(f"Code matches one of the adjacent windows, continuing anyway")
+                    else:
+                        logger.warning(f"Code {code} doesn't match any valid window: {close_codes}")
+                        # We'll continue anyway and let Cognito handle validation
             except Exception as totp_error:
                 logger.error(f"TOTP validation error: {totp_error}")
             
@@ -1014,42 +928,21 @@ def confirm_mfa_setup_endpoint():
             # Use new session if available, otherwise use original
             verify_session = new_session if new_session else session
             
-            try:
-                verify_response = cognito_client.verify_software_token(
-                    Session=verify_session,
-                    UserCode=code
-                )
-                
-                # Check the status
-                status = verify_response.get("Status")
-                verify_session = verify_response.get("Session")  # Get possibly new session
-                
-                logger.info(f"MFA verification status: {status}")
-                log_session_info("Session after verify_software_token", verify_session)
-                
-                if status != "SUCCESS":
-                    logger.warning(f"Verification returned non-SUCCESS status: {status}")
-                    return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
-            except cognito_client.exceptions.CodeMismatchException as code_error:
-                logger.warning(f"CodeMismatchException: {code_error}")
-                
-                # Get a valid code to help the user
-                totp = pyotp.TOTP(secret_code)
-                current_valid_code = totp.now()
-                
-                # Log time window info
-                current_time = time.time()
-                time_window = int(current_time) % 30
-                time_left = 30 - time_window
-                
-                logger.info(f"Time window: {time_window}/30 seconds, next code in {time_left} seconds")
-                
-                return jsonify({
-                    "detail": "The verification code is incorrect. Please try again with a new code.",
-                    "currentValidCode": current_valid_code,
-                    "timeWindow": f"{time_window}/30",
-                    "timeLeft": time_left
-                }), 400
+            verify_response = cognito_client.verify_software_token(
+                Session=verify_session,
+                UserCode=code
+            )
+            
+            # Check the status
+            status = verify_response.get("Status")
+            verify_session = verify_response.get("Session")  # Get possibly new session
+            
+            logger.info(f"MFA verification status: {status}")
+            log_session_info("Session after verify_software_token", verify_session)
+            
+            if status != "SUCCESS":
+                logger.warning(f"Verification returned non-SUCCESS status: {status}")
+                return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
                 
             # Step 3: For the final step, now use the SOFTWARE_TOKEN_MFA flow if we have a password
             if password:
@@ -1087,9 +980,8 @@ def confirm_mfa_setup_endpoint():
                             totp = pyotp.TOTP(secret_code)
                             fresh_code = totp.now()
                             logger.info(f"Generated fresh TOTP code: {fresh_code}")
-                            # Use the original code if it's still valid, otherwise use the fresh code
-                            verification_result = debug_totp_verification(secret_code, code)
-                            verification_code = code if verification_result.get("is_valid", False) else fresh_code
+                            # Use the fresh code as fallback
+                            verification_code = code if totp.verify(code, valid_window=2) else fresh_code
                         except Exception as totp_error:
                             logger.error(f"Error generating fresh TOTP code: {totp_error}")
                             verification_code = code
@@ -1165,22 +1057,12 @@ def confirm_mfa_setup_endpoint():
                 prev_code = totp.at(datetime.now() - timedelta(seconds=30))
                 next_code = totp.at(datetime.now() + timedelta(seconds=30))
                 
-                # Calculate time window info
-                current_time = time.time()
-                time_window = int(current_time) % 30
-                time_left = 30 - time_window
-                
                 error_msg = (
                     "The verification code is incorrect. "
                     "Make sure you're using the current code from Google Authenticator. "
                     "Please try again with a new code from your authenticator app."
                 )
-                return jsonify({
-                    "detail": error_msg, 
-                    "currentValidCode": current_valid,
-                    "timeWindow": f"{time_window}/30",
-                    "timeLeft": time_left
-                }), 400
+                return jsonify({"detail": error_msg, "currentValidCode": current_valid}), 400
                 
             except Exception as detail_error:
                 # Fall back to generic message
@@ -1196,7 +1078,6 @@ def confirm_mfa_setup_endpoint():
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Enhanced verify MFA endpoint with improved time handling
 @auth_services_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
 def verify_mfa_endpoint():
     if request.method == "OPTIONS":
@@ -1206,10 +1087,6 @@ def verify_mfa_endpoint():
     session = data.get('session')
     code = data.get('code')
     username = data.get('username')
-    
-    # Get time information from client for debugging
-    client_time = data.get('client_time')
-    adjusted_time = data.get('adjusted_time')
 
     # Log session information
     log_session_info("verify-mfa endpoint", session)
@@ -1217,28 +1094,11 @@ def verify_mfa_endpoint():
     if not (session and code and username):
         return jsonify({"detail": "Session, username, and code are required"}), 400
 
-    # Call the verify_mfa function with time information
-    auth_result = verify_mfa(session, code, username, client_time, adjusted_time)
+    # Call the verify_mfa function
+    auth_result = verify_mfa(session, code, username)
     
     # Check if it's an error response (tuple with status code)
     if isinstance(auth_result, tuple):
-        # If it's a code mismatch error, try to provide a valid code
-        if auth_result[1] == 400 and isinstance(auth_result[0], dict) and "detail" in auth_result[0]:
-            if "verification code" in auth_result[0]["detail"]:
-                # Get server time info
-                server_time = datetime.now().isoformat()
-                current_time = time.time()
-                time_window = int(current_time) % 30
-                time_left = 30 - time_window
-                
-                # Enhanced error response with timing info
-                error_response = auth_result[0]
-                error_response["server_time"] = server_time
-                error_response["time_window"] = f"{time_window}/30 seconds"
-                error_response["time_left"] = f"{time_left} seconds until next code"
-                
-                return jsonify(error_response), auth_result[1]
-        
         return jsonify(auth_result[0]), auth_result[1]
     
     # Otherwise, it's a successful response
