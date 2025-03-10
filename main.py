@@ -149,9 +149,18 @@ public_keys = get_cognito_public_keys()
 logger.info(f"Retrieved {len(public_keys.get('keys', []))} Cognito public keys")
 
 # === Basic Health Check Route ===
-@app.route("/", methods=["GET"])
+@app.route("/health", methods=["GET"])
 def home():
     return jsonify({"status": "success", "message": "EncryptGate API is Running!"}), 200
+
+@app.route("/api/health", methods=["GET"])
+def api_health_check():
+    """Health check endpoint for API monitoring."""
+    return jsonify({
+        "status": "healthy",
+        "service": "EncryptGate API",
+        "version": "1.0",
+    }), 200
 
 # === Improved Debug Route ===
 @app.route("/api/debug", methods=["GET"])
