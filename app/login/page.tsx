@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2 } from "lucide-react";
+import { Loader2 } from 'lucide-react';
 
 type UserType = "admin" | "employee";
 
@@ -137,7 +137,7 @@ export default function LoginPage() {
     }
   }, [logApiCall]);
 
-  // Fetch server time for time synchronization check
+  // Update the fetchServerTime function to check and handle time differences
   const fetchServerTime = async (baseUrl: string) => {
     try {
       const response = await fetch(`${baseUrl}/api/auth/test-mfa-code`, {
@@ -157,11 +157,16 @@ export default function LoginPage() {
         
         if (diffMs > 30000) { // 30 seconds
           console.warn(`Time synchronization issue: Server time differs by ${Math.round(diffMs/1000)} seconds`);
+        
+          // Store the time offset for future calculations
+          const timeOffset = serverDate.getTime() - clientDate.getTime();
+          localStorage.setItem("server_time_offset", timeOffset.toString());
+        
           if (debugMode) {
             setApiCallLog(prev => [...prev, {
               timestamp: new Date().toISOString(),
               action: "Time Sync Warning",
-              result: `Server time differs by ${Math.round(diffMs/1000)} seconds. This may cause MFA verification issues.`
+              result: `Server time differs by ${Math.round(diffMs/1000)} seconds. Offset stored for MFA verification.`
             }]);
           }
         }
@@ -190,11 +195,24 @@ export default function LoginPage() {
     }
   }, [mfaSecretCode, email, logApiCall]);
 
-  // Get current valid code from server
+  // Update the getCurrentValidCode function to handle time synchronization
   const getCurrentValidCode = async (): Promise<string | null> => {
     if (!apiBaseUrl || !mfaSecretCode) return null;
-    
+  
     try {
+      // Get the stored time offset if available
+      const timeOffset = localStorage.getItem("server_time_offset");
+    
+      // If we have a time offset, calculate what the server time would be
+      let clientTime = new Date().toISOString();
+      let adjustedTime = clientTime;
+    
+      if (timeOffset) {
+        const serverTimeNow = new Date(Date.now() + parseInt(timeOffset));
+        adjustedTime = serverTimeNow.toISOString();
+        logApiCall("Get Current MFA Code", `Using adjusted time: ${adjustedTime}`);
+      }
+    
       const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
         method: "POST",
         headers: {
@@ -202,13 +220,15 @@ export default function LoginPage() {
           "Accept": "application/json",
         },
         body: JSON.stringify({
-          secret: mfaSecretCode
+          secret: mfaSecretCode,
+          client_time: clientTime,
+          adjusted_time: adjustedTime
         }),
       });
-      
+    
       const result = await response.json();
       logApiCall("Get Current MFA Code", `Current valid code: ${result.current_code}`);
-      
+    
       if (result.current_code) {
         return result.current_code;
       }
@@ -219,10 +239,10 @@ export default function LoginPage() {
     }
   };
 
-  // Test MFA code against the server's time
+  // Update the testMfaCode function to properly handle time synchronization
   const testMfaCode = async (code: string): Promise<boolean> => {
     if (!apiBaseUrl || !mfaSecretCode) return false;
-    
+  
     try {
       const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
         method: "POST",
@@ -232,13 +252,21 @@ export default function LoginPage() {
         },
         body: JSON.stringify({
           secret: mfaSecretCode,
-          code: code
+          code: code,
+          // Add timestamp to ensure server knows when the code was generated
+          timestamp: new Date().toISOString()
         }),
       });
-      
+    
       const result = await response.json();
       logApiCall("MFA Code Test", JSON.stringify(result));
-      
+    
+      // If server provides a valid code, use it
+      if (!result.valid && result.current_code) {
+        setSetupMfaCode(result.current_code);
+        setError(`Code mismatch. Try using this code instead: ${result.current_code}`);
+      }
+    
       return result.valid;
     } catch (error) {
       logApiCall("MFA Code Test Error", String(error));
@@ -659,12 +687,62 @@ export default function LoginPage() {
     }
   };
 
-  // Helper function to update with a fresh code
+  // Add a function to synchronize time with server
+  const synchronizeTime = async () => {
+    if (!apiBaseUrl) return;
+  
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+        method: "POST", 
+        headers: { "Content-Type": "application/json" }, 
+        body: JSON.stringify({ 
+          secret: "AAAAAAAAAA", 
+          code: "000000",
+          client_time: new Date().toISOString()
+        })
+      });
+    
+      const data = await response.json();
+    
+      if (data.server_time) {
+        setServerTime(data.server_time);
+      
+        // Calculate and store time offset
+        const serverDate = new Date(data.server_time);
+        const clientDate = new Date();
+        const timeOffset = serverDate.getTime() - clientDate.getTime();
+      
+        localStorage.setItem("server_time_offset", timeOffset.toString());
+      
+        logApiCall("Time Synchronization", 
+          `Server time: ${data.server_time}, Client time: ${clientDate.toISOString()}, Offset: ${timeOffset}ms`);
+      
+        return timeOffset;
+      }
+    } catch (error) {
+      console.error("Failed to synchronize time:", error);
+      logApiCall("Time Synchronization Error", String(error));
+    }
+  
+    return null;
+  };
+
+  // Add time synchronization on component mount
+  useEffect(() => {
+    if (apiBaseUrl) {
+      synchronizeTime();
+    }
+  }, [apiBaseUrl]);
+
+  // Update the refreshMfaCode function to use time synchronization
   const refreshMfaCode = async () => {
     if (!mfaSecretCode) return;
-    
+  
     setIsLoading(true);
     try {
+      // Synchronize time first
+      await synchronizeTime();
+    
       // Get current valid code from server
       const freshCode = await getCurrentValidCode();
       if (freshCode) {
@@ -687,22 +765,39 @@ export default function LoginPage() {
       setError("API URL is not available.");
       return;
     }
-    
+  
     if (setupMfaCode.length !== 6) {
       setError("Please enter a valid 6-digit code from your authenticator app.");
       return;
     }
-    
+  
+    // Get the stored time offset if available
+    const timeOffset = localStorage.getItem("server_time_offset");
+  
     // Validate MFA code with server time first
     try {
       const isValid = await testMfaCode(setupMfaCode);
       if (!isValid) {
-        const freshCode = await getCurrentValidCode();
-        if (freshCode) {
-          setError(`The code you entered doesn't match. Try using this code: ${freshCode}`);
-          setSetupMfaCode(freshCode);
+        // If we have a time offset, try to get a valid code based on server time
+        if (timeOffset) {
+          const serverTimeNow = new Date(Date.now() + parseInt(timeOffset));
+          logApiCall("MFA Time Adjustment", `Using server time: ${serverTimeNow.toISOString()} for validation`);
+        
+          const freshCode = await getCurrentValidCode();
+          if (freshCode) {
+            setError(`The code you entered doesn't match. Try using this code: ${freshCode}`);
+            setSetupMfaCode(freshCode);
+          } else {
+            setError("This code doesn't match. Please use the current code from Google Authenticator.");
+          }
         } else {
-          setError("This code doesn't match. Please use the current code from Google Authenticator.");
+          const freshCode = await getCurrentValidCode();
+          if (freshCode) {
+            setError(`The code you entered doesn't match. Try using this code: ${freshCode}`);
+            setSetupMfaCode(freshCode);
+          } else {
+            setError("This code doesn't match. Please use the current code from Google Authenticator.");
+          }
         }
         return;
       }
@@ -710,24 +805,24 @@ export default function LoginPage() {
       // Continue even if the test fails - the real verification will happen on the server
       logApiCall("MFA Code Validation", "Pre-validation failed, but continuing with setup");
     }
-    
+  
     // Log critical session info first
     logSessionInfo("MFA setup session");
-    
+  
     // Get the password from session storage
     const savedPassword = sessionStorage.getItem("temp_password") || "";
     logApiCall("MFA Setup", `Password available for MFA setup: ${!!savedPassword}`);
-    
+  
     // Validate the session before proceeding
     if (!session) {
       setError("Your session has expired. Please log in again to restart the MFA setup process.");
       return;
     }
-    
+  
     setIsLoading(true);
     setError("");
     setSuccessMessage("");
-    
+  
     try {
       // Use the session-based flow for MFA verification
       const endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`;
@@ -735,12 +830,14 @@ export default function LoginPage() {
         username: email,
         session: session,
         code: setupMfaCode,
-        password: savedPassword // Include the password here!
+        password: savedPassword, // Include the password here!
+        // Add client timestamp for server to check time sync
+        client_time: new Date().toISOString()
       };
-      
+    
       logApiCall("MFA Setup Verification", 
         `Sending verification request with code ${setupMfaCode}, session length ${session.length}, password included: ${!!savedPassword}`);
-      
+    
       // Log the full request for debugging
       if (debugMode) {
         console.log("MFA Setup Request Body:", JSON.stringify({
@@ -748,7 +845,7 @@ export default function LoginPage() {
           password: savedPassword ? "[REDACTED]" : ""
         }));
       }
-      
+    
       const response = await fetchWithRetry(endpoint, {
         method: "POST",
         headers: {
@@ -760,7 +857,7 @@ export default function LoginPage() {
         mode: "cors",
         credentials: "include",
       }, 1);
-      
+    
       // Try to parse the response
       let responseData: LoginResponse;
       try {
@@ -770,7 +867,7 @@ export default function LoginPage() {
       } catch (parseError) {
         throw new Error("Unable to parse server response. Please try again.");
       }
-      
+    
       if (!response.ok) {
         // Check for specific error types from backend
         if (response.status === 400 && responseData.detail) {
@@ -779,7 +876,7 @@ export default function LoginPage() {
             setSetupMfaCode(responseData.currentValidCode);
             throw new Error(`The code you entered is incorrect. Try this current code: ${responseData.currentValidCode}`);
           }
-          
+        
           // Check if it's a code mismatch error
           if (responseData.detail.includes("code is incorrect") || 
               responseData.detail.includes("CodeMismatchException")) {
@@ -794,21 +891,21 @@ export default function LoginPage() {
           throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`);
         }
       }
-      
+    
       // MFA setup successful, close dialog and process the result
       setShowMFASetup(false);
-      
+    
       // Clean up temporary token and password
       localStorage.removeItem("temp_access_token");
       sessionStorage.removeItem("temp_password");
-      
+    
       // Check if we received tokens in the response
       if (responseData.access_token) {
         // Store the new tokens
         localStorage.setItem("access_token", responseData.access_token);
         localStorage.setItem("id_token", responseData.id_token || "");
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
-        
+      
         // Redirect to dashboard
         router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       } else {
@@ -819,13 +916,13 @@ export default function LoginPage() {
       const errorMessage = error instanceof Error ? error.message : "Failed to set up MFA";
       setError(errorMessage);
       logApiCall("MFA Setup Error", errorMessage);
-      
+    
       // If there's an issue with the verification code, clear the input
       // so the user can try again with a new code
       if (errorMessage.includes("code") || errorMessage.includes("verification") && !errorMessage.includes("Try this current code")) {
         setSetupMfaCode("");
       }
-      
+    
       // If session expired, close the dialog so user can log in again
       if (errorMessage.includes("session has expired")) {
         setTimeout(() => {
@@ -838,6 +935,7 @@ export default function LoginPage() {
     }
   };
 
+  // Update the handleMFASubmit function to handle time synchronization
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -846,15 +944,27 @@ export default function LoginPage() {
 
     setError("");
     setIsLoading(true);
-    
+  
     const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
-    
+  
     // Log session information for debugging
     logSessionInfo("MFA verification session");
 
     try {
+      // Get the stored time offset if available
+      const timeOffset = localStorage.getItem("server_time_offset");
+      const clientTime = new Date().toISOString();
+    
+      // If we have a time offset, calculate what the server time would be
+      let adjustedTime = clientTime;
+      if (timeOffset) {
+        const serverTimeNow = new Date(Date.now() + parseInt(timeOffset));
+        adjustedTime = serverTimeNow.toISOString();
+        logApiCall("MFA Time Adjustment", `Using adjusted time: ${adjustedTime} for validation`);
+      }
+    
       logApiCall("MFA Verification", `Verifying MFA code: ${mfaCode}, session length: ${session.length}`);
-      
+    
       const response = await fetchWithRetry(mfaEndpoint, {
         method: "POST",
         headers: {
@@ -862,7 +972,13 @@ export default function LoginPage() {
           "Accept": "application/json",
           "Origin": window.location.origin
         },
-        body: JSON.stringify({ code: mfaCode, session, username: email }),
+        body: JSON.stringify({ 
+          code: mfaCode, 
+          session, 
+          username: email,
+          client_time: clientTime,
+          adjusted_time: adjustedTime
+        }),
         mode: "cors",
         credentials: "include",
       }, 1).catch(fetchError => {
@@ -881,6 +997,12 @@ export default function LoginPage() {
 
       if (!response.ok) {
         if (response.status === 400 && data.detail && data.detail.includes("verification code")) {
+          // If server provides a valid code, suggest it
+          if (data.currentValidCode) {
+            setMfaCode(data.currentValidCode);
+            throw new Error(`Code mismatch. Try using this code instead: ${data.currentValidCode}`);
+          }
+        
           // Clear the mfa code field on code mismatch errors
           setMfaCode("");
           logApiCall("MFA Verification Error", data.detail || "Invalid MFA code");
@@ -895,7 +1017,7 @@ export default function LoginPage() {
       localStorage.setItem("access_token", data.access_token || "");
       localStorage.setItem("id_token", data.id_token || "");
       localStorage.setItem("refresh_token", data.refresh_token || "");
-      
+    
       // Clear temporary password
       sessionStorage.removeItem("temp_password");
 
@@ -904,7 +1026,7 @@ export default function LoginPage() {
     } catch (error: any) {
       setError(error.message || "MFA verification failed. Please try again.");
       logApiCall("MFA Verification Error", error.message || "Unknown error");
-      
+    
       // If session expired, close the dialog so user can log in again
       if (error.message.includes("session has expired")) {
         setTimeout(() => {
