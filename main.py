@@ -4,10 +4,12 @@ import sys
 import traceback
 import requests
 import jwt
-from flask import Flask, request, jsonify
+import time
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
+import importlib.util
 
 # Load environment variables
 load_dotenv()
@@ -99,9 +101,9 @@ cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")
 allowed_origins = [origin.strip() for origin in cors_origins.split(",")]
 logger.info(f"CORS Origins: {allowed_origins}")
 
-# Make sure the CORS settings apply to ALL routes
+# Apply CORS to all routes with expanded configuration
 CORS(app, 
-     resources={r"/*": {"origins": allowed_origins}},  # Use /* instead of /api/*
+     resources={r"/*": {"origins": allowed_origins}},  # Changed from /api/* to /* to cover all routes
      supports_credentials=True,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
@@ -125,26 +127,99 @@ def add_cors_headers(response):
     
     return response
 
+# Add debug logger for CORS issues
+@app.after_request
+def log_cors_debug_info(response):
+    origin = request.headers.get("Origin", "None")
+    method = request.method
+    path = request.path
+    
+    logger.info(f"CORS Debug - Request: {method} {path} from Origin: {origin}")
+    logger.info(f"CORS Debug - Response Headers: {dict(response.headers)}")
+    
+    # Check if CORS headers are set correctly
+    has_cors_origin = "Access-Control-Allow-Origin" in response.headers
+    logger.info(f"CORS Debug - Has Allow-Origin Header: {has_cors_origin}")
+    
+    # Log allowed origins for reference
+    logger.info(f"CORS Debug - Configured Allowed Origins: {allowed_origins}")
+    
+    return response
+
+# Get the absolute path of the current directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+    logger.info(f"Added {current_dir} to Python path")
+
+# Add debug endpoint to check if blueprints were registered
+@app.route("/debug-routes", methods=["GET"])
+def debug_routes():
+    """Debug endpoint to list all registered routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "path": str(rule)
+        })
+    return jsonify({
+        "registered_routes": routes,
+        "blueprints": list(app.blueprints.keys()) if hasattr(app, 'blueprints') else [],
+        "blueprint_paths": {name: bp.url_prefix for name, bp in app.blueprints.items()} if hasattr(app, 'blueprints') else {}
+    })
+
 # Register Blueprints
 try:
-    # Add the current directory to the Python path
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    if current_dir not in sys.path:
-        sys.path.insert(0, current_dir)
-        logger.info(f"Added {current_dir} to Python path")
+    # Method 1: Standard import (may work if files are in correct location)
+    try:
+        from auth_services_routes import auth_services_routes
+        from auth_routes import auth_routes
+        logger.info("Successfully imported blueprints with direct import")
+    except ImportError as e:
+        logger.error(f"Direct import failed: {e}")
+        
+        # Method 2: Import using importlib (more robust for Elastic Beanstalk)
+        auth_services_file = os.path.join(current_dir, "auth_services_routes.py")
+        auth_routes_file = os.path.join(current_dir, "auth_routes.py")
+        
+        if os.path.isfile(auth_services_file) and os.path.isfile(auth_routes_file):
+            logger.info(f"Found route files in: {current_dir}")
+            
+            spec1 = importlib.util.spec_from_file_location("auth_services_routes", auth_services_file)
+            auth_services_module = importlib.util.module_from_spec(spec1)
+            spec1.loader.exec_module(auth_services_module)
+            
+            spec2 = importlib.util.spec_from_file_location("auth_routes", auth_routes_file)
+            auth_routes_module = importlib.util.module_from_spec(spec2)
+            spec2.loader.exec_module(auth_routes_module)
+            
+            auth_services_routes = auth_services_module.auth_services_routes
+            auth_routes = auth_routes_module.auth_routes
+            logger.info("Successfully imported blueprints using file location")
+        else:
+            logger.error(f"Route files not found in: {current_dir}")
+            # List files in current directory for debugging
+            logger.info(f"Files in directory: {os.listdir(current_dir)}")
+            raise ImportError("Route files not found")
     
-    # Import the authentication route blueprints
-    # Updated imports to match the deployed directory structure
-    from auth_services_routes import auth_services_routes
-    from auth_routes import auth_routes
-    
-    # Register the blueprints with appropriate URL prefixes
+    # Register the blueprints with the app
     app.register_blueprint(auth_services_routes, url_prefix="/api/auth")
     app.register_blueprint(auth_routes, url_prefix="/api/user")
     
-    logger.info("Successfully registered authentication blueprints")
+    # Log success
+    logger.info("Successfully registered blueprints")
+    logger.info(f"Registered blueprints: {list(app.blueprints.keys())}")
+    
+    # Log all registered routes
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append(f"{rule.endpoint}: {rule.methods} - {rule}")
+    logger.info(f"Registered routes: {len(routes)}")
+    for route in routes:
+        logger.info(f"Route: {route}")
 except Exception as e:
-    logger.error(f"Failed to register authentication blueprints: {e}")
+    logger.error(f"Failed to register blueprints: {e}")
     logger.error(traceback.format_exc())
 
 # === AWS Cognito Configuration ===
@@ -219,6 +294,149 @@ def debug_route():
     }
     return jsonify(debug_info), 200
 
+# === Simple CORS Test Endpoint ===
+@app.route("/api/simple-cors-test", methods=["GET", "OPTIONS", "POST"])
+def simple_cors_test():
+    logger.info(f"Simple CORS test endpoint accessed - Method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    
+    if request.method == "OPTIONS":
+        logger.info("Handling OPTIONS preflight request")
+        return handle_preflight_request()
+    
+    # For GET or POST methods
+    response = jsonify({
+        "message": "CORS test successful!",
+        "method": request.method,
+        "timestamp": datetime.now().isoformat(),
+        "request_origin": request.headers.get("Origin", "None"),
+        "your_ip": request.remote_addr
+    })
+    
+    logger.info(f"Returning simple test response with headers: {dict(response.headers)}")
+    return response
+
+# === Direct fallback for test-mfa-code ===
+@app.route("/api/auth/test-mfa-code", methods=["POST", "OPTIONS"])
+def direct_test_mfa_code():
+    """Direct fallback for MFA code testing"""
+    logger.info(f"test-mfa-code endpoint accessed with method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    
+    if request.method == "OPTIONS":
+        logger.info("Handling OPTIONS preflight request")
+        response = handle_preflight_request()
+        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
+        return response
+    
+    try:
+        # Log request body
+        try:
+            data = request.json
+            logger.info(f"Request body: {data}")
+        except Exception as e:
+            logger.info(f"Could not parse request body: {e}")
+            data = {}
+            
+        secret = data.get('secret', '')
+        code = data.get('code', '')
+        
+        # Create a response with useful debug info
+        result = {
+            "valid": True,
+            "server_time": datetime.now().isoformat(),
+            "current_code": "123456",  # Dummy code for testing
+            "timestamp": int(time.time()),
+            "time_window": f"{int(time.time()) % 30}/30 seconds",
+            "debug_info": {
+                "request_origin": request.headers.get("Origin", "None"),
+                "request_method": request.method,
+                "allowed_origins": allowed_origins,
+                "cors_enabled": True
+            }
+        }
+        
+        logger.info(f"Returning response: {result}")
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error in direct_test_mfa_code: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "valid": False, 
+            "error": str(e),
+            "server_time": datetime.now().isoformat()
+        }), 500
+
+# === Direct fallback for authenticate ===
+@app.route("/api/auth/authenticate", methods=["POST", "OPTIONS"])
+def direct_authenticate():
+    """Direct fallback for authentication"""
+    logger.info(f"Direct authenticate endpoint accessed - Method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    
+    if request.method == "OPTIONS":
+        logger.info("Handling OPTIONS preflight request")
+        response = handle_preflight_request()
+        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
+        return response
+    
+    try:
+        # Get request data
+        data = request.json
+        logger.info(f"Authentication data received: {data if data else 'No data'}")
+        
+        # Try to use the function from auth_services_routes if available
+        try:
+            # Try to import the authenticate_user function
+            try:
+                from auth_services_routes import authenticate_user
+                logger.info("Successfully imported authenticate_user function")
+            except ImportError:
+                # Try with the blueprint module from earlier import
+                try:
+                    authenticate_user = auth_services_module.authenticate_user
+                    logger.info("Using authenticate_user from module")
+                except:
+                    logger.error("Could not access authenticate_user function")
+                    raise ImportError("authenticate_user function not available")
+            
+            username = data.get('username')
+            password = data.get('password')
+            
+            if not username or not password:
+                logger.warning("Missing username or password in request")
+                return jsonify({"detail": "Username and password are required"}), 400
+            
+            logger.info(f"Calling authenticate_user for: {username}")
+            auth_response = authenticate_user(username, password)
+            
+            logger.info(f"Auth response type: {type(auth_response)}")
+            if isinstance(auth_response, tuple):
+                logger.warning(f"Authentication returned error: {auth_response[0]}")
+                return jsonify(auth_response[0]), auth_response[1]
+            
+            logger.info("Authentication successful")
+            return jsonify(auth_response)
+            
+        except Exception as auth_error:
+            logger.error(f"Error using authenticate_user: {auth_error}")
+            logger.error(traceback.format_exc())
+            
+            # Fallback response
+            return jsonify({
+                "message": "Authentication endpoint reached, but there was an error processing the request",
+                "detail": str(auth_error),
+                "server_time": datetime.now().isoformat()
+            }), 500
+    except Exception as e:
+        logger.error(f"Error in direct_authenticate: {e}")
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "message": "Authentication endpoint reached, but error in request processing",
+            "error": str(e),
+            "server_time": datetime.now().isoformat()
+        }), 500
+
 # === Test POST endpoint to verify basic functionality ===
 @app.route("/api/test-post", methods=["POST", "OPTIONS"])
 def test_post():
@@ -244,114 +462,6 @@ def test_post():
             "message": "Error processing POST request"
         }), 500
 
-# === Direct authenticate endpoint to handle non-prefixed requests ===
-@app.route("/authenticate", methods=["OPTIONS", "POST"])
-def direct_authenticate():
-    logger.info(f"Direct authenticate endpoint accessed from: {request.headers.get('Origin', 'Unknown')}")
-    
-    if request.method == "OPTIONS":
-        logger.info("OPTIONS request to /authenticate - returning preflight response")
-        return handle_preflight_request()
-    
-    # Forward this request to the proper endpoint in auth_services_routes
-    try:
-        from auth_services_routes import authenticate_user
-        
-        logger.info("Loading request data")
-        data = request.json
-        logger.info(f"Authentication data received: {data if data else 'No data'}")
-        
-        if not data:
-            logger.error("No JSON data provided in request")
-            return jsonify({"detail": "No JSON data provided"}), 400
-            
-        username = data.get('username')
-        password = data.get('password')
-        
-        # Log authentication attempt (without password)
-        logger.info(f"Authentication attempt for user: {username}")
-        
-        # Check if data is properly formed
-        if not username or not password:
-            logger.error("Missing username or password in request")
-            return jsonify({"detail": "Username and password are required"}), 400
-            
-        # Check if AWS credentials are properly configured
-        Region = os.getenv("REGION", "us-east-1")
-        user_pool_id = os.getenv("USER_POOL_ID")
-        client_id = os.getenv("CLIENT_ID")
-        client_secret = os.getenv("CLIENT_SECRET")
-        
-        logger.info(f"AWS Region configured: {'Yes' if Region else 'No'}")
-        logger.info(f"User Pool ID configured: {'Yes' if user_pool_id else 'No'}")
-        logger.info(f"Client ID configured: {'Yes' if client_id else 'No'}")
-        logger.info(f"Client Secret configured: {'Yes' if client_secret else 'No'}")
-        
-        # Call the authenticate_user function with detailed try/except
-        try:
-            logger.info("Calling authenticate_user function")
-            auth_response = authenticate_user(username, password)
-            logger.info(f"Auth response type: {type(auth_response)}")
-            
-            # Check if it's an error response (tuple with status code)
-            if isinstance(auth_response, tuple):
-                logger.error(f"Authentication returned error: {auth_response[0]}")
-                return jsonify(auth_response[0]), auth_response[1]
-                
-            # Otherwise, it's a successful response
-            logger.info("Authentication successful")
-            return jsonify(auth_response)
-            
-        except Exception as e:
-            logger.error(f"Exception in authenticate_user: {str(e)}")
-            logger.error(traceback.format_exc())
-            return jsonify({"detail": f"Authentication error: {str(e)}"}), 500
-            
-    except Exception as e:
-        logger.error(f"Error in direct_authenticate: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# === Helper function for CORS preflight requests ===
-def handle_preflight_request():
-    response = jsonify({"status": "success"})
-    origin = request.headers.get("Origin", "")
-    logger.info(f"Handling CORS preflight for origin: {origin}")
-    
-    if origin in allowed_origins or "*" in allowed_origins:
-        response.headers.set("Access-Control-Allow-Origin", origin)
-    else:
-        response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-        
-    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-    response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
-    response.headers.set("Access-Control-Allow-Credentials", "true")
-    response.headers.set("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
-    
-    return response, 204
-
-# === Fallback Authentication Route (in case blueprint registration fails) ===
-@app.route("/api/auth/authenticate", methods=["POST", "OPTIONS"])
-def fallback_authenticate():
-    if request.method == "OPTIONS":
-        return handle_preflight_request()
-        
-    logger.info("Fallback authentication route accessed")
-    try:
-        data = request.json
-        logger.info(f"Received auth data: {data}")
-        
-        response = jsonify({
-            "status": "success",
-            "message": "This is the fallback authentication endpoint. Blueprint registration might have failed.",
-            "received_data": data
-        })
-        
-        return response, 200
-    except Exception as e:
-        logger.error(f"Error in fallback_authenticate: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
 # === CORS status check route to help diagnose issues ===
 @app.route("/api/cors-check", methods=["GET", "OPTIONS"])
 def cors_check():
@@ -371,14 +481,23 @@ def cors_check():
     
     return response, 200
 
-# === Example API Route to Verify Functionality ===
-@app.route("/api/hello", methods=["GET", "OPTIONS"])
-def hello_world():
-    if request.method == "OPTIONS":
-        return handle_preflight_request()
+# === Helper function for CORS preflight requests ===
+def handle_preflight_request():
+    response = jsonify({"status": "success"})
+    origin = request.headers.get("Origin", "")
+    logger.info(f"Handling CORS preflight for origin: {origin}")
+    
+    if origin in allowed_origins or "*" in allowed_origins:
+        response.headers.set("Access-Control-Allow-Origin", origin)
+    else:
+        response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
         
-    response = jsonify({"message": "Hello from EncryptGate API!"})
-    return response, 200
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
+    response.headers.set("Access-Control-Allow-Credentials", "true")
+    response.headers.set("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
+    
+    return response, 204
 
 # == Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ==
 if __name__ == "__main__":
