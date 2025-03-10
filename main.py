@@ -5,11 +5,17 @@ import traceback
 import requests
 import jwt
 import time
+import boto3
+import botocore
+import hmac
+import hashlib
+import base64
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime
 import importlib.util
+import pyotp
 
 # Load environment variables
 load_dotenv()
@@ -152,6 +158,32 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
     logger.info(f"Added {current_dir} to Python path")
 
+# Add debug endpoint to check application structure
+@app.route("/api/check-app-structure", methods=["GET"])
+def check_app_structure():
+    """Checks the application structure and files"""
+    app_structure = {
+        "current_directory": os.getcwd(),
+        "files_in_current_dir": os.listdir(),
+        "python_path": sys.path,
+        "auth_services_exists": os.path.exists("auth_services_routes.py"),
+        "auth_routes_exists": os.path.exists("auth_routes.py"),
+        "main_exists": os.path.exists("main.py"),
+        "wsgi_exists": os.path.exists("wsgi.py"),
+        "application_exists": os.path.exists("application.py"),
+        "modules": [m.__name__ for m in sys.modules.values() if hasattr(m, '__name__') and not m.__name__.startswith('_')]
+    }
+    
+    # Check if we can import auth_services_routes
+    try:
+        import auth_services_routes
+        app_structure["auth_services_import"] = "success"
+        app_structure["auth_services_functions"] = dir(auth_services_routes)
+    except ImportError as e:
+        app_structure["auth_services_import"] = f"failed: {str(e)}"
+    
+    return jsonify(app_structure)
+
 # Add debug endpoint to check if blueprints were registered
 @app.route("/debug-routes", methods=["GET"])
 def debug_routes():
@@ -226,6 +258,7 @@ except Exception as e:
 COGNITO_REGION = os.getenv("REGION", "us-east-1")
 COGNITO_USERPOOL_ID = os.getenv("COGNITO_USERPOOL_ID")
 COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
+COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
 
 logger.info(f"Cognito Region: {COGNITO_REGION}")
 logger.info(f"Cognito UserPool ID: {COGNITO_USERPOOL_ID}")
@@ -341,23 +374,39 @@ def direct_test_mfa_code():
         secret = data.get('secret', '')
         code = data.get('code', '')
         
-        # Create a response with useful debug info
-        result = {
-            "valid": True,
-            "server_time": datetime.now().isoformat(),
-            "current_code": "123456",  # Dummy code for testing
-            "timestamp": int(time.time()),
-            "time_window": f"{int(time.time()) % 30}/30 seconds",
-            "debug_info": {
-                "request_origin": request.headers.get("Origin", "None"),
-                "request_method": request.method,
-                "allowed_origins": allowed_origins,
-                "cors_enabled": True
-            }
-        }
+        if not secret:
+            return jsonify({
+                "valid": False, 
+                "error": "Missing secret",
+                "server_time": datetime.now().isoformat()
+            }), 400
         
-        logger.info(f"Returning response: {result}")
-        return jsonify(result)
+        # Create a TOTP object with the secret
+        try:
+            totp = pyotp.TOTP(secret)
+            current_time = time.time()
+            current_code = totp.now()
+            
+            # Verify the code with a window if provided
+            is_valid = True
+            if code:
+                is_valid = totp.verify(code, valid_window=2)  # Allow 2 steps before/after for time sync issues
+            
+            return jsonify({
+                "valid": is_valid,
+                "provided_code": code if code else "Not provided",
+                "current_code": current_code,
+                "timestamp": int(current_time),
+                "time_window": f"{int(current_time) % 30}/30 seconds",
+                "server_time": datetime.now().isoformat()
+            })
+        except Exception as totp_error:
+            logger.error(f"TOTP error: {totp_error}")
+            return jsonify({
+                "valid": False, 
+                "error": str(totp_error),
+                "server_time": datetime.now().isoformat()
+            }), 500
     except Exception as e:
         logger.error(f"Error in direct_test_mfa_code: {e}")
         logger.error(traceback.format_exc())
@@ -385,56 +434,122 @@ def direct_authenticate():
         data = request.json
         logger.info(f"Authentication data received: {data if data else 'No data'}")
         
-        # Try to use the function from auth_services_routes if available
+        if not data:
+            logger.warning("No JSON data provided in request")
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        password = data.get('password')
+        
+        # Validation
+        if not username or not password:
+            logger.warning("Missing username or password in request")
+            return jsonify({"detail": "Username and password are required"}), 400
+        
+        # Authentication implementation directly from your auth_services_routes.py
         try:
-            # Try to import the authenticate_user function
+            # Check AWS Cognito configuration
+            CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
+            CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
+            USER_POOL_ID = os.getenv("COGNITO_USERPOOL_ID")
+            
+            if not CLIENT_ID or not CLIENT_SECRET or not USER_POOL_ID:
+                logger.error("AWS Cognito configuration missing")
+                return jsonify({"detail": "Authentication service misconfigured"}), 500
+            
+            # Generate secret hash
             try:
-                from auth_services_routes import authenticate_user
-                logger.info("Successfully imported authenticate_user function")
-            except ImportError:
-                # Try with the blueprint module from earlier import
-                try:
-                    authenticate_user = auth_services_module.authenticate_user
-                    logger.info("Using authenticate_user from module")
-                except:
-                    logger.error("Could not access authenticate_user function")
-                    raise ImportError("authenticate_user function not available")
+                # Directly implement the generate_client_secret_hash function 
+                message = username + CLIENT_ID
+                secret = CLIENT_SECRET.encode("utf-8")
+                hash_obj = hmac.new(secret, message.encode("utf-8"), hashlib.sha256)
+                hash_digest = hash_obj.digest()
+                secret_hash = base64.b64encode(hash_digest).decode()
+            except Exception as hash_error:
+                logger.error(f"Failed to generate secret hash: {hash_error}")
+                return jsonify({"detail": "Authentication error: Failed to generate credentials"}), 500
             
-            username = data.get('username')
-            password = data.get('password')
+            # Initialize Cognito client
+            try:
+                cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
+            except Exception as e:
+                logger.error(f"Failed to initialize Cognito client: {e}")
+                return jsonify({"detail": "Failed to connect to authentication service"}), 500
             
-            if not username or not password:
-                logger.warning("Missing username or password in request")
-                return jsonify({"detail": "Username and password are required"}), 400
+            # Call Cognito API
+            try:
+                logger.info(f"Initiating Cognito authentication for user: {username}")
+                
+                response = cognito_client.initiate_auth(
+                    ClientId=CLIENT_ID,
+                    AuthFlow="USER_PASSWORD_AUTH",
+                    AuthParameters={
+                        "USERNAME": username,
+                        "PASSWORD": password,
+                        "SECRET_HASH": secret_hash,
+                    },
+                )
+                
+                logger.info(f"Cognito authentication response received - keys: {list(response.keys())}")
+            except cognito_client.exceptions.NotAuthorizedException:
+                logger.warning("Authentication failed: Invalid credentials")
+                return jsonify({"detail": "Invalid username or password."}), 401
+            except cognito_client.exceptions.UserNotFoundException:
+                logger.warning("Authentication failed: User not found")
+                return jsonify({"detail": "Invalid username or password."}), 401
+            except botocore.exceptions.ClientError as client_error:
+                error_code = client_error.response['Error']['Code']
+                error_message = client_error.response['Error']['Message']
+                logger.error(f"AWS ClientError: {error_code} - {error_message}")
+                return jsonify({"detail": f"Authentication failed: {error_message}"}), 500
+            except Exception as api_error:
+                logger.error(f"Cognito API call failed: {api_error}")
+                return jsonify({"detail": f"Authentication failed: {str(api_error)}"}), 500
             
-            logger.info(f"Calling authenticate_user for: {username}")
-            auth_response = authenticate_user(username, password)
+            # Process auth result
+            auth_result = response.get("AuthenticationResult")
+            if not auth_result:
+                # Check for challenges
+                challenge_name = response.get("ChallengeName")
+                if challenge_name:
+                    logger.info(f"Authentication challenge required: {challenge_name}")
+                    
+                    # Return challenge details
+                    response_data = {
+                        "ChallengeName": challenge_name,
+                        "session": response.get("Session"),
+                        "mfa_required": challenge_name == "SOFTWARE_TOKEN_MFA"
+                    }
+                    
+                    return jsonify(response_data)
+                else:
+                    logger.error("No AuthenticationResult or ChallengeName in response")
+                    return jsonify({"detail": "Invalid authentication response"}), 500
             
-            logger.info(f"Auth response type: {type(auth_response)}")
-            if isinstance(auth_response, tuple):
-                logger.warning(f"Authentication returned error: {auth_response[0]}")
-                return jsonify(auth_response[0]), auth_response[1]
-            
+            # Return successful result
             logger.info("Authentication successful")
-            return jsonify(auth_response)
-            
+            return jsonify({
+                "id_token": auth_result.get("IdToken"),
+                "access_token": auth_result.get("AccessToken"),
+                "refresh_token": auth_result.get("RefreshToken"),
+                "token_type": auth_result.get("TokenType"),
+                "expires_in": auth_result.get("ExpiresIn"),
+            })
+                
         except Exception as auth_error:
-            logger.error(f"Error using authenticate_user: {auth_error}")
+            logger.error(f"Error during authentication: {auth_error}")
             logger.error(traceback.format_exc())
             
             # Fallback response
             return jsonify({
-                "message": "Authentication endpoint reached, but there was an error processing the request",
-                "detail": str(auth_error),
-                "server_time": datetime.now().isoformat()
+                "detail": f"Authentication failed: {str(auth_error)}"
             }), 500
     except Exception as e:
         logger.error(f"Error in direct_authenticate: {e}")
         logger.error(traceback.format_exc())
         return jsonify({
-            "message": "Authentication endpoint reached, but error in request processing",
-            "error": str(e),
-            "server_time": datetime.now().isoformat()
+            "detail": "Server error during authentication",
+            "error": str(e)
         }), 500
 
 # === Test POST endpoint to verify basic functionality ===
