@@ -7,6 +7,7 @@ import jwt
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Load environment variables
 load_dotenv()
@@ -16,27 +17,45 @@ app = Flask(__name__)
 
 # === Logging Setup ===
 def setup_comprehensive_logging():
-    log_dir = "/var/log/encryptgate"
-    os.makedirs(log_dir, exist_ok=True)  # Ensure the log directory exists
+    try:
+        log_dir = "/var/log/encryptgate"
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except PermissionError:
+            # Fall back to a directory we can write to
+            log_dir = "/tmp/encryptgate_logs"
+            os.makedirs(log_dir, exist_ok=True)
+            print(f"WARNING: Could not access /var/log/encryptgate, using {log_dir} instead")
 
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format="%(asctime)s [%(levelname)s] %(pathname)s:%(lineno)d - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(os.path.join(log_dir, "application_debug.log"), mode='a')
-        ]
-    )
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s [%(levelname)s] %(pathname)s:%(lineno)d - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler(os.path.join(log_dir, "application_debug.log"), mode='a')
+            ]
+        )
 
-    # Capture unhandled exceptions
-    def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
-        if issubclass(exc_type, KeyboardInterrupt):
-            sys.__excepthook__(exc_type, exc_value, exc_traceback)
-            return
-        logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+        # Capture unhandled exceptions
+        def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
+            if issubclass(exc_type, KeyboardInterrupt):
+                sys.__excepthook__(exc_type, exc_value, exc_traceback)
+                return
+            logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
-    sys.excepthook = handle_unhandled_exception
+        sys.excepthook = handle_unhandled_exception
+    except Exception as e:
+        # Ensure setup_comprehensive_logging never fails the application startup
+        print(f"WARNING: Could not set up comprehensive logging: {e}")
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s [%(levelname)s] %(pathname)s:%(lineno)d - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            handlers=[
+                logging.StreamHandler(sys.stdout)
+            ]
+        )
 
 setup_comprehensive_logging()
 logger = logging.getLogger(__name__)
@@ -60,9 +79,16 @@ def log_environment_details():
 log_environment_details()
 
 # === Ensure Required Directories Exist ===
-pid_dir = "/var/pids"
-os.makedirs(pid_dir, exist_ok=True)
-logger.info(f"PID directory set: {pid_dir}")
+try:
+    pid_dir = "/var/pids"
+    os.makedirs(pid_dir, exist_ok=True)
+    logger.info(f"PID directory set: {pid_dir}")
+except PermissionError:
+    pid_dir = "/tmp/pids"
+    os.makedirs(pid_dir, exist_ok=True)
+    logger.info(f"Could not use /var/pids, using {pid_dir} instead")
+except Exception as e:
+    logger.error(f"Error setting up PID directory: {e}")
 
 # === API URL Configuration ===
 API_URL = os.getenv("API_URL", "http://localhost:8080")
@@ -145,13 +171,25 @@ def get_cognito_public_keys():
         logger.error(traceback.format_exc())
         return {"keys": []}
 
-public_keys = get_cognito_public_keys()
-logger.info(f"Retrieved {len(public_keys.get('keys', []))} Cognito public keys")
+try:
+    public_keys = get_cognito_public_keys()
+    logger.info(f"Retrieved {len(public_keys.get('keys', []))} Cognito public keys")
+except Exception as e:
+    logger.error(f"Error retrieving Cognito public keys: {e}")
+    public_keys = {"keys": []}
 
 # === Basic Health Check Route ===
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({"status": "success", "message": "EncryptGate API Root"}), 200
+
 @app.route("/health", methods=["GET"])
-def home():
-    return jsonify({"status": "success", "message": "EncryptGate API is Running!"}), 200
+def health():
+    return jsonify({
+        "status": "healthy", 
+        "message": "EncryptGate API is Running!",
+        "timestamp": datetime.now().isoformat()
+    }), 200
 
 @app.route("/api/health", methods=["GET"])
 def api_health_check():
@@ -160,6 +198,7 @@ def api_health_check():
         "status": "healthy",
         "service": "EncryptGate API",
         "version": "1.0",
+        "timestamp": datetime.now().isoformat()
     }), 200
 
 # === Improved Debug Route ===
@@ -238,12 +277,12 @@ def direct_authenticate():
             return jsonify({"detail": "Username and password are required"}), 400
             
         # Check if AWS credentials are properly configured
-        aws_region = os.getenv("AWS_REGION", "us-east-1")
+        Region = os.getenv("REGION", "us-east-1")
         user_pool_id = os.getenv("USER_POOL_ID")
         client_id = os.getenv("CLIENT_ID")
         client_secret = os.getenv("CLIENT_SECRET")
         
-        logger.info(f"AWS Region configured: {'Yes' if aws_region else 'No'}")
+        logger.info(f"AWS Region configured: {'Yes' if Region else 'No'}")
         logger.info(f"User Pool ID configured: {'Yes' if user_pool_id else 'No'}")
         logger.info(f"Client ID configured: {'Yes' if client_id else 'No'}")
         logger.info(f"Client Secret configured: {'Yes' if client_secret else 'No'}")
