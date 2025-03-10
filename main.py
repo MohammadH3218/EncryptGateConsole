@@ -99,9 +99,9 @@ cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")
 allowed_origins = [origin.strip() for origin in cors_origins.split(",")]
 logger.info(f"CORS Origins: {allowed_origins}")
 
-# Apply CORS to all routes with expanded configuration
+# Make sure the CORS settings apply to ALL routes
 CORS(app, 
-     resources={r"/*": {"origins": allowed_origins}},  # Changed from /api/* to /* to cover all routes
+     resources={r"/*": {"origins": allowed_origins}},  # Use /* instead of /api/*
      supports_credentials=True,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
