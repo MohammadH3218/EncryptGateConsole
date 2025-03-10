@@ -505,7 +505,7 @@ if __name__ == "__main__":
         debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
         port = int(os.getenv("PORT", 8080))  # AWS EB requires port 8080
         
-        logger.info("Starting Flask server on port 8080")
+        logger.info(f"Starting Flask server on port {port}")
         app.run(debug=debug_mode, host="0.0.0.0", port=port)
     except Exception as e:
         logger.error(f"Critical failure starting Flask server: {e}")
