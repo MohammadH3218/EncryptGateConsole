@@ -13,9 +13,12 @@ import base64
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
-from datetime import datetime
+from datetime import datetime, timedelta
 import importlib.util
 import pyotp
+import qrcode
+from io import BytesIO
+from base64 import b64encode
 
 # Load environment variables
 load_dotenv()
@@ -332,6 +335,24 @@ def debug_route():
 def simple_cors_test():
     logger.info(f"Simple CORS test endpoint accessed - Method: {request.method}")
     logger.info(f"Request headers: {dict(request.headers)}")
+
+    # === Helper function for CORS preflight requests ===
+def handle_preflight_request():
+    response = jsonify({"status": "success"})
+    origin = request.headers.get("Origin", "")
+    logger.info(f"Handling CORS preflight for origin: {origin}")
+    
+    if origin in allowed_origins or "*" in allowed_origins:
+        response.headers.set("Access-Control-Allow-Origin", origin)
+    else:
+        response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        
+    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
+    response.headers.set("Access-Control-Allow-Credentials", "true")
+    response.headers.set("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
+    
+    return response, 204
     
     if request.method == "OPTIONS":
         logger.info("Handling OPTIONS preflight request")
@@ -552,77 +573,161 @@ def direct_authenticate():
             "error": str(e)
         }), 500
 
-# === Test POST endpoint to verify basic functionality ===
-@app.route("/api/test-post", methods=["POST", "OPTIONS"])
-def test_post():
+# === Direct fallback for /api/auth/respond-to-challenge ===
+@app.route("/api/auth/respond-to-challenge", methods=["POST", "OPTIONS"])
+def direct_respond_to_challenge():
+    """Direct fallback for responding to auth challenges"""
+    logger.info(f"Respond to challenge endpoint accessed - Method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    
     if request.method == "OPTIONS":
-        return handle_preflight_request()
-        
+        logger.info("Handling OPTIONS preflight request")
+        response = handle_preflight_request()
+        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
+        return response
+    
     try:
-        logger.info("Test POST endpoint accessed")
         data = request.json
-        logger.info(f"Test POST received data: {data}")
+        logger.info(f"Challenge response data received: {data if data else 'No data'}")
         
-        return jsonify({
-            "status": "success",
-            "received_data": data,
-            "message": "POST request successful"
-        }), 200
+        if not data:
+            logger.warning("No JSON data provided in request")
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        session = data.get('session')
+        challenge_name = data.get('challengeName')
+        challenge_responses = data.get('challengeResponses', {})
+        
+        if not (username and session and challenge_name):
+            logger.warning("Missing required parameters for challenge response")
+            return jsonify({"detail": "Username, session, and challengeName are required"}), 400
+        
+        # Respond to the authentication challenge - direct implementation
+        try:
+            # Check AWS Cognito configuration
+            CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
+            CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
+            
+            if not CLIENT_ID or not CLIENT_SECRET:
+                logger.error("AWS Cognito configuration missing")
+                return jsonify({"detail": "Authentication service misconfigured"}), 500
+            
+            # Generate secret hash
+            try:
+                message = username + CLIENT_ID
+                secret = CLIENT_SECRET.encode("utf-8")
+                hash_obj = hmac.new(secret, message.encode("utf-8"), hashlib.sha256)
+                hash_digest = hash_obj.digest()
+                secret_hash = base64.b64encode(hash_digest).decode()
+            except Exception as hash_error:
+                logger.error(f"Failed to generate secret hash: {hash_error}")
+                return jsonify({"detail": "Challenge response failed: Unable to generate credentials"}), 500
+            
+            # Initialize Cognito client
+            try:
+                cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
+            except Exception as e:
+                logger.error(f"Failed to initialize Cognito client: {e}")
+                return jsonify({"detail": "Failed to connect to authentication service"}), 500
+            
+            # Add username and secret hash to challenge responses
+            challenge_responses_with_auth = {
+                "USERNAME": username,
+                "SECRET_HASH": secret_hash
+            }
+            
+            # Add challenge-specific responses
+            for key, value in challenge_responses.items():
+                challenge_responses_with_auth[key] = value
+            
+            # Make the API call
+            try:
+                logger.info(f"Calling respond_to_auth_challenge for challenge: {challenge_name}")
+                
+                response = cognito_client.respond_to_auth_challenge(
+                    ClientId=CLIENT_ID,
+                    ChallengeName=challenge_name,
+                    Session=session,
+                    ChallengeResponses=challenge_responses_with_auth
+                )
+                
+                logger.info(f"Challenge response received - keys: {list(response.keys())}")
+            except Exception as api_error:
+                logger.error(f"Cognito API call failed: {api_error}")
+                return jsonify({"detail": f"Challenge response failed: {str(api_error)}"}), 500
+            
+            # Process response
+            auth_result = response.get("AuthenticationResult")
+            if auth_result:
+                # Authentication completed successfully
+                logger.info(f"Challenge {challenge_name} completed successfully")
+                return jsonify({
+                    "id_token": auth_result.get("IdToken"),
+                    "access_token": auth_result.get("AccessToken"),
+                    "refresh_token": auth_result.get("RefreshToken"),
+                    "token_type": auth_result.get("TokenType"),
+                    "expires_in": auth_result.get("ExpiresIn"),
+                })
+            
+            # If no auth result, check for next challenge
+            next_challenge = response.get("ChallengeName")
+            if next_challenge:
+                logger.info(f"Next challenge required: {next_challenge}")
+                
+                response_data = {
+                    "ChallengeName": next_challenge,
+                    "session": response.get("Session"),
+                    "mfa_required": next_challenge == "SOFTWARE_TOKEN_MFA"
+                }
+                
+                # Include MFA secret code if this is an MFA setup challenge
+                if next_challenge == "MFA_SETUP":
+                    # For MFA setup, we'd typically generate a secret here
+                    mfa_secret = pyotp.random_base32()
+                    response_data["secretCode"] = mfa_secret
+                    
+                return jsonify(response_data)
+            
+            # If we get here, something unexpected happened
+            logger.error("No AuthenticationResult or ChallengeName in response")
+            return jsonify({"detail": "Invalid challenge response"}), 500
+            
+        except cognito_client.exceptions.InvalidPasswordException as pwd_error:
+            logger.warning(f"Invalid password format")
+            return jsonify({"detail": f"Password does not meet requirements: {str(pwd_error)}"}), 400
+            
+        except cognito_client.exceptions.CodeMismatchException as code_error:
+            logger.warning(f"CodeMismatchException: Invalid verification code")
+            return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
+            
+        except botocore.exceptions.ClientError as client_error:
+            error_code = client_error.response['Error']['Code']
+            error_message = client_error.response['Error']['Message']
+            logger.error(f"AWS ClientError: {error_code} - {error_message}")
+            return jsonify({"detail": f"Challenge response failed: {error_message}"}), 500
+            
+        except Exception as e:
+            logger.error(f"Challenge response error: {e}")
+            return jsonify({"detail": f"Challenge response failed: {str(e)}"}), 500
+            
     except Exception as e:
-        logger.error(f"Error in test POST endpoint: {str(e)}")
+        logger.error(f"Error in direct_respond_to_challenge: {e}")
         logger.error(traceback.format_exc())
         return jsonify({
-            "status": "error",
-            "error": str(e),
-            "message": "Error processing POST request"
+            "detail": "Server error during challenge response",
+            "error": str(e)
         }), 500
 
-# === CORS status check route to help diagnose issues ===
-@app.route("/api/cors-check", methods=["GET", "OPTIONS"])
-def cors_check():
+# === Direct fallback for /api/auth/setup-mfa ===
+@app.route("/api/auth/setup-mfa", methods=["POST", "OPTIONS"])
+def direct_setup_mfa():
+    """Set up MFA for a user with access token"""
+    logger.info(f"Setup MFA endpoint accessed - Method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    
     if request.method == "OPTIONS":
-        return handle_preflight_request()
-        
-    origin = request.headers.get("Origin", "Unknown")
-    is_allowed = origin in allowed_origins or "*" in allowed_origins
-    
-    response = jsonify({
-        "status": "success",
-        "message": "CORS check endpoint",
-        "request_origin": origin,
-        "is_allowed_origin": is_allowed,
-        "allowed_origins": allowed_origins
-    })
-    
-    return response, 200
-
-# === Helper function for CORS preflight requests ===
-def handle_preflight_request():
-    response = jsonify({"status": "success"})
-    origin = request.headers.get("Origin", "")
-    logger.info(f"Handling CORS preflight for origin: {origin}")
-    
-    if origin in allowed_origins or "*" in allowed_origins:
-        response.headers.set("Access-Control-Allow-Origin", origin)
-    else:
-        response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-        
-    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-    response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
-    response.headers.set("Access-Control-Allow-Credentials", "true")
-    response.headers.set("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
-    
-    return response, 204
-
-# == Main Entry Point (Ensure AWS Elastic Beanstalk Uses Port 8080) ==
-if __name__ == "__main__":
-    try:
-        debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
-        port = int(os.getenv("PORT", 8080))  # AWS EB requires port 8080
-        
-        logger.info(f"Starting Flask server on port {port}")
-        app.run(debug=debug_mode, host="0.0.0.0", port=port)
-    except Exception as e:
-        logger.error(f"Critical failure starting Flask server: {e}")
-        logger.error(traceback.format_exc())
-        sys.exit(1)
+        logger.info("Handling OPTIONS preflight request")
+        response = handle_preflight_request()
+        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
+        return response
