@@ -161,6 +161,134 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
     logger.info(f"Added {current_dir} to Python path")
 
+# Add debug endpoint to check application structure
+@app.route("/api/check-app-structure", methods=["GET"])
+def check_app_structure():
+    """Checks the application structure and files"""
+    app_structure = {
+        "current_directory": os.getcwd(),
+        "files_in_current_dir": os.listdir(),
+        "python_path": sys.path,
+        "auth_services_exists": os.path.exists("auth_services_routes.py"),
+        "auth_routes_exists": os.path.exists("auth_routes.py"),
+        "main_exists": os.path.exists("main.py"),
+        "wsgi_exists": os.path.exists("wsgi.py"),
+        "application_exists": os.path.exists("application.py"),
+        "modules": [m.__name__ for m in sys.modules.values() if hasattr(m, '__name__') and not m.__name__.startswith('_')]
+    }
+    
+    # Check if we can import auth_services_routes
+    try:
+        import auth_services_routes
+        app_structure["auth_services_import"] = "success"
+        app_structure["auth_services_functions"] = dir(auth_services_routes)
+    except ImportError as e:
+        app_structure["auth_services_import"] = f"failed: {str(e)}"
+    
+    return jsonify(app_structure)
+
+# Add debug endpoint to check if blueprints were registered
+@app.route("/debug-routes", methods=["GET"])
+def debug_routes():
+    """Debug endpoint to list all registered routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "path": str(rule)
+        })
+    return jsonify({
+        "registered_routes": routes,
+        "blueprints": list(app.blueprints.keys()) if hasattr(app, 'blueprints') else [],
+        "blueprint_paths": {name: bp.url_prefix for name, bp in app.blueprints.items()} if hasattr(app, 'blueprints') else {}
+    })
+
+# Register Blueprints
+try:
+    # Method 1: Standard import (may work if files are in correct location)
+    try:
+        from auth_services_routes import auth_services_routes
+        from auth_routes import auth_routes
+        logger.info("Successfully imported blueprints with direct import")
+    except ImportError as e:
+        logger.error(f"Direct import failed: {e}")
+        
+        # Method 2: Import using importlib (more robust for Elastic Beanstalk)
+        auth_services_file = os.path.join(current_dir, "auth_services_routes.py")
+        auth_routes_file = os.path.join(current_dir, "auth_routes.py")
+        
+        if os.path.isfile(auth_services_file) and os.path.isfile(auth_routes_file):
+            logger.info(f"Found route files in: {current_dir}")
+            
+            spec1 = importlib.util.spec_from_file_location("auth_services_routes", auth_services_file)
+            auth_services_module = importlib.util.module_from_spec(spec1)
+            spec1.loader.exec_module(auth_services_module)
+            
+            spec2 = importlib.util.spec_from_file_location("auth_routes", auth_routes_file)
+            auth_routes_module = importlib.util.module_from_spec(spec2)
+            spec2.loader.exec_module(auth_routes_module)
+            
+            auth_services_routes = auth_services_module.auth_services_routes
+            auth_routes = auth_routes_module.auth_routes
+            logger.info("Successfully imported blueprints using file location")
+        else:
+            logger.error(f"Route files not found in: {current_dir}")
+            # List files in current directory for debugging
+            logger.info(f"Files in directory: {os.listdir(current_dir)}")
+            raise ImportError("Route files not found")
+    
+    # Register the blueprints with the app
+    app.register_blueprint(auth_services_routes, url_prefix="/api/auth")
+    app.register_blueprint(auth_routes, url_prefix="/api/user")
+    
+    # Log success
+    logger.info("Successfully registered blueprints")
+    logger.info(f"Registered blueprints: {list(app.blueprints.keys())}")
+    
+    # Log all registered routes
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append(f"{rule.endpoint}: {rule.methods} - {rule}")
+    logger.info(f"Registered routes: {len(routes)}")
+    for route in routes:
+        logger.info(f"Route: {route}")
+except Exception as e:
+    logger.error(f"Failed to register blueprints: {e}")
+    logger.error(traceback.format_exc())
+
+# === AWS Cognito Configuration ===
+COGNITO_REGION = os.getenv("REGION", "us-east-1")
+COGNITO_USERPOOL_ID = os.getenv("COGNITO_USERPOOL_ID")
+COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
+COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
+
+logger.info(f"Cognito Region: {COGNITO_REGION}")
+logger.info(f"Cognito UserPool ID: {COGNITO_USERPOOL_ID}")
+
+# === Fetch AWS Cognito Public Keys ===
+def get_cognito_public_keys():
+    try:
+        url = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USERPOOL_ID}/.well-known/jwks.json"
+        logger.info(f"Fetching Cognito public keys from: {url}")
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Network error fetching Cognito public keys: {e}")
+        return {"keys": []}
+    except Exception as e:
+        logger.error(f"Unexpected error fetching Cognito public keys: {e}")
+        logger.error(traceback.format_exc())
+        return {"keys": []}
+
+try:
+    public_keys = get_cognito_public_keys()
+    logger.info(f"Retrieved {len(public_keys.get('keys', []))} Cognito public keys")
+except Exception as e:
+    logger.error(f"Error retrieving Cognito public keys: {e}")
+    public_keys = {"keys": []}
+
 # === Helper function for normalized ISO 8601 datetime parsing ===
 def parse_iso_datetime(datetime_str):
     """
@@ -218,16 +346,54 @@ def get_time_difference_seconds(dt1, dt2):
         logger.warning(f"Error calculating time difference: {e}")
         return None
 
-# === AWS Cognito Configuration ===
-COGNITO_REGION = os.getenv("REGION", "us-east-1")
-COGNITO_USERPOOL_ID = os.getenv("COGNITO_USERPOOL_ID")
-COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
-COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
+# === Basic Health Check Route ===
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({"status": "success", "message": "EncryptGate API Root"}), 200
 
-logger.info(f"Cognito Region: {COGNITO_REGION}")
-logger.info(f"Cognito UserPool ID: {COGNITO_USERPOOL_ID}")
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({
+        "status": "healthy", 
+        "message": "EncryptGate API is Running!",
+        "timestamp": datetime.now().isoformat()
+    }), 200
 
-# === Helper function for CORS preflight requests ===
+@app.route("/api/health", methods=["GET"])
+def api_health_check():
+    """Health check endpoint for API monitoring."""
+    return jsonify({
+        "status": "healthy",
+        "service": "EncryptGate API",
+        "version": "1.0",
+        "timestamp": datetime.now().isoformat()
+    }), 200
+
+# === Improved Debug Route ===
+@app.route("/api/debug", methods=["GET"])
+def debug_route():
+    debug_info = {
+        "python_version": sys.version,
+        "current_directory": os.getcwd(),
+        "environment_variables": {
+            key: value for key, value in os.environ.items()
+            if key.lower() not in ['password', 'secret', 'token', 'aws_secret_access_key']
+        },
+        "python_path": sys.path,
+        "flask_debug": app.debug,
+        "cors_origins": allowed_origins,
+        "api_url": API_URL,
+        "running_processes": os.popen("ps aux | grep gunicorn").read().strip()
+    }
+    return jsonify(debug_info), 200
+
+# === Simple CORS Test Endpoint ===
+@app.route("/api/simple-cors-test", methods=["GET", "OPTIONS", "POST"])
+def simple_cors_test():
+    logger.info(f"Simple CORS test endpoint accessed - Method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+
+    # === Helper function for CORS preflight requests ===
 def handle_preflight_request():
     response = jsonify({"status": "success"})
     origin = request.headers.get("Origin", "")
@@ -244,35 +410,41 @@ def handle_preflight_request():
     response.headers.set("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
     
     return response, 204
-
-# === Basic Health Check Route ===
-@app.route("/", methods=["GET"])
-def root():
-    return jsonify({"status": "success", "message": "EncryptGate API Root"}), 200
-
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({
-        "status": "healthy", 
-        "message": "EncryptGate API is Running!",
-        "timestamp": get_current_utc_datetime().isoformat()
-    }), 200
+    
+    if request.method == "OPTIONS":
+        logger.info("Handling OPTIONS preflight request")
+        return handle_preflight_request()
+    
+    # For GET or POST methods
+    response = jsonify({
+        "message": "CORS test successful!",
+        "method": request.method,
+        "timestamp": datetime.now().isoformat(),
+        "request_origin": request.headers.get("Origin", "None"),
+        "your_ip": request.remote_addr
+    })
+    
+    logger.info(f"Returning simple test response with headers: {dict(response.headers)}")
+    return response
 
 # === Direct fallback for test-mfa-code with improved time handling ===
 @app.route("/api/auth/test-mfa-code", methods=["POST", "OPTIONS"])
 def direct_test_mfa_code():
     """Direct fallback for MFA code testing with improved time handling"""
     logger.info(f"test-mfa-code endpoint accessed with method: {request.method}")
+    logger.info(f"Request headers: {dict(request.headers)}")
     
     if request.method == "OPTIONS":
         logger.info("Handling OPTIONS preflight request")
-        return handle_preflight_request()
+        response = handle_preflight_request()
+        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
+        return response
     
     try:
         # Log request body
         try:
             data = request.json
-            logger.info(f"Request body (test-mfa-code): {data}")
+            logger.info(f"Request body: {data}")
         except Exception as e:
             logger.info(f"Could not parse request body: {e}")
             data = {}

@@ -228,7 +228,7 @@ export default function LoginPage() {
     }
   };
 
-  // Function to get server-adjusted time for MFA verification
+  // Improved function to get server-adjusted time for MFA verification
   const getServerAdjustedTime = () => {
     const timeOffset = localStorage.getItem("server_time_offset");
     const syncTimestamp = localStorage.getItem("time_sync_timestamp");
@@ -767,7 +767,7 @@ export default function LoginPage() {
   // Enhanced refreshMfaCode function with improved time handling
   const refreshMfaCode = async () => {
     if (!mfaSecretCode) return;
-  
+
     setIsLoading(true);
     setError("");
     
@@ -776,13 +776,10 @@ export default function LoginPage() {
       await synchronizeTime();
       
       // Get current valid code from server
-      const endpoint = `${apiBaseUrl}/api/auth/test-mfa-code`;
-      
-      // Get current client time and server-adjusted time
       const clientTime = new Date().toISOString();
-      const serverAdjustedTime = getServerAdjustedTime()?.toISOString();
+      const serverAdjustedTime = getServerAdjustedTime()?.toISOString() || clientTime;
       
-      const response = await fetch(endpoint, {
+      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -797,7 +794,7 @@ export default function LoginPage() {
     
       const result = await response.json();
       
-      // Use the best available code
+      // Try to use the best available code
       let freshCode = null;
       if (result.client_code && serverAdjustedTime) {
         // If we have client-adjusted time and the server generated a code for it
