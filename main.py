@@ -13,7 +13,7 @@ import base64
 from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import importlib.util
 import pyotp
 import qrcode
@@ -101,6 +101,25 @@ except PermissionError:
 except Exception as e:
     logger.error(f"Error setting up PID directory: {e}")
 
+# === Helper Functions for Time Parsing / Calculation ===
+def parse_iso_datetime(datetime_str: str) -> datetime:
+    """
+    Parse ISO 8601 datetime string to a timezone-aware datetime object in UTC.
+    """
+    # Safely replace 'Z' with '+00:00' if present, then parse and convert to UTC
+    return datetime.fromisoformat(datetime_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+
+def get_time_difference_seconds(dt1: datetime, dt2: datetime) -> float:
+    """
+    Calculate absolute difference in seconds between two datetime objects.
+    Ensures both are timezone-aware before subtraction.
+    """
+    if dt1.tzinfo is None:
+        dt1 = dt1.replace(tzinfo=timezone.utc)
+    if dt2.tzinfo is None:
+        dt2 = dt2.replace(tzinfo=timezone.utc)
+    return abs((dt1 - dt2).total_seconds())
+
 # === API URL Configuration ===
 API_URL = os.getenv("API_URL", "http://localhost:8080")
 logger.info(f"API URL: {API_URL}")
@@ -110,14 +129,12 @@ cors_origins = os.getenv("CORS_ORIGINS", "https://console-encryptgate.net")
 allowed_origins = [origin.strip() for origin in cors_origins.split(",")]
 logger.info(f"CORS Origins: {allowed_origins}")
 
-# Apply CORS to all routes with expanded configuration
-CORS(app, 
+CORS(app,
      resources={r"/*": {"origins": allowed_origins}},  # Changed from /api/* to /* to cover all routes
      supports_credentials=True,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
 
-# Global after_request handler to ensure CORS headers are added to all responses
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get("Origin", "")
@@ -126,17 +143,14 @@ def add_cors_headers(response):
     if origin in allowed_origins or "*" in allowed_origins:
         response.headers.set("Access-Control-Allow-Origin", origin)
     else:
-        # Default to the primary domain if origin is not in allowed list
         response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
     
-    # Set other CORS headers
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
     response.headers.set("Access-Control-Allow-Credentials", "true")
     
     return response
 
-# Add debug logger for CORS issues
 @app.after_request
 def log_cors_debug_info(response):
     origin = request.headers.get("Origin", "None")
@@ -146,11 +160,9 @@ def log_cors_debug_info(response):
     logger.info(f"CORS Debug - Request: {method} {path} from Origin: {origin}")
     logger.info(f"CORS Debug - Response Headers: {dict(response.headers)}")
     
-    # Check if CORS headers are set correctly
     has_cors_origin = "Access-Control-Allow-Origin" in response.headers
     logger.info(f"CORS Debug - Has Allow-Origin Header: {has_cors_origin}")
     
-    # Log allowed origins for reference
     logger.info(f"CORS Debug - Configured Allowed Origins: {allowed_origins}")
     
     return response
@@ -161,7 +173,6 @@ if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
     logger.info(f"Added {current_dir} to Python path")
 
-# Add debug endpoint to check application structure
 @app.route("/api/check-app-structure", methods=["GET"])
 def check_app_structure():
     """Checks the application structure and files"""
@@ -177,7 +188,6 @@ def check_app_structure():
         "modules": [m.__name__ for m in sys.modules.values() if hasattr(m, '__name__') and not m.__name__.startswith('_')]
     }
     
-    # Check if we can import auth_services_routes
     try:
         import auth_services_routes
         app_structure["auth_services_import"] = "success"
@@ -187,7 +197,6 @@ def check_app_structure():
     
     return jsonify(app_structure)
 
-# Add debug endpoint to check if blueprints were registered
 @app.route("/debug-routes", methods=["GET"])
 def debug_routes():
     """Debug endpoint to list all registered routes"""
@@ -206,7 +215,6 @@ def debug_routes():
 
 # Register Blueprints
 try:
-    # Method 1: Standard import (may work if files are in correct location)
     try:
         from auth_services_routes import auth_services_routes
         from auth_routes import auth_routes
@@ -214,7 +222,6 @@ try:
     except ImportError as e:
         logger.error(f"Direct import failed: {e}")
         
-        # Method 2: Import using importlib (more robust for Elastic Beanstalk)
         auth_services_file = os.path.join(current_dir, "auth_services_routes.py")
         auth_routes_file = os.path.join(current_dir, "auth_routes.py")
         
@@ -234,19 +241,15 @@ try:
             logger.info("Successfully imported blueprints using file location")
         else:
             logger.error(f"Route files not found in: {current_dir}")
-            # List files in current directory for debugging
             logger.info(f"Files in directory: {os.listdir(current_dir)}")
             raise ImportError("Route files not found")
     
-    # Register the blueprints with the app
     app.register_blueprint(auth_services_routes, url_prefix="/api/auth")
     app.register_blueprint(auth_routes, url_prefix="/api/user")
     
-    # Log success
     logger.info("Successfully registered blueprints")
     logger.info(f"Registered blueprints: {list(app.blueprints.keys())}")
     
-    # Log all registered routes
     routes = []
     for rule in app.url_map.iter_rules():
         routes.append(f"{rule.endpoint}: {rule.methods} - {rule}")
@@ -266,7 +269,6 @@ COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
 logger.info(f"Cognito Region: {COGNITO_REGION}")
 logger.info(f"Cognito UserPool ID: {COGNITO_USERPOOL_ID}")
 
-# === Fetch AWS Cognito Public Keys ===
 def get_cognito_public_keys():
     try:
         url = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USERPOOL_ID}/.well-known/jwks.json"
@@ -289,7 +291,6 @@ except Exception as e:
     logger.error(f"Error retrieving Cognito public keys: {e}")
     public_keys = {"keys": []}
 
-# === Basic Health Check Route ===
 @app.route("/", methods=["GET"])
 def root():
     return jsonify({"status": "success", "message": "EncryptGate API Root"}), 200
@@ -297,9 +298,9 @@ def root():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
-        "status": "healthy", 
+        "status": "healthy",
         "message": "EncryptGate API is Running!",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }), 200
 
 @app.route("/api/health", methods=["GET"])
@@ -309,10 +310,9 @@ def api_health_check():
         "status": "healthy",
         "service": "EncryptGate API",
         "version": "1.0",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat()
     }), 200
 
-# === Improved Debug Route ===
 @app.route("/api/debug", methods=["GET"])
 def debug_route():
     debug_info = {
@@ -330,13 +330,11 @@ def debug_route():
     }
     return jsonify(debug_info), 200
 
-# === Simple CORS Test Endpoint ===
 @app.route("/api/simple-cors-test", methods=["GET", "OPTIONS", "POST"])
 def simple_cors_test():
     logger.info(f"Simple CORS test endpoint accessed - Method: {request.method}")
     logger.info(f"Request headers: {dict(request.headers)}")
 
-    # === Helper function for CORS preflight requests ===
 def handle_preflight_request():
     response = jsonify({"status": "success"})
     origin = request.headers.get("Origin", "")
@@ -350,7 +348,7 @@ def handle_preflight_request():
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
     response.headers.set("Access-Control-Allow-Credentials", "true")
-    response.headers.set("Access-Control-Max-Age", "3600")  # Cache preflight for 1 hour
+    response.headers.set("Access-Control-Max-Age", "3600")
     
     return response, 204
     
@@ -358,11 +356,10 @@ def handle_preflight_request():
         logger.info("Handling OPTIONS preflight request")
         return handle_preflight_request()
     
-    # For GET or POST methods
     response = jsonify({
         "message": "CORS test successful!",
         "method": request.method,
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "request_origin": request.headers.get("Origin", "None"),
         "your_ip": request.remote_addr
     })
@@ -370,7 +367,6 @@ def handle_preflight_request():
     logger.info(f"Returning simple test response with headers: {dict(response.headers)}")
     return response
 
-# === Direct fallback for test-mfa-code with improved time handling ===
 @app.route("/api/auth/test-mfa-code", methods=["POST", "OPTIONS"])
 def direct_test_mfa_code():
     """Direct fallback for MFA code testing with improved time handling"""
@@ -384,7 +380,6 @@ def direct_test_mfa_code():
         return response
     
     try:
-        # Log request body
         try:
             data = request.json
             logger.info(f"Request body: {data}")
@@ -394,66 +389,64 @@ def direct_test_mfa_code():
             
         secret = data.get('secret', '')
         code = data.get('code', '')
-        client_time = data.get('client_time')
-        adjusted_time = data.get('adjusted_time')
+        client_time_str = data.get('client_time')
+        adjusted_time_str = data.get('adjusted_time')
         
-        # Log time information
-        server_time = datetime.now()
+        # Use timezone-aware server time
+        server_time = datetime.now(timezone.utc)
         logger.info(f"Server time: {server_time.isoformat()}")
+        
+        # Parse client_time and adjusted_time with parse_iso_datetime
         time_diff_seconds = None
-        if client_time:
+        if client_time_str:
             try:
-                client_dt = datetime.fromisoformat(client_time.replace('Z', '+00:00'))
-                time_diff_seconds = abs((server_time - client_dt).total_seconds())
-                logger.info(f"Client time: {client_time}, Time difference: {time_diff_seconds} seconds")
+                client_dt = parse_iso_datetime(client_time_str)
+                time_diff_seconds = get_time_difference_seconds(server_time, client_dt)
+                logger.info(f"Client time: {client_time_str}, Time difference: {time_diff_seconds} seconds")
             except Exception as time_error:
                 logger.warning(f"Error parsing client time: {time_error}")
         
-        if adjusted_time:
-            logger.info(f"Client adjusted time: {adjusted_time}")
+        if adjusted_time_str:
+            logger.info(f"Client adjusted time: {adjusted_time_str}")
         
         if not secret:
             return jsonify({
-                "valid": False, 
+                "valid": False,
                 "error": "Missing secret",
                 "server_time": server_time.isoformat()
             }), 400
         
-        # Create a TOTP object with the secret
         try:
             totp = pyotp.TOTP(secret)
             current_time = time.time()
-            
-            # Current server-generated code
             current_code = totp.now()
             
-            # Generate codes for adjacent time windows
+            # Generate adjacent codes using server_time
             prev_code = totp.at(server_time - timedelta(seconds=30))
             next_code = totp.at(server_time + timedelta(seconds=30))
             
-            # Also generate codes using client time if provided
+            # Generate a code based on adjusted_time if provided
             client_current_code = None
-            if adjusted_time:
+            if adjusted_time_str:
                 try:
-                    adjusted_dt = datetime.fromisoformat(adjusted_time.replace('Z', '+00:00'))
+                    adjusted_dt = parse_iso_datetime(adjusted_time_str)
                     client_current_code = totp.at(adjusted_dt)
                     logger.info(f"Code based on client adjusted time: {client_current_code}")
                 except Exception as adj_error:
                     logger.warning(f"Error using adjusted time: {adj_error}")
             
-            # Verify the code with a window if provided
+            # Verify the provided code with an extended window
             is_valid = False
             if code:
-                # Try with server time first (with extended window)
-                is_valid = totp.verify(code, valid_window=5)  # Increased window to 5 for larger time differences
+                is_valid = totp.verify(code, valid_window=5)
                 
-                # If that fails and we have client time, try with that
+                # If not valid with server time, check if it matches the client_current_code
                 if not is_valid and client_current_code:
                     is_valid = (code == client_current_code)
-                    
+                
                 logger.info(f"Code validation result: {is_valid}, Server code: {current_code}, Client code: {client_current_code}")
             else:
-                is_valid = True  # No code provided to verify
+                is_valid = True  # If no code is provided, we skip verification
             
             return jsonify({
                 "valid": is_valid,
@@ -467,15 +460,15 @@ def direct_test_mfa_code():
                 "server_time": server_time.isoformat(),
                 "time_sync_info": {
                     "server_time": server_time.isoformat(),
-                    "client_time": client_time,
-                    "adjusted_time": adjusted_time,
+                    "client_time": client_time_str,
+                    "adjusted_time": adjusted_time_str,
                     "time_drift": time_diff_seconds
                 }
             })
         except Exception as totp_error:
             logger.error(f"TOTP error: {totp_error}")
             return jsonify({
-                "valid": False, 
+                "valid": False,
                 "error": str(totp_error),
                 "server_time": server_time.isoformat()
             }), 500
@@ -483,12 +476,11 @@ def direct_test_mfa_code():
         logger.error(f"Error in direct_test_mfa_code: {e}")
         logger.error(traceback.format_exc())
         return jsonify({
-            "valid": False, 
+            "valid": False,
             "error": str(e),
-            "server_time": datetime.now().isoformat()
+            "server_time": datetime.now(timezone.utc).isoformat()
         }), 500
 
-# === Direct fallback for authenticate ===
 @app.route("/api/auth/authenticate", methods=["POST", "OPTIONS"])
 def direct_authenticate():
     """Direct fallback for authentication"""
@@ -502,7 +494,6 @@ def direct_authenticate():
         return response
     
     try:
-        # Get request data
         data = request.json
         logger.info(f"Authentication data received: {data if data else 'No data'}")
         
@@ -513,14 +504,11 @@ def direct_authenticate():
         username = data.get('username')
         password = data.get('password')
         
-        # Validation
         if not username or not password:
             logger.warning("Missing username or password in request")
             return jsonify({"detail": "Username and password are required"}), 400
         
-        # Authentication implementation directly from your auth_services_routes.py
         try:
-            # Check AWS Cognito configuration
             CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
             CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
             USER_POOL_ID = os.getenv("COGNITO_USERPOOL_ID")
@@ -529,9 +517,7 @@ def direct_authenticate():
                 logger.error("AWS Cognito configuration missing")
                 return jsonify({"detail": "Authentication service misconfigured"}), 500
             
-            # Generate secret hash
             try:
-                # Directly implement the generate_client_secret_hash function 
                 message = username + CLIENT_ID
                 secret = CLIENT_SECRET.encode("utf-8")
                 hash_obj = hmac.new(secret, message.encode("utf-8"), hashlib.sha256)
@@ -541,14 +527,12 @@ def direct_authenticate():
                 logger.error(f"Failed to generate secret hash: {hash_error}")
                 return jsonify({"detail": "Authentication error: Failed to generate credentials"}), 500
             
-            # Initialize Cognito client
             try:
                 cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
             except Exception as e:
                 logger.error(f"Failed to initialize Cognito client: {e}")
                 return jsonify({"detail": "Failed to connect to authentication service"}), 500
             
-            # Call Cognito API
             try:
                 logger.info(f"Initiating Cognito authentication for user: {username}")
                 
@@ -578,15 +562,12 @@ def direct_authenticate():
                 logger.error(f"Cognito API call failed: {api_error}")
                 return jsonify({"detail": f"Authentication failed: {str(api_error)}"}), 500
             
-            # Process auth result
             auth_result = response.get("AuthenticationResult")
             if not auth_result:
-                # Check for challenges
                 challenge_name = response.get("ChallengeName")
                 if challenge_name:
                     logger.info(f"Authentication challenge required: {challenge_name}")
                     
-                    # Return challenge details
                     response_data = {
                         "ChallengeName": challenge_name,
                         "session": response.get("Session"),
@@ -598,7 +579,6 @@ def direct_authenticate():
                     logger.error("No AuthenticationResult or ChallengeName in response")
                     return jsonify({"detail": "Invalid authentication response"}), 500
             
-            # Return successful result
             logger.info("Authentication successful")
             return jsonify({
                 "id_token": auth_result.get("IdToken"),
@@ -612,7 +592,6 @@ def direct_authenticate():
             logger.error(f"Error during authentication: {auth_error}")
             logger.error(traceback.format_exc())
             
-            # Fallback response
             return jsonify({
                 "detail": f"Authentication failed: {str(auth_error)}"
             }), 500
@@ -624,7 +603,6 @@ def direct_authenticate():
             "error": str(e)
         }), 500
 
-# === Direct fallback for /api/auth/respond-to-challenge ===
 @app.route("/api/auth/respond-to-challenge", methods=["POST", "OPTIONS"])
 def direct_respond_to_challenge():
     """Direct fallback for responding to auth challenges"""
@@ -654,9 +632,7 @@ def direct_respond_to_challenge():
             logger.warning("Missing required parameters for challenge response")
             return jsonify({"detail": "Username, session, and challengeName are required"}), 400
         
-        # Respond to the authentication challenge - direct implementation
         try:
-            # Check AWS Cognito configuration
             CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
             CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
             
@@ -664,7 +640,6 @@ def direct_respond_to_challenge():
                 logger.error("AWS Cognito configuration missing")
                 return jsonify({"detail": "Authentication service misconfigured"}), 500
             
-            # Generate secret hash
             try:
                 message = username + CLIENT_ID
                 secret = CLIENT_SECRET.encode("utf-8")
@@ -675,24 +650,19 @@ def direct_respond_to_challenge():
                 logger.error(f"Failed to generate secret hash: {hash_error}")
                 return jsonify({"detail": "Challenge response failed: Unable to generate credentials"}), 500
             
-            # Initialize Cognito client
             try:
                 cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
             except Exception as e:
                 logger.error(f"Failed to initialize Cognito client: {e}")
                 return jsonify({"detail": "Failed to connect to authentication service"}), 500
             
-            # Add username and secret hash to challenge responses
             challenge_responses_with_auth = {
                 "USERNAME": username,
                 "SECRET_HASH": secret_hash
             }
-            
-            # Add challenge-specific responses
             for key, value in challenge_responses.items():
                 challenge_responses_with_auth[key] = value
             
-            # Make the API call
             try:
                 logger.info(f"Calling respond_to_auth_challenge for challenge: {challenge_name}")
                 
@@ -708,10 +678,8 @@ def direct_respond_to_challenge():
                 logger.error(f"Cognito API call failed: {api_error}")
                 return jsonify({"detail": f"Challenge response failed: {str(api_error)}"}), 500
             
-            # Process response
             auth_result = response.get("AuthenticationResult")
             if auth_result:
-                # Authentication completed successfully
                 logger.info(f"Challenge {challenge_name} completed successfully")
                 return jsonify({
                     "id_token": auth_result.get("IdToken"),
@@ -721,7 +689,6 @@ def direct_respond_to_challenge():
                     "expires_in": auth_result.get("ExpiresIn"),
                 })
             
-            # If no auth result, check for next challenge
             next_challenge = response.get("ChallengeName")
             if next_challenge:
                 logger.info(f"Next challenge required: {next_challenge}")
@@ -731,16 +698,11 @@ def direct_respond_to_challenge():
                     "session": response.get("Session"),
                     "mfa_required": next_challenge == "SOFTWARE_TOKEN_MFA"
                 }
-                
-                # Include MFA secret code if this is an MFA setup challenge
                 if next_challenge == "MFA_SETUP":
-                    # For MFA setup, we'd typically generate a secret here
                     mfa_secret = pyotp.random_base32()
                     response_data["secretCode"] = mfa_secret
-                    
                 return jsonify(response_data)
             
-            # If we get here, something unexpected happened
             logger.error("No AuthenticationResult or ChallengeName in response")
             return jsonify({"detail": "Invalid challenge response"}), 500
             
@@ -770,7 +732,6 @@ def direct_respond_to_challenge():
             "error": str(e)
         }), 500
 
-# === Direct fallback for /api/auth/setup-mfa ===
 @app.route("/api/auth/setup-mfa", methods=["POST", "OPTIONS"])
 def direct_setup_mfa():
     """Set up MFA for a user with access token"""
@@ -795,39 +756,30 @@ def direct_setup_mfa():
             logger.warning("No access token provided in request")
             return jsonify({"detail": "Access token is required"}), 400
         
-        # Initialize Cognito client
         try:
             cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
         except Exception as e:
             logger.error(f"Failed to initialize Cognito client: {e}")
             return jsonify({"detail": "Failed to connect to authentication service"}), 500
         
-        # Validate token format
         if not access_token or not isinstance(access_token, str) or len(access_token) < 20:
             logger.error(f"Invalid access token format")
             return jsonify({"detail": "Invalid access token format"}), 400
             
         try:
-            # Get user details first to validate token and get username
-            user_response = cognito_client.get_user(
-                AccessToken=access_token
-            )
+            user_response = cognito_client.get_user(AccessToken=access_token)
             username = user_response.get("Username", "user")
             logger.info(f"Retrieved username: {username} from access token")
         except Exception as user_error:
             logger.error(f"Failed to get user details: {user_error}")
             return jsonify({"detail": f"Invalid access token: {str(user_error)}"}), 401
             
-        # Make the API call to associate software token
         try:
-            associate_response = cognito_client.associate_software_token(
-                AccessToken=access_token
-            )
+            associate_response = cognito_client.associate_software_token(AccessToken=access_token)
         except Exception as assoc_error:
             logger.error(f"Failed to associate software token: {assoc_error}")
             return jsonify({"detail": f"MFA setup failed: {str(assoc_error)}"}), 500
         
-        # Get the secret code
         secret_code = associate_response.get("SecretCode")
         if not secret_code:
             logger.error("No secret code in response")
@@ -835,48 +787,34 @@ def direct_setup_mfa():
         
         logger.info(f"Generated secret code for MFA setup: {secret_code}")
         
-        # Generate QR code
+        def generate_qr_code(secret_code, username, issuer="EncryptGate"):
+            sanitized_issuer = issuer.lower().replace(" ", "")
+            totp = pyotp.TOTP(secret_code)
+            provisioning_uri = totp.provisioning_uri(name=username, issuer_name=sanitized_issuer)
+            logger.info(f"Generated provisioning URI: {provisioning_uri}")
+            
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=10,
+                border=4,
+            )
+            qr.add_data(provisioning_uri)
+            qr.make(fit=True)
+            
+            img = qr.make_image(fill_color="black", back_color="white")
+            buffered = BytesIO()
+            img.save(buffered)
+            img_str = b64encode(buffered.getvalue()).decode()
+            
+            return f"data:image/png;base64,{img_str}"
+        
         try:
-            # Function to generate QR code
-            def generate_qr_code(secret_code, username, issuer="EncryptGate"):
-                # Create the OTP auth URI with specific formatting for Google Authenticator
-                sanitized_issuer = issuer.lower().replace(" ", "")
-                
-                # Generate provisioning URI with standard format
-                totp = pyotp.TOTP(secret_code)
-                provisioning_uri = totp.provisioning_uri(
-                    name=username, 
-                    issuer_name=sanitized_issuer
-                )
-                
-                logger.info(f"Generated provisioning URI: {provisioning_uri}")
-                
-                # Generate QR code with higher error correction
-                qr = qrcode.QRCode(
-                    version=1,
-                    error_correction=qrcode.constants.ERROR_CORRECT_M,
-                    box_size=10,
-                    border=4,
-                )
-                qr.add_data(provisioning_uri)
-                qr.make(fit=True)
-                
-                # Create image
-                img = qr.make_image(fill_color="black", back_color="white")
-                
-                # Convert to base64
-                buffered = BytesIO()
-                img.save(buffered)
-                img_str = b64encode(buffered.getvalue()).decode()
-                
-                return f"data:image/png;base64,{img_str}"
-                
             qr_code = generate_qr_code(secret_code, username, "EncryptGate")
         except Exception as qr_error:
             logger.warning(f"Failed to generate QR code: {qr_error}")
             qr_code = None
         
-        # Generate current valid TOTP code for convenience
         try:
             totp = pyotp.TOTP(secret_code)
             current_code = totp.now()
@@ -898,7 +836,6 @@ def direct_setup_mfa():
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Failed to setup MFA: {str(e)}"}), 500
 
-# Enhanced version of direct_confirm_mfa_setup with better time handling
 @app.route("/api/auth/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def direct_confirm_mfa_setup():
     """Direct fallback for confirming MFA setup with improved time handling"""
@@ -922,26 +859,25 @@ def direct_confirm_mfa_setup():
         username = data.get('username')
         session = data.get('session')
         code = data.get('code')
-        password = data.get('password', '')  # Added password parameter
-        client_time = data.get('client_time')
-        adjusted_time = data.get('adjusted_time')
+        password = data.get('password', '')
+        client_time_str = data.get('client_time')
+        adjusted_time_str = data.get('adjusted_time')
         
-        # Log time information for debugging
-        server_time = datetime.now()
+        server_time = datetime.now(timezone.utc)
         logger.info(f"Server time: {server_time.isoformat()}")
+        
         time_diff_seconds = None
-        if client_time:
+        if client_time_str:
             try:
-                client_dt = datetime.fromisoformat(client_time.replace('Z', '+00:00'))
-                time_diff_seconds = abs((server_time - client_dt).total_seconds())
-                logger.info(f"Client time: {client_time}, Time difference: {time_diff_seconds} seconds")
+                client_dt = parse_iso_datetime(client_time_str)
+                time_diff_seconds = get_time_difference_seconds(server_time, client_dt)
+                logger.info(f"Client time: {client_time_str}, Time difference: {time_diff_seconds} seconds")
             except Exception as time_error:
                 logger.warning(f"Error parsing client time: {time_error}")
         
-        if adjusted_time:
-            logger.info(f"Client adjusted time: {adjusted_time}")
+        if adjusted_time_str:
+            logger.info(f"Client adjusted time: {adjusted_time_str}")
         
-        # Enhanced session validation and logging
         if session:
             logger.info(f"Session token length: {len(session)}")
             logger.info(f"First 20 chars of session: {session[:20] if len(session) > 20 else session}")
@@ -949,7 +885,6 @@ def direct_confirm_mfa_setup():
             
         logger.info(f"MFA setup parameters: username={username}, code length={len(code) if code else 0}, password provided={bool(password)}")
         
-        # Validate input parameters
         if not code:
             logger.error("MFA code is missing")
             return jsonify({"detail": "Verification code is required"}), 400
@@ -962,23 +897,15 @@ def direct_confirm_mfa_setup():
             logger.error("Username is missing")
             return jsonify({"detail": "Username is required"}), 400
         
-        # Initialize Cognito client
         try:
             cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
         except Exception as e:
             logger.error(f"Failed to initialize Cognito client: {e}")
             return jsonify({"detail": "Failed to connect to authentication service"}), 500
         
-        # Follow the same sequence as in auth_services_routes.py
         try:
-            # Step 1: Call associate_software_token with the session
             logger.info(f"Step 1: Calling associate_software_token with session")
-            
-            associate_response = cognito_client.associate_software_token(
-                Session=session
-            )
-            
-            # Get the secret code and possibly a new session
+            associate_response = cognito_client.associate_software_token(Session=session)
             secret_code = associate_response.get("SecretCode")
             new_session = associate_response.get("Session")
             
@@ -992,70 +919,50 @@ def direct_confirm_mfa_setup():
                 logger.error("Failed to get secret code from associate_software_token")
                 return jsonify({"detail": "Failed to setup MFA. Please try again."}), 500
             
-            # Add debug info to check TOTP validation directly
+            # Local TOTP checks for debugging
             try:
-                # Create a TOTP object with the secret
                 totp = pyotp.TOTP(secret_code)
-                
-                # Generate codes with different time sources for debugging
-                current_code = totp.now()  # Using server time
-                
-                # Try with client adjusted time if provided
+                current_code = totp.now()
                 client_code = None
-                if adjusted_time:
+                
+                if adjusted_time_str:
                     try:
-                        adjusted_dt = datetime.fromisoformat(adjusted_time.replace('Z', '+00:00'))
+                        adjusted_dt = parse_iso_datetime(adjusted_time_str)
                         client_code = totp.at(adjusted_dt)
                         logger.info(f"Code based on client adjusted time: {client_code}")
                     except Exception as adj_error:
                         logger.warning(f"Error using adjusted time: {adj_error}")
                 
-                # Check if the user-provided code matches any valid code
-                is_valid_server = totp.verify(code, valid_window=5)  # Extended window for larger time differences
-                is_valid_client = client_code and code == client_code
-                is_valid = is_valid_server or is_valid_client
-                
+                is_valid_server = totp.verify(code, valid_window=5)
+                is_valid_client = (client_code and code == client_code)
                 logger.info(f"TOTP Validation: Server code = {current_code}, Client code = {client_code}, User code = {code}")
                 logger.info(f"Valid with server time: {is_valid_server}, Valid with client time: {is_valid_client}")
                 logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
                 
-                # Check adjacent time windows
                 prev_window = totp.at(server_time - timedelta(seconds=30))
                 next_window = totp.at(server_time + timedelta(seconds=30))
                 logger.info(f"Adjacent codes: Previous = {prev_window}, Current = {current_code}, Next = {next_window}")
                 
-                # If code doesn't match, but we're proceeding anyway
-                if not is_valid:
+                if not (is_valid_server or is_valid_client):
                     close_codes = [prev_window, current_code, next_window]
                     if client_code:
                         close_codes.append(client_code)
-                    
-                    if code in close_codes:
-                        logger.info(f"Code matches one of the adjacent windows, continuing anyway")
-                    else:
+                    if code not in close_codes:
                         logger.warning(f"Code {code} doesn't match any valid window: {close_codes}")
-                        # Continue anyway - let Cognito handle validation, but log it clearly
                         logger.warning("Proceeding with verification despite code mismatch")
             except Exception as totp_error:
                 logger.error(f"TOTP validation error: {totp_error}")
             
-            # Step 2: Call verify_software_token with the session and code
-            # Note: We're proceeding with the API call even if our local validation failed
             logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
-            
-            # Use new session if available, otherwise use original
             verify_session = new_session if new_session else session
             
             try:
-                # This is the critical verification call
                 verify_response = cognito_client.verify_software_token(
                     Session=verify_session,
                     UserCode=code
                 )
-                
-                # If we get here, the verification succeeded despite any local validation issues
                 status = verify_response.get("Status")
-                verify_session = verify_response.get("Session")  # Get possibly new session
+                verify_session = verify_response.get("Session")
                 
                 logger.info(f"MFA verification status: {status}")
                 if verify_session:
@@ -1068,24 +975,20 @@ def direct_confirm_mfa_setup():
                     return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
             except cognito_client.exceptions.CodeMismatchException as code_error:
                 logger.error(f"AWS rejected the code: {code_error}")
-                
-                # Generate a fresh code with both server and client time
-                fresh_server_code = totp.now()
+                fresh_server_code = None
                 fresh_client_code = None
-                
-                if adjusted_time:
-                    try:
-                        adjusted_dt = datetime.fromisoformat(adjusted_time.replace('Z', '+00:00'))
+                try:
+                    totp = pyotp.TOTP(secret_code)
+                    fresh_server_code = totp.now()
+                    if adjusted_time_str:
+                        adjusted_dt = parse_iso_datetime(adjusted_time_str)
                         fresh_client_code = totp.at(adjusted_dt)
-                    except Exception:
-                        pass
-                
-                # Return both codes to help user troubleshoot
+                except:
+                    pass
                 error_msg = (
                     "The verification code is incorrect. Try one of these current codes: "
                     f"Server: {fresh_server_code}"
                 )
-                
                 if fresh_client_code and fresh_client_code != fresh_server_code:
                     error_msg += f", Client: {fresh_client_code}"
                 
@@ -1099,24 +1002,18 @@ def direct_confirm_mfa_setup():
                         "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
                     }
                 }), 400
-                
-            # Step 3: For the final step, use the SOFTWARE_TOKEN_MFA flow if we have a password
+            
             if password:
-                # We have the password, so we can complete the full flow
                 logger.info(f"Step 3: Final step - initiate_auth with USER_PASSWORD_AUTH flow")
-                
                 try:
-                    # Generate secret hash
                     CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
                     CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
                     
-                    message = username + CLIENT_ID
-                    secret = CLIENT_SECRET.encode("utf-8")
-                    hash_obj = hmac.new(secret, message.encode("utf-8"), hashlib.sha256)
-                    hash_digest = hash_obj.digest()
-                    secret_hash = base64.b64encode(hash_digest).decode()
+                    msg = username + CLIENT_ID
+                    sec = CLIENT_SECRET.encode("utf-8")
+                    hash_obj = hmac.new(sec, msg.encode("utf-8"), hashlib.sha256)
+                    secret_hash = base64.b64encode(hash_obj.digest()).decode()
                     
-                    # First do USER_PASSWORD_AUTH to get a session
                     logger.info("Step 3a: Initiating auth with USER_PASSWORD_AUTH to get MFA challenge")
                     final_auth_response = cognito_client.initiate_auth(
                         ClientId=CLIENT_ID,
@@ -1128,53 +1025,41 @@ def direct_confirm_mfa_setup():
                         }
                     )
                     
-                    # Log response keys
-                    logger.info(f"initiate_auth response keys: {list(final_auth_response.keys())}")
-                    
-                    # Check if we got MFA challenge (which we should since MFA is now enabled)
                     if final_auth_response.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
-                        # Now respond to the MFA challenge with a fresh code
                         mfa_session = final_auth_response.get("Session")
-                        
                         if mfa_session:
                             logger.info(f"MFA challenge session length: {len(mfa_session)}")
                             logger.info(f"First 20 chars: {mfa_session[:20] if len(mfa_session) > 20 else mfa_session}")
                             logger.info(f"Last 20 chars: {mfa_session[-20:] if len(mfa_session) > 20 else mfa_session}")
                         
-                        # Get a fresh code from TOTP using both server and client time
+                        verification_code = code
                         try:
+                            totp = pyotp.TOTP(secret_code)
                             fresh_server_code = totp.now()
-                            
-                            # Try with client time if available
                             fresh_client_code = None
-                            if adjusted_time:
+                            if adjusted_time_str:
                                 try:
-                                    adjusted_dt = datetime.fromisoformat(adjusted_time.replace('Z', '+00:00'))
+                                    adjusted_dt = parse_iso_datetime(adjusted_time_str)
                                     fresh_client_code = totp.at(adjusted_dt)
-                                except Exception:
+                                except:
                                     pass
-                            
                             logger.info(f"Generated fresh TOTP codes - Server: {fresh_server_code}, Client: {fresh_client_code}")
                             
-                            # Use client code if available, otherwise use server code
-                            # Also consider the original code if it's still valid
-                            if fresh_client_code and is_valid_client:
-                                verification_code = code  # Use original code if it matches client time
+                            if fresh_client_code and (code == fresh_client_code):
+                                verification_code = code
                             elif fresh_client_code:
-                                verification_code = fresh_client_code  # Use fresh client code
-                            elif is_valid_server:
-                                verification_code = code  # Use original code if it matches server time
+                                verification_code = fresh_client_code
+                            elif totp.verify(code, valid_window=5):
+                                verification_code = code
                             else:
-                                verification_code = fresh_server_code  # Use fresh server code
-                                
+                                verification_code = fresh_server_code
+                            
                             logger.info(f"Selected verification code: {verification_code}")
                         except Exception as totp_error:
                             logger.error(f"Error generating fresh TOTP code: {totp_error}")
-                            verification_code = code  # Fall back to original code
                         
                         logger.info(f"Step 3b: Responding to MFA challenge with code: {verification_code}")
                         
-                        # Respond to the MFA challenge with our selected code
                         mfa_response = cognito_client.respond_to_auth_challenge(
                             ClientId=CLIENT_ID,
                             ChallengeName="SOFTWARE_TOKEN_MFA",
@@ -1186,7 +1071,6 @@ def direct_confirm_mfa_setup():
                             }
                         )
                         
-                        # Check if we got authentication result
                         auth_result = mfa_response.get("AuthenticationResult")
                         if auth_result:
                             logger.info("MFA setup and verification completed successfully with tokens")
@@ -1206,7 +1090,6 @@ def direct_confirm_mfa_setup():
                                 "status": "SUCCESS"
                             })
                     else:
-                        # Unexpected flow but MFA setup was successful
                         logger.info(f"MFA setup successful, but no MFA challenge received. Response: {final_auth_response}")
                         return jsonify({
                             "message": "MFA setup verified successfully. Please log in again.",
@@ -1215,13 +1098,11 @@ def direct_confirm_mfa_setup():
                 except Exception as final_auth_error:
                     logger.error(f"Error in final authentication step: {final_auth_error}")
                     logger.error(traceback.format_exc())
-                    # MFA setup was still successful
                     return jsonify({
                         "message": "MFA setup verified, but couldn't complete login. Please log in again.",
                         "status": "SUCCESS"
                     })
             else:
-                # No password provided, but MFA setup was successful
                 return jsonify({
                     "message": "MFA setup verified successfully. Please log in again with your MFA code.",
                     "status": "SUCCESS"
@@ -1234,26 +1115,17 @@ def direct_confirm_mfa_setup():
         except cognito_client.exceptions.CodeMismatchException as code_error:
             logger.warning(f"CodeMismatchException: {code_error}")
             logger.warning(traceback.format_exc())
-            
-            # Generate fresh codes with both server and client time
             try:
+                totp = pyotp.TOTP(secret_code)
                 fresh_server_code = totp.now()
-                
-                # Try with client time if available
                 fresh_client_code = None
-                if adjusted_time:
-                    try:
-                        adjusted_dt = datetime.fromisoformat(adjusted_time.replace('Z', '+00:00'))
-                        fresh_client_code = totp.at(adjusted_dt)
-                    except Exception:
-                        pass
-                
-                # Return both codes to help user troubleshoot
+                if adjusted_time_str:
+                    adjusted_dt = parse_iso_datetime(adjusted_time_str)
+                    fresh_client_code = totp.at(adjusted_dt)
                 error_msg = (
                     "The verification code is incorrect. Try one of these current codes: "
                     f"Server: {fresh_server_code}"
                 )
-                
                 if fresh_client_code and fresh_client_code != fresh_server_code:
                     error_msg += f", Client: {fresh_client_code}"
                 
@@ -1267,9 +1139,7 @@ def direct_confirm_mfa_setup():
                         "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
                     }
                 }), 400
-                
             except Exception as detail_error:
-                # Fall back to generic message
                 return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
             
         except Exception as e:
@@ -1282,7 +1152,6 @@ def direct_confirm_mfa_setup():
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Enhanced version of direct_verify_mfa with better time handling
 @app.route("/api/auth/verify-mfa", methods=["POST", "OPTIONS"])
 def direct_verify_mfa():
     """Direct fallback for verifying MFA with improved time handling"""
@@ -1304,48 +1173,43 @@ def direct_verify_mfa():
         session = data.get('session')
         code = data.get('code')
         username = data.get('username')
-        client_time = data.get('client_time')
-        adjusted_time = data.get('adjusted_time')
+        client_time_str = data.get('client_time')
+        adjusted_time_str = data.get('adjusted_time')
         
-        # Log time information for debugging
-        server_time = datetime.now()
+        server_time = datetime.now(timezone.utc)
         logger.info(f"Server time: {server_time.isoformat()}")
+        
         time_diff_seconds = None
-        if client_time:
+        if client_time_str:
             try:
-                client_dt = datetime.fromisoformat(client_time.replace('Z', '+00:00'))
-                time_diff_seconds = abs((server_time - client_dt).total_seconds())
-                logger.info(f"Client time: {client_time}, Time difference: {time_diff_seconds} seconds")
+                client_dt = parse_iso_datetime(client_time_str)
+                time_diff_seconds = get_time_difference_seconds(server_time, client_dt)
+                logger.info(f"Client time: {client_time_str}, Time difference: {time_diff_seconds} seconds")
             except Exception as time_error:
                 logger.warning(f"Error parsing client time: {time_error}")
         
-        if adjusted_time:
-            logger.info(f"Client adjusted time: {adjusted_time}")
+        if adjusted_time_str:
+            logger.info(f"Client adjusted time: {adjusted_time_str}")
         
-        # Log request details for debugging
         logger.info(f"MFA verification for user: {username}")
         if session:
             logger.info(f"Session token length: {len(session)}")
             logger.info(f"First 20 chars of session: {session[:20] if len(session) > 20 else session}")
             logger.info(f"Last 20 chars of session: {session[-20:] if len(session) > 20 else session}")
         
-        # Input validation
         if not code or not isinstance(code, str):
             logger.error(f"Invalid code format")
             return jsonify({"detail": "Verification code must be a 6-digit number"}), 400
-            
-        # Ensure code is exactly 6 digits
+        
         code = code.strip()
         if not code.isdigit() or len(code) != 6:
             logger.error(f"Invalid code format: {code}")
             return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
         
-        # Validate session format
         if not session or not isinstance(session, str) or len(session) < 20:
             logger.error(f"Invalid session format: length {len(session) if session else 0}")
             return jsonify({"detail": "Invalid session format"}), 400
         
-        # Initialize Cognito client
         try:
             cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
         except Exception as e:
@@ -1353,17 +1217,14 @@ def direct_verify_mfa():
             return jsonify({"detail": "Failed to connect to authentication service"}), 500
         
         try:
-            # Generate secret hash
             CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
             CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
             
-            message = username + CLIENT_ID
-            secret = CLIENT_SECRET.encode("utf-8")
-            hash_obj = hmac.new(secret, message.encode("utf-8"), hashlib.sha256)
-            hash_digest = hash_obj.digest()
-            secret_hash = base64.b64encode(hash_digest).decode()
+            msg = username + CLIENT_ID
+            sec = CLIENT_SECRET.encode("utf-8")
+            hash_obj = hmac.new(sec, msg.encode("utf-8"), hashlib.sha256)
+            secret_hash = base64.b64encode(hash_obj.digest()).decode()
             
-            # Prepare challenge responses    
             challenge_responses = {
                 "USERNAME": username,
                 "SOFTWARE_TOKEN_MFA_CODE": code,
@@ -1372,7 +1233,6 @@ def direct_verify_mfa():
             
             logger.info(f"Sending MFA verification with code: {code}")
             
-            # Make the API call
             try:
                 response = cognito_client.respond_to_auth_challenge(
                     ClientId=CLIENT_ID,
@@ -1398,32 +1258,19 @@ def direct_verify_mfa():
                 })
             except cognito_client.exceptions.CodeMismatchException as code_error:
                 logger.warning(f"MFA code mismatch: {code_error}")
-                
-                # Try to get the user's MFA secret based on session
-                # This is a fallback approach
-                try:
-                    # We don't have the secret here, but we want to provide helpful message
-                    # about time synchronization
-                    error_msg = (
-                        "The verification code is incorrect or has expired. "
-                        "There appears to be a time synchronization issue. "
-                        "Please try again with a new code from your authenticator app, "
-                        "or try refreshing the page to synchronize time."
-                    )
-                    
-                    # Include time difference information in the response
-                    return jsonify({
-                        "detail": error_msg,
-                        "timeInfo": {
-                            "serverTime": server_time.isoformat(),
-                            "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
-                        }
-                    }), 400
-                except Exception:
-                    # If we can't provide specific guidance, fall back to generic message
-                    return jsonify({
-                        "detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."
-                    }), 400
+                error_msg = (
+                    "The verification code is incorrect or has expired. "
+                    "There appears to be a time synchronization issue. "
+                    "Please try again with a new code from your authenticator app, "
+                    "or try refreshing the page to synchronize time."
+                )
+                return jsonify({
+                    "detail": error_msg,
+                    "timeInfo": {
+                        "serverTime": server_time.isoformat(),
+                        "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
+                    }
+                }), 400
                 
             except cognito_client.exceptions.ExpiredCodeException as expired_error:
                 logger.warning(f"MFA code expired: {expired_error}")
