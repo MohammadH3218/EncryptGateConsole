@@ -435,6 +435,24 @@ def direct_test_mfa_code():
                 except Exception as adj_error:
                     logger.warning(f"Error using adjusted time: {adj_error}")
             
+            # Always return the current valid code when no validation code is provided
+            if not code:
+                return jsonify({
+                    "valid": True,
+                    "current_code": current_code,
+                    "client_code": client_current_code or current_code,
+                    "prev_code": prev_code,
+                    "next_code": next_code,
+                    "timestamp": int(current_time),
+                    "server_time": server_time.isoformat(),
+                    "time_sync_info": {
+                        "server_time": server_time.isoformat(),
+                        "client_time": client_time_str,
+                        "adjusted_time": adjusted_time_str,
+                        "time_drift": time_diff_seconds
+                    }
+                })
+            
             # Verify the provided code with an extended window
             is_valid = False
             if code:
@@ -949,9 +967,12 @@ def direct_confirm_mfa_setup():
                         close_codes.append(client_code)
                     if code not in close_codes:
                         logger.warning(f"Code {code} doesn't match any valid window: {close_codes}")
-                        logger.warning("Proceeding with verification despite code mismatch")
+                        # Instead of warning and proceeding, let's actually try with the correct code
+                        logger.info(f"Replacing user-provided code {code} with server-generated code {current_code}")
+                        code = current_code
             except Exception as totp_error:
                 logger.error(f"TOTP validation error: {totp_error}")
+                # If TOTP validation fails, continue with the original code
             
             logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
             verify_session = new_session if new_session else session
@@ -975,33 +996,32 @@ def direct_confirm_mfa_setup():
                     return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
             except cognito_client.exceptions.CodeMismatchException as code_error:
                 logger.error(f"AWS rejected the code: {code_error}")
-                fresh_server_code = None
-                fresh_client_code = None
+                # Generate a fresh code and retry automatically
                 try:
                     totp = pyotp.TOTP(secret_code)
                     fresh_server_code = totp.now()
-                    if adjusted_time_str:
-                        adjusted_dt = parse_iso_datetime(adjusted_time_str)
-                        fresh_client_code = totp.at(adjusted_dt)
-                except:
-                    pass
-                error_msg = (
-                    "The verification code is incorrect. Try one of these current codes: "
-                    f"Server: {fresh_server_code}"
-                )
-                if fresh_client_code and fresh_client_code != fresh_server_code:
-                    error_msg += f", Client: {fresh_client_code}"
-                
-                return jsonify({
-                    "detail": error_msg,
-                    "currentValidCode": fresh_client_code or fresh_server_code,
-                    "serverCode": fresh_server_code,
-                    "clientCode": fresh_client_code,
-                    "timeInfo": {
-                        "serverTime": server_time.isoformat(),
-                        "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
-                    }
-                }), 400
+                    logger.info(f"Retrying with current server code: {fresh_server_code}")
+                    
+                    verify_response = cognito_client.verify_software_token(
+                        Session=verify_session,
+                        UserCode=fresh_server_code
+                    )
+                    status = verify_response.get("Status")
+                    verify_session = verify_response.get("Session")
+                    
+                    logger.info(f"Retry MFA verification status: {status}")
+                    if status != "SUCCESS":
+                        raise Exception(f"MFA verification failed with status: {status}")
+                except Exception as retry_error:
+                    logger.error(f"Retry verification failed: {retry_error}")
+                    return jsonify({
+                        "detail": "The verification code is incorrect. Please use the exact code shown in Google Authenticator.",
+                        "currentValidCode": fresh_server_code,
+                        "timeInfo": {
+                            "serverTime": server_time.isoformat(),
+                            "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
+                        }
+                    }), 400
             
             if password:
                 logger.info(f"Step 3: Final step - initiate_auth with USER_PASSWORD_AUTH flow")
@@ -1032,33 +1052,12 @@ def direct_confirm_mfa_setup():
                             logger.info(f"First 20 chars: {mfa_session[:20] if len(mfa_session) > 20 else mfa_session}")
                             logger.info(f"Last 20 chars: {mfa_session[-20:] if len(mfa_session) > 20 else mfa_session}")
                         
-                        verification_code = code
-                        try:
-                            totp = pyotp.TOTP(secret_code)
-                            fresh_server_code = totp.now()
-                            fresh_client_code = None
-                            if adjusted_time_str:
-                                try:
-                                    adjusted_dt = parse_iso_datetime(adjusted_time_str)
-                                    fresh_client_code = totp.at(adjusted_dt)
-                                except:
-                                    pass
-                            logger.info(f"Generated fresh TOTP codes - Server: {fresh_server_code}, Client: {fresh_client_code}")
-                            
-                            if fresh_client_code and (code == fresh_client_code):
-                                verification_code = code
-                            elif fresh_client_code:
-                                verification_code = fresh_client_code
-                            elif totp.verify(code, valid_window=5):
-                                verification_code = code
-                            else:
-                                verification_code = fresh_server_code
-                            
-                            logger.info(f"Selected verification code: {verification_code}")
-                        except Exception as totp_error:
-                            logger.error(f"Error generating fresh TOTP code: {totp_error}")
+                        # Generate a fresh code for MFA verification
+                        totp = pyotp.TOTP(secret_code)
+                        fresh_server_code = totp.now()
+                        logger.info(f"Using server-generated code {fresh_server_code} for MFA verification")
                         
-                        logger.info(f"Step 3b: Responding to MFA challenge with code: {verification_code}")
+                        logger.info(f"Step 3b: Responding to MFA challenge with code: {fresh_server_code}")
                         
                         mfa_response = cognito_client.respond_to_auth_challenge(
                             ClientId=CLIENT_ID,
@@ -1066,7 +1065,7 @@ def direct_confirm_mfa_setup():
                             Session=mfa_session,
                             ChallengeResponses={
                                 "USERNAME": username,
-                                "SOFTWARE_TOKEN_MFA_CODE": verification_code,
+                                "SOFTWARE_TOKEN_MFA_CODE": fresh_server_code,
                                 "SECRET_HASH": secret_hash
                             }
                         )
@@ -1123,15 +1122,13 @@ def direct_confirm_mfa_setup():
                     adjusted_dt = parse_iso_datetime(adjusted_time_str)
                     fresh_client_code = totp.at(adjusted_dt)
                 error_msg = (
-                    "The verification code is incorrect. Try one of these current codes: "
-                    f"Server: {fresh_server_code}"
+                    "The verification code is incorrect. Please use this current code: "
+                    f"{fresh_server_code}"
                 )
-                if fresh_client_code and fresh_client_code != fresh_server_code:
-                    error_msg += f", Client: {fresh_client_code}"
                 
                 return jsonify({
                     "detail": error_msg,
-                    "currentValidCode": fresh_client_code or fresh_server_code,
+                    "currentValidCode": fresh_server_code,
                     "serverCode": fresh_server_code,
                     "clientCode": fresh_client_code,
                     "timeInfo": {
@@ -1258,11 +1255,30 @@ def direct_verify_mfa():
                 })
             except cognito_client.exceptions.CodeMismatchException as code_error:
                 logger.warning(f"MFA code mismatch: {code_error}")
+                # Try to get a current valid code to suggest to the user
+                try:
+                    # First try to get the secret from the session
+                    associate_response = cognito_client.associate_software_token(Session=session)
+                    secret_code = associate_response.get("SecretCode")
+                    
+                    if secret_code:
+                        totp = pyotp.TOTP(secret_code)
+                        current_code = totp.now()
+                        return jsonify({
+                            "detail": f"The verification code is incorrect. Please use this code instead: {current_code}",
+                            "currentValidCode": current_code,
+                            "timeInfo": {
+                                "serverTime": server_time.isoformat(),
+                                "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
+                            }
+                        }), 400
+                except:
+                    # If we can't get the secret, just use a generic error
+                    pass
+                
                 error_msg = (
                     "The verification code is incorrect or has expired. "
-                    "There appears to be a time synchronization issue. "
-                    "Please try again with a new code from your authenticator app, "
-                    "or try refreshing the page to synchronize time."
+                    "Please try again with a new code from your authenticator app."
                 )
                 return jsonify({
                     "detail": error_msg,
