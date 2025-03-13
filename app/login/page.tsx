@@ -361,6 +361,41 @@ export default function LoginPage() {
     }
   };
 
+  // Synchronize time with server and get MFA code
+  const synchronizeTimeAndGetCode = async () => {
+    if (!apiBaseUrl || !mfaSecretCode) return null;
+    
+    try {
+      // Fetch server time and get the correct MFA code
+      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({ 
+          secret: mfaSecretCode,
+          client_time: new Date().toISOString(),
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.server_time) {
+        setServerTime(data.server_time);
+        logApiCall(
+          "Time Synchronization",
+          `Server time: ${data.server_time}, Client time: ${new Date().toISOString()}`
+        );
+      }
+      
+      return data.current_code || null;
+    } catch (error) {
+      logApiCall("Time Synchronization Error", String(error));
+      return null;
+    }
+  };
+
   const handleLogin = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -386,6 +421,7 @@ export default function LoginPage() {
         logApiCall("Login Network Error", fetchError.message);
         throw new Error(`Network error: ${fetchError.message}`);
       });
+      
       let responseData: LoginResponse;
       try {
         responseData = await response.json();
@@ -397,23 +433,37 @@ export default function LoginPage() {
         logApiCall("Login JSON Parse Error", String(jsonError));
         throw new Error("Invalid response from server. Please try again.");
       }
+      
       if (!response.ok) {
         logApiCall("Login Error", responseData?.detail || `Authentication failed (${response.status})`);
         throw new Error(responseData?.detail || `Authentication failed (${response.status})`);
       }
+      
+      // Store session for MFA verification if provided
       if (responseData.session) {
         setSession(responseData.session);
         logSessionInfo("Initial login session", responseData.session);
       }
-      if (responseData.mfa_required || responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
+      
+      // Store temporary password if needed for MFA setup
+      if (responseData.mfa_required || responseData.ChallengeName === "SOFTWARE_TOKEN_MFA" || 
+          responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
         sessionStorage.setItem("temp_password", password);
         logApiCall("Password Storage", "Stored password temporarily for MFA setup");
       }
+      
+      // Handle different authentication flows
       if (responseData.ChallengeName === "NEW_PASSWORD_REQUIRED") {
+        // New password is required
         logApiCall("Login Flow", "NEW_PASSWORD_REQUIRED challenge detected");
         setShowPasswordChange(true);
+      } else if (responseData.ChallengeName === "SOFTWARE_TOKEN_MFA" || responseData.mfa_required) {
+        // MFA verification is required
+        logApiCall("Login Flow", "MFA verification required");
+        setShowMFA(true);
       } else if (responseData.access_token) {
-        logApiCall("Login Flow", "Access token received, checking MFA setup");
+        // User is fully authenticated - check if MFA needs to be set up
+        logApiCall("Login Flow", "Access token received, checking if MFA setup is needed");
         try {
           const setupMfaEndpoint = `${apiBaseUrl}/api/auth/setup-mfa`;
           const mfaResponse = await fetchWithRetry(setupMfaEndpoint, {
@@ -427,35 +477,47 @@ export default function LoginPage() {
             mode: "cors",
             credentials: "include",
           }, 1);
-          const mfaData = await mfaResponse.json();
-          logApiCall(
-            "MFA Setup Check",
-            `Status: ${mfaResponse.status}, Has secret: ${!!mfaData.secretCode}`
-          );
-          if (mfaResponse.ok && mfaData.secretCode) {
-            setMfaSecretCode(mfaData.secretCode);
-            localStorage.setItem("temp_access_token", responseData.access_token);
-            if (mfaData.currentCode) {
-              setSetupMfaCode(mfaData.currentCode);
+          
+          // Check if we got a valid response
+          if (mfaResponse.ok) {
+            const mfaData = await mfaResponse.json();
+            logApiCall(
+              "MFA Setup Check",
+              `Status: ${mfaResponse.status}, Has secret: ${!!mfaData.secretCode}`
+            );
+            
+            if (mfaData.secretCode) {
+              // MFA needs to be set up
+              setMfaSecretCode(mfaData.secretCode);
+              localStorage.setItem("temp_access_token", responseData.access_token);
+              if (mfaData.currentCode) {
+                setSetupMfaCode(mfaData.currentCode);
+              }
+              setShowMFASetup(true);
+              return;
             }
-            setShowMFASetup(true);
-            return;
           }
+          
+          // No MFA setup needed, proceed with login
+          logApiCall("Login Flow", "User is fully authenticated, redirecting to dashboard");
+          localStorage.setItem("access_token", responseData.access_token);
+          localStorage.setItem("id_token", responseData.id_token || "");
+          localStorage.setItem("refresh_token", responseData.refresh_token || "");
+          sessionStorage.removeItem("temp_password");
+          router.push("/admin/dashboard");
         } catch (mfaError: any) {
+          // If there's an error checking MFA status, assume user is authenticated
           logApiCall("MFA Setup Check Error", mfaError.message || "Unknown error");
+          localStorage.setItem("access_token", responseData.access_token);
+          localStorage.setItem("id_token", responseData.id_token || "");
+          localStorage.setItem("refresh_token", responseData.refresh_token || "");
+          sessionStorage.removeItem("temp_password");
+          router.push("/admin/dashboard");
         }
-        logApiCall("Login Flow", "Proceeding with login (MFA already set up or not required)");
-        localStorage.setItem("access_token", responseData.access_token);
-        localStorage.setItem("id_token", responseData.id_token || "");
-        localStorage.setItem("refresh_token", responseData.refresh_token || "");
-        sessionStorage.removeItem("temp_password");
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
-      } else if (responseData.mfa_required) {
-        logApiCall("Login Flow", "MFA verification required");
-        setShowMFA(true);
       } else {
+        // Unexpected response format
         logApiCall("Login Flow Error", "Unexpected server response format");
-        throw new Error("Unexpected server response format");
+        throw new Error("Unexpected server response format. Please try again.");
       }
     } catch (error: any) {
       setError(error.message || "An error occurred. Please try again.");
@@ -499,20 +561,25 @@ export default function LoginPage() {
         mode: "cors",
         credentials: "include",
       }, 1);
+      
       const responseData = await response.json();
       logApiCall(
         "Password Change Response",
         `Status: ${response.status}, Response keys: ${Object.keys(responseData).join(", ")}`
       );
+      
       if (!response.ok) {
         logApiCall("Password Change Error", responseData.detail || `Failed to change password (${response.status})`);
         throw new Error(responseData.detail || `Failed to change password (${response.status})`);
       }
+      
       if (responseData.session) {
         setSession(responseData.session);
         logSessionInfo("Updated session after password change", responseData.session);
       }
+      
       sessionStorage.setItem("temp_password", newPassword);
+      
       if (responseData.access_token) {
         logApiCall("Password Change Flow", "Access token received, checking MFA setup");
         try {
@@ -528,41 +595,59 @@ export default function LoginPage() {
             mode: "cors",
             credentials: "include",
           }, 1);
-          const mfaData = await mfaResponse.json();
-          logApiCall(
-            "MFA Setup Check",
-            `Status: ${mfaResponse.status}, Has secret: ${!!mfaData.secretCode}`
-          );
-          if (mfaResponse.ok && mfaData.secretCode) {
-            setShowPasswordChange(false);
-            setMfaSecretCode(mfaData.secretCode);
-            localStorage.setItem("temp_access_token", responseData.access_token);
-            if (mfaData.currentCode) {
-              setSetupMfaCode(mfaData.currentCode);
+          
+          if (mfaResponse.ok) {
+            const mfaData = await mfaResponse.json();
+            logApiCall(
+              "MFA Setup Check",
+              `Status: ${mfaResponse.status}, Has secret: ${!!mfaData.secretCode}`
+            );
+            
+            if (mfaData.secretCode) {
+              // MFA setup required
+              setShowPasswordChange(false);
+              setMfaSecretCode(mfaData.secretCode);
+              localStorage.setItem("temp_access_token", responseData.access_token);
+              if (mfaData.currentCode) {
+                setSetupMfaCode(mfaData.currentCode);
+              }
+              setShowMFASetup(true);
+              return;
             }
-            setShowMFASetup(true);
-            return;
           }
+          
+          // No MFA setup needed
+          logApiCall("Password Change Flow", "Proceeding with login (MFA already set up or not required)");
+          localStorage.setItem("access_token", responseData.access_token);
+          localStorage.setItem("id_token", responseData.id_token || "");
+          localStorage.setItem("refresh_token", responseData.refresh_token || "");
+          setShowPasswordChange(false);
+          sessionStorage.removeItem("temp_password");
+          router.push("/admin/dashboard");
         } catch (mfaError: any) {
+          // If MFA check fails, assume no MFA needed
           logApiCall("MFA Setup Check Error", mfaError.message || "Unknown error");
+          localStorage.setItem("access_token", responseData.access_token);
+          localStorage.setItem("id_token", responseData.id_token || "");
+          localStorage.setItem("refresh_token", responseData.refresh_token || "");
+          setShowPasswordChange(false);
+          sessionStorage.removeItem("temp_password");
+          router.push("/admin/dashboard");
         }
-        logApiCall("Password Change Flow", "Proceeding with login (MFA already set up or not required)");
-        localStorage.setItem("access_token", responseData.access_token);
-        localStorage.setItem("id_token", responseData.id_token || "");
-        localStorage.setItem("refresh_token", responseData.refresh_token || "");
-        setShowPasswordChange(false);
-        sessionStorage.removeItem("temp_password");
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
       } else if (responseData.ChallengeName) {
-        if (responseData.ChallengeName === "MFA_SETUP") {
+        // Handle any additional challenges
+        if (responseData.ChallengeName === "SOFTWARE_TOKEN_MFA") {
+          logApiCall("Password Change Flow", "MFA verification required");
+          setShowPasswordChange(false);
+          setShowMFA(true);
+        } else if (responseData.ChallengeName === "MFA_SETUP") {
           logApiCall("Password Change Flow", "MFA setup challenge received");
           setShowPasswordChange(false);
           setMfaSecretCode(responseData.secretCode || "");
           setShowMFASetup(true);
-        } else if (responseData.mfa_required) {
-          logApiCall("Password Change Flow", "MFA verification required");
-          setShowPasswordChange(false);
-          setShowMFA(true);
+        } else {
+          logApiCall("Password Change Flow", `Unexpected challenge: ${responseData.ChallengeName}`);
+          throw new Error(`Unexpected challenge: ${responseData.ChallengeName}`);
         }
       } else {
         logApiCall("Password Change Flow Error", "Unexpected response format");
@@ -573,41 +658,6 @@ export default function LoginPage() {
       logApiCall("Password Change Error", error.message || "Unknown error");
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  // Synchronize time with server and get MFA code
-  const synchronizeTimeAndGetCode = async () => {
-    if (!apiBaseUrl || !mfaSecretCode) return null;
-    
-    try {
-      // Fetch server time and get the correct MFA code
-      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: JSON.stringify({ 
-          secret: mfaSecretCode,
-          client_time: new Date().toISOString(),
-        }),
-      });
-      
-      const data = await response.json();
-      
-      if (data.server_time) {
-        setServerTime(data.server_time);
-        logApiCall(
-          "Time Synchronization",
-          `Server time: ${data.server_time}, Client time: ${new Date().toISOString()}`
-        );
-      }
-      
-      return data.current_code || null;
-    } catch (error) {
-      logApiCall("Time Synchronization Error", String(error));
-      return null;
     }
   };
 
@@ -730,10 +780,12 @@ export default function LoginPage() {
       sessionStorage.removeItem("temp_password");
       
       if (responseData.access_token) {
+        // Store tokens and redirect to dashboard
         localStorage.setItem("access_token", responseData.access_token);
         localStorage.setItem("id_token", responseData.id_token || "");
         localStorage.setItem("refresh_token", responseData.refresh_token || "");
-        router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+        logApiCall("MFA Setup Complete", "Redirecting to dashboard");
+        router.push("/admin/dashboard");
       } else {
         setSuccessMessage("MFA setup successful. Please log in again.");
       }
@@ -792,8 +844,8 @@ export default function LoginPage() {
         });
         
         const data = await associateResponse.json();
-        if (data.currentValidCode) {
-          setMfaCode(data.currentValidCode);
+        if (data.currentValidCode || data.current_code) {
+          setMfaCode(data.currentValidCode || data.current_code);
           setSuccessMessage("Using server-generated code for verification");
         } else {
           setError("Please enter a valid 6-digit verification code from your authenticator app");
@@ -879,12 +931,15 @@ export default function LoginPage() {
         throw new Error(data?.detail || "Invalid MFA code");
       }
       
+      // Store tokens in localStorage for authenticated session
       localStorage.setItem("access_token", data.access_token || "");
       localStorage.setItem("id_token", data.id_token || "");
       localStorage.setItem("refresh_token", data.refresh_token || "");
       sessionStorage.removeItem("temp_password");
       logApiCall("MFA Verification", "Successful, redirecting to dashboard");
-      router.push(userType === "admin" ? "/admin/dashboard" : "/employee/dashboard");
+      
+      // Successful MFA verification - redirect to dashboard
+      router.push("/admin/dashboard");
     } catch (error: any) {
       setError(error.message || "MFA verification failed. Please try again.");
       logApiCall("MFA Verification Error", error.message || "Unknown error");
