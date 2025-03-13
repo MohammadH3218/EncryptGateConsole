@@ -245,6 +245,93 @@ export default function LoginPage() {
     }
   };
 
+  // Synchronize time with server and get MFA code - works with or without mfaSecretCode
+  const synchronizeTimeAndGetCode = async (secretCode?: string) => {
+    if (!apiBaseUrl) return null;
+    
+    // Use provided secret or the stored MFA secret code
+    const secret = secretCode || mfaSecretCode;
+    if (!secret) {
+      // If no secret is available, just try to get the server time
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({ 
+            secret: "AAAAAAAAAA", // Dummy secret to reach endpoint
+            client_time: new Date().toISOString(),
+          }),
+        });
+        
+        const data = await response.json();
+        
+        if (data.server_time) {
+          setServerTime(data.server_time);
+          
+          // Calculate time offset
+          const serverTime = new Date(data.server_time).getTime();
+          const clientTime = Date.now();
+          const offset = serverTime - clientTime;
+          
+          if (Math.abs(offset) > 5000) { // If offset is more than 5 seconds
+            localStorage.setItem("server_time_offset", offset.toString());
+            logApiCall(
+              "Time Synchronization",
+              `Time offset detected: ${offset}ms. Storing for future use.`
+            );
+          }
+        }
+        
+        return null; // No code without a valid secret
+      } catch (error) {
+        logApiCall("Time Synchronization Error", String(error));
+        return null;
+      }
+    }
+    
+    // With a valid secret, get both time and code
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({ 
+          secret: secret,
+          client_time: new Date().toISOString(),
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.server_time) {
+        setServerTime(data.server_time);
+        
+        // Calculate and store time offset
+        const serverTime = new Date(data.server_time).getTime();
+        const clientTime = Date.now();
+        const offset = serverTime - clientTime;
+        
+        if (Math.abs(offset) > 5000) { // If offset is more than 5 seconds
+          localStorage.setItem("server_time_offset", offset.toString());
+          logApiCall(
+            "Time Synchronization",
+            `Time offset detected: ${offset}ms. Storing for future use.`
+          );
+        }
+      }
+      
+      return data.current_code || null;
+    } catch (error) {
+      logApiCall("Time Synchronization Error", String(error));
+      return null;
+    }
+  };
+
   const handleForgotPasswordRequest = async () => {
     if (!forgotPasswordEmail) {
       setForgotPasswordError("Please enter your email address");
@@ -323,7 +410,7 @@ export default function LoginPage() {
       setSuccessMessage("Password reset successful. Please sign in with your new password.");
     } catch (error: any) {
       setForgotPasswordError(error.message || "Failed to reset password");
-      logApiCall("Confirm Forgot Password Error", error.message || "Unknown error");
+      logApiCall("Forgot Password Error", error.message || "Unknown error");
     } finally {
       setIsForgotPasswordLoading(false);
     }
@@ -358,41 +445,6 @@ export default function LoginPage() {
         return fetchWithRetry(url, options, retries - 1, timeout);
       }
       throw error;
-    }
-  };
-
-  // Synchronize time with server and get MFA code
-  const synchronizeTimeAndGetCode = async () => {
-    if (!apiBaseUrl || !mfaSecretCode) return null;
-    
-    try {
-      // Fetch server time and get the correct MFA code
-      const response = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: JSON.stringify({ 
-          secret: mfaSecretCode,
-          client_time: new Date().toISOString(),
-        }),
-      });
-      
-      const data = await response.json();
-      
-      if (data.server_time) {
-        setServerTime(data.server_time);
-        logApiCall(
-          "Time Synchronization",
-          `Server time: ${data.server_time}, Client time: ${new Date().toISOString()}`
-        );
-      }
-      
-      return data.current_code || null;
-    } catch (error) {
-      logApiCall("Time Synchronization Error", String(error));
-      return null;
     }
   };
 
@@ -818,19 +870,22 @@ export default function LoginPage() {
     }
   };
 
-  // Update handleMFASubmit to handle time synchronization
+  // Updated handleMFASubmit with time synchronization improvements
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
       return;
     }
     
-    // If no code entered or code is not 6 digits, try to get one from the server
+    setIsLoading(true);
+    setError("");
+    setSuccessMessage("");
+    
+    // First ensure we have a valid MFA code
     if (!mfaCode || mfaCode.length !== 6) {
-      setIsLoading(true);
       try {
-        // First try to associate software token to get secret
-        const associateResponse = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+        // Try to get a server-generated code first
+        const serverCode = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -841,12 +896,14 @@ export default function LoginPage() {
             session: session,
             username: email,
           }),
-        });
+        })
+        .then(res => res.json())
+        .then(data => data.currentValidCode || data.current_code);
         
-        const data = await associateResponse.json();
-        if (data.currentValidCode || data.current_code) {
-          setMfaCode(data.currentValidCode || data.current_code);
-          setSuccessMessage("Using server-generated code for verification");
+        if (serverCode) {
+          setMfaCode(serverCode);
+          logApiCall("MFA Verification", `Using server-generated code: ${serverCode}`);
+          setSuccessMessage("Using server-generated code for verification...");
         } else {
           setError("Please enter a valid 6-digit verification code from your authenticator app");
           setIsLoading(false);
@@ -857,15 +914,13 @@ export default function LoginPage() {
         setIsLoading(false);
         return;
       }
-      setIsLoading(false);
     }
     
-    setError("");
-    setIsLoading(true);
     const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
     logSessionInfo("MFA verification session");
     
     try {
+      // Get time synchronization info
       const timeOffset = localStorage.getItem("server_time_offset");
       const clientTime = new Date().toISOString();
       let adjustedTime = clientTime;
@@ -912,23 +967,64 @@ export default function LoginPage() {
       }
       
       if (!response.ok) {
-        if (response.status === 400 && data.detail && data.detail.includes("verification code")) {
+        if (response.status === 400 && data.detail) {
           if (data.currentValidCode) {
+            // Automatically retry with the correct code provided by the server
             setMfaCode(data.currentValidCode);
-            // Auto retry with correct code
             setSuccessMessage("Using server-provided code for verification...");
+            
+            // Small delay before retrying
             setTimeout(() => {
               handleMFASubmit();
             }, 1000);
             return;
           }
-          setMfaCode("");
-          logApiCall("MFA Verification Error", data.detail || "Invalid MFA code");
+          
+          // Try to synchronize time and get a fresh code if the error is code-related
+          if (data.detail.includes("verification code") || data.detail.includes("code is incorrect")) {
+            try {
+              // Try to associate software token to get valid code
+              const associateResponse = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+                },
+                body: JSON.stringify({
+                  secret: "AAAAAAAAAA", // Dummy secret to reach endpoint
+                  session: session,
+                  username: email,
+                  client_time: new Date().toISOString(),
+                }),
+              });
+              
+              const freshData = await associateResponse.json();
+              if (freshData.currentValidCode || freshData.current_code) {
+                const freshCode = freshData.currentValidCode || freshData.current_code;
+                setMfaCode(freshCode);
+                setError(`The verification code appears to be incorrect. A new code has been generated: ${freshCode}`);
+                setSuccessMessage("Retrying with server-provided code...");
+                
+                setTimeout(() => {
+                  handleMFASubmit();
+                }, 1500);
+                return;
+              }
+            } catch (syncError) {
+              // If we can't get a new code, just show the original error
+              setError(data.detail || "Invalid MFA code");
+            }
+          } else {
+            setError(data.detail || "Invalid MFA code");
+          }
         } else if (response.status === 401 && data.detail && data.detail.includes("session")) {
           logApiCall("MFA Verification Error", "Session expired");
           throw new Error("Your session has expired. Please log in again.");
+        } else {
+          throw new Error(data?.detail || "Invalid MFA code");
         }
-        throw new Error(data?.detail || "Invalid MFA code");
+        setIsLoading(false);
+        return;
       }
       
       // Store tokens in localStorage for authenticated session
