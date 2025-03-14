@@ -1180,7 +1180,7 @@ def direct_confirm_mfa_setup():
 
 @app.route("/api/auth/verify-mfa", methods=["POST", "OPTIONS"])
 def direct_verify_mfa():
-    """Direct fallback for verifying MFA with improved time handling and auto-code generation"""
+    """Direct fallback for verifying MFA with improved time handling"""
     logger.info(f"Verify MFA endpoint accessed - Method: {request.method}")
     logger.info(f"Request headers: {dict(request.headers)}")
     
@@ -1201,6 +1201,7 @@ def direct_verify_mfa():
         username = data.get('username')
         client_time_str = data.get('client_time')
         adjusted_time_str = data.get('adjusted_time')
+        skip_code_generation = data.get('skip_code_generation', False)  # New flag to skip code generation
         
         server_time = datetime.now(timezone.utc)
         logger.info(f"Server time: {server_time.isoformat()}")
@@ -1223,46 +1224,15 @@ def direct_verify_mfa():
             logger.info(f"First 20 chars of session: {session[:20] if len(session) > 20 else session}")
             logger.info(f"Last 20 chars of session: {session[-20:] if len(session) > 20 else session}")
         
-        # Auto-generate a code if not provided
-        generated_code = None
-        secret_code = None
-        if not code or not isinstance(code, str) or len(code) != 6:
-            logger.info("No valid code provided, attempting to generate one")
-            try:
-                # Try to associate software token to get secret
-                try:
-                    cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
-                    associate_response = cognito_client.associate_software_token(Session=session)
-                    secret_code = associate_response.get("SecretCode")
-                    
-                    if secret_code:
-                        logger.info(f"Got secret code from session: {secret_code}")
-                        totp = pyotp.TOTP(secret_code)
-                        generated_code = totp.now()
-                        logger.info(f"Generated TOTP code: {generated_code}")
-                        code = generated_code
-                    else:
-                        logger.warning("Could not get secret code from session")
-                except Exception as assoc_error:
-                    logger.warning(f"Error associating token: {assoc_error}")
-                    
-                if not generated_code:
-                    # If we still couldn't generate a code, return an error
-                    return jsonify({
-                        "detail": "Could not generate verification code. Please enter a valid code from your authenticator app.",
-                        "currentValidCode": None
-                    }), 400
-            except Exception as gen_error:
-                logger.error(f"Error generating code: {gen_error}")
-                return jsonify({"detail": "Verification code must be a 6-digit number"}), 400
+        if not code or not isinstance(code, str):
+            logger.error(f"Invalid code format")
+            return jsonify({"detail": "Verification code must be a 6-digit number"}), 400
         
-        # Validate code format
         code = code.strip()
         if not code.isdigit() or len(code) != 6:
             logger.error(f"Invalid code format: {code}")
             return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
         
-        # Validate session format
         if not session or not isinstance(session, str) or len(session) < 20:
             logger.error(f"Invalid session format: length {len(session) if session else 0}")
             return jsonify({"detail": "Invalid session format"}), 400
@@ -1272,6 +1242,31 @@ def direct_verify_mfa():
         except Exception as e:
             logger.error(f"Failed to initialize Cognito client: {e}")
             return jsonify({"detail": "Failed to connect to authentication service"}), 500
+        
+        # For users who already have MFA set up, we should NOT try to generate a code
+        # Only try this for new MFA setup
+        if not skip_code_generation:
+            try:
+                # Try to generate a code from the session
+                logger.info("Attempting to generate MFA code from session (for new MFA setup)")
+                try:
+                    associate_response = cognito_client.associate_software_token(
+                        Session=session
+                    )
+                    secret_code = associate_response.get("SecretCode")
+                    
+                    if secret_code:
+                        totp = pyotp.TOTP(secret_code)
+                        current_code = totp.now()
+                        if code != current_code:
+                            logger.info(f"User provided code {code} doesn't match server code {current_code}, but proceeding anyway")
+                except Exception as e:
+                    logger.info(f"Error on retry code generation: {e}")
+                    # This is expected for users who already have MFA set up
+                    # Just continue with the provided code
+            except Exception as e:
+                logger.warning(f"Code generation failed but proceeding with user-provided code: {e}")
+                # Continue with verification using the provided code
         
         try:
             CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
@@ -1290,6 +1285,7 @@ def direct_verify_mfa():
             
             logger.info(f"Sending MFA verification with code: {code}")
             
+            # Make the API call
             try:
                 response = cognito_client.respond_to_auth_challenge(
                     ClientId=CLIENT_ID,
@@ -1299,115 +1295,41 @@ def direct_verify_mfa():
                 )
                 
                 logger.info(f"MFA verification response received")
+            except Exception as api_error:
+                logger.error(f"Cognito API call failed: {api_error}")
+                return jsonify({"detail": f"MFA verification failed: {str(api_error)}"}), 500
+            
+            auth_result = response.get("AuthenticationResult")
+            if not auth_result:
+                logger.error("No AuthenticationResult in MFA response")
+                return jsonify({"detail": "Invalid MFA response from server"}), 500
                 
-                auth_result = response.get("AuthenticationResult")
-                if not auth_result:
-                    logger.error("No AuthenticationResult in MFA response")
-                    return jsonify({"detail": "Invalid MFA response from server"}), 500
-                    
-                logger.info("MFA verification successful")
-                return jsonify({
-                    "id_token": auth_result.get("IdToken"),
-                    "access_token": auth_result.get("AccessToken"),
-                    "refresh_token": auth_result.get("RefreshToken"),
-                    "token_type": auth_result.get("TokenType"),
-                    "expires_in": auth_result.get("ExpiresIn"),
-                })
-            except cognito_client.exceptions.CodeMismatchException as code_error:
-                logger.warning(f"MFA code mismatch: {code_error}")
+            logger.info("MFA verification successful")
+            return jsonify({
+                "id_token": auth_result.get("IdToken"),
+                "access_token": auth_result.get("AccessToken"),
+                "refresh_token": auth_result.get("RefreshToken"),
+                "token_type": auth_result.get("TokenType"),
+                "expires_in": auth_result.get("ExpiresIn"),
+            })
                 
-                # If we already have the secret_code from generating a code earlier
-                if secret_code:
-                    try:
-                        totp = pyotp.TOTP(secret_code)
-                        current_code = totp.now()
-                        # Try one more time with the current code
-                        try:
-                            retry_response = cognito_client.respond_to_auth_challenge(
-                                ClientId=CLIENT_ID,
-                                ChallengeName="SOFTWARE_TOKEN_MFA",
-                                Session=session,
-                                ChallengeResponses={
-                                    "USERNAME": username,
-                                    "SOFTWARE_TOKEN_MFA_CODE": current_code,
-                                    "SECRET_HASH": secret_hash
-                                }
-                            )
-                            
-                            retry_auth_result = retry_response.get("AuthenticationResult")
-                            if retry_auth_result:
-                                logger.info("MFA verification successful with auto-retry")
-                                return jsonify({
-                                    "id_token": retry_auth_result.get("IdToken"),
-                                    "access_token": retry_auth_result.get("AccessToken"),
-                                    "refresh_token": retry_auth_result.get("RefreshToken"),
-                                    "token_type": retry_auth_result.get("TokenType"),
-                                    "expires_in": retry_auth_result.get("ExpiresIn"),
-                                })
-                        except Exception as retry_error:
-                            logger.warning(f"Auto-retry failed: {retry_error}")
-                        
-                        # If retry failed, return the correct code to the client
-                        return jsonify({
-                            "detail": f"The verification code is incorrect. Please use this code instead: {current_code}",
-                            "currentValidCode": current_code,
-                            "timeInfo": {
-                                "serverTime": server_time.isoformat(),
-                                "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
-                            }
-                        }), 400
-                    except Exception as totp_error:
-                        logger.error(f"Error generating retry code: {totp_error}")
+        except cognito_client.exceptions.CodeMismatchException as code_error:
+            logger.warning(f"MFA code mismatch: {code_error}")
+            error_msg = (
+                "The verification code is incorrect or has expired. "
+                "Please try again with a new code from your authenticator app."
+            )
+            return jsonify({"detail": error_msg}), 400
                 
-                # If we don't have a valid secret, try to associate one
-                try:
-                    # First try to get the secret from the session
-                    associate_response = cognito_client.associate_software_token(Session=session)
-                    retry_secret = associate_response.get("SecretCode")
-                    
-                    if retry_secret:
-                        totp = pyotp.TOTP(retry_secret)
-                        current_code = totp.now()
-                        return jsonify({
-                            "detail": f"The verification code is incorrect. Please use this code instead: {current_code}",
-                            "currentValidCode": current_code,
-                            "timeInfo": {
-                                "serverTime": server_time.isoformat(),
-                                "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
-                            }
-                        }), 400
-                except Exception as retry_error:
-                    logger.error(f"Error on retry code generation: {retry_error}")
+        except cognito_client.exceptions.ExpiredCodeException as expired_error:
+            logger.warning(f"MFA code expired: {expired_error}")
+            return jsonify({"detail": "The verification code has expired. Please generate a new code from your authenticator app."}), 400
                 
-                # If all else fails, return a generic error
-                return jsonify({
-                    "detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."
-                }), 400
-                
-            except cognito_client.exceptions.ExpiredCodeException as expired_error:
-                logger.warning(f"MFA code expired: {expired_error}")
-                
-                # Try to generate a fresh code
-                if secret_code:
-                    try:
-                        totp = pyotp.TOTP(secret_code)
-                        current_code = totp.now()
-                        return jsonify({
-                            "detail": f"The verification code has expired. Please use this fresh code: {current_code}",
-                            "currentValidCode": current_code
-                        }), 400
-                    except Exception as gen_error:
-                        logger.error(f"Error generating fresh code: {gen_error}")
-                
-                return jsonify({
-                    "detail": "The verification code has expired. Please generate a new code from your authenticator app."
-                }), 400
-                
-            except botocore.exceptions.ClientError as client_error:
-                error_code = client_error.response['Error']['Code']
-                error_message = client_error.response['Error']['Message']
-                logger.error(f"AWS ClientError: {error_code} - {error_message}")
-                return jsonify({"detail": f"MFA verification failed: {error_message}"}), 500
+        except botocore.exceptions.ClientError as client_error:
+            error_code = client_error.response['Error']['Code']
+            error_message = client_error.response['Error']['Message']
+            logger.error(f"AWS ClientError: {error_code} - {error_message}")
+            return jsonify({"detail": f"MFA verification failed: {error_message}"}), 500
                 
         except Exception as e:
             logger.error(f"MFA verification error: {e}")

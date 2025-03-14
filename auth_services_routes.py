@@ -1087,6 +1087,7 @@ def verify_mfa_endpoint():
     session = data.get('session')
     code = data.get('code')
     username = data.get('username')
+    skip_code_generation = data.get('skip_code_generation', False)  # Add this flag
 
     # Log session information
     log_session_info("verify-mfa endpoint", session)
@@ -1094,10 +1095,19 @@ def verify_mfa_endpoint():
     if not (session and username):
         return jsonify({"detail": "Session and username are required"}), 400
         
-    # If no code provided or code is not valid, try to get a server-generated code
-    if not code or len(code) != 6:
+    # Input validation for code
+    if not code or not isinstance(code, str):
+        return jsonify({"detail": "Verification code must be a 6-digit number"}), 400
+        
+    code = code.strip()
+    if not code.isdigit() or len(code) != 6:
+        return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
+    
+    # For users with existing MFA, skip trying to generate a new code
+    if not skip_code_generation:
         try:
             # Try to get the secret from the session to generate a code
+            # This will fail for users who already have MFA set up with "Invalid session for the user"
             associate_response = cognito_client.associate_software_token(
                 Session=session
             )
@@ -1105,16 +1115,18 @@ def verify_mfa_endpoint():
             
             if secret_code:
                 totp = pyotp.TOTP(secret_code)
-                current_code = totp.now()
-                code = current_code
-                logger.info(f"Using server-generated code: {code}")
-            else:
-                return jsonify({"detail": "Verification code is required"}), 400
+                server_code = totp.now()
+                logger.info(f"Generated server code: {server_code}")
+                
+                # If the user-provided code doesn't match our server code,
+                # we'll proceed anyway and let Cognito validate
+                if code != server_code:
+                    logger.info(f"User code {code} doesn't match server code {server_code}, proceeding with verification")
         except Exception as e:
-            logger.error(f"Error generating code for verification: {e}")
-            return jsonify({"detail": "Verification code is required"}), 400
+            # This is expected for users who already have MFA set up
+            logger.info(f"Could not generate MFA code from session (normal for existing MFA users): {e}")
 
-    # Call the verify_mfa function
+    # Call the verify_mfa function with the user-provided code
     auth_result = verify_mfa(session, code, username)
     
     # Check if it's an error response (tuple with status code)
