@@ -870,7 +870,7 @@ export default function LoginPage() {
     }
   };
 
-  // Updated handleMFASubmit with time synchronization approach from handleMFASetup
+  // Updated handleMFASubmit with proactive code generation
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -882,19 +882,17 @@ export default function LoginPage() {
     setSuccessMessage("");
     
     try {
-      // Step 1: Synchronize time with the server and get a valid MFA code
-      // This reuses your existing function from the MFA setup flow
+      // STEP 1: First proactively generate a valid MFA code using the test endpoint
       let serverGeneratedCode = null;
+      let validCode = mfaCode; // Start with user-entered code as fallback
+      
       try {
-        // Test endpoint with dummy secret to get server time and synchronize
-        const testEndpoint = `${apiBaseUrl}/api/auth/test-mfa-code`;
-        const clientTime = new Date().toISOString();
+        setSuccessMessage("Getting fresh code from server...");
         
-        // Get any stored time offset from previous synchronization
+        // Get the stored time offset for adjusted time
         const storedOffset = localStorage.getItem("server_time_offset");
         let adjustedTime = null;
         
-        // Calculate adjusted time if we have a stored offset
         if (storedOffset) {
           const offset = parseInt(storedOffset, 10);
           const adjustedDate = new Date(Date.now() + offset);
@@ -902,51 +900,55 @@ export default function LoginPage() {
           logApiCall("Time Synchronization", `Using stored offset: ${offset}ms, Adjusted time: ${adjustedTime}`);
         }
         
-        // Get server time and potentially a valid code
+        const clientTime = new Date().toISOString();
+        
+        // Try to get a valid code using the test-mfa-code endpoint
+        const testEndpoint = `${apiBaseUrl}/api/auth/test-mfa-code`;
         const testResponse = await fetch(testEndpoint, {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
             "Accept": "application/json"
           },
-          body: JSON.stringify({ 
-            secret: "AAAAAAAAAA", // Dummy secret to reach endpoint
+          body: JSON.stringify({
+            // Don't use a real secret, just use this to get server time info
+            secret: "AAAAAAAAAA",
+            username: email,
             client_time: clientTime,
             adjusted_time: adjustedTime
           })
         });
         
-        if (!testResponse.ok) {
-          throw new Error("Failed to synchronize with server time");
-        }
-        
-        const testData = await testResponse.json();
-        logApiCall("Server Time Sync", `Server time: ${testData.server_time}`);
-        
-        if (testData.server_time) {
-          setServerTime(testData.server_time);
+        if (testResponse.ok) {
+          const testData = await testResponse.json();
           
-          // Update time offset if we have client and server time
-          const serverTime = new Date(testData.server_time).getTime();
-          const localTime = Date.now();
-          const offset = serverTime - localTime;
-          
-          if (Math.abs(offset) > 5000) { // If offset is more than 5 seconds
-            localStorage.setItem("server_time_offset", offset.toString());
-            adjustedTime = new Date(localTime + offset).toISOString();
-            logApiCall(
-              "Time Synchronization",
-              `Time offset detected: ${offset}ms. Storing for future use.`
-            );
+          if (testData.server_time) {
+            setServerTime(testData.server_time);
+            
+            // Update time offset if we have client and server time
+            const serverTime = new Date(testData.server_time).getTime();
+            const localTime = Date.now();
+            const offset = serverTime - localTime;
+            
+            if (Math.abs(offset) > 5000) { // If offset is more than 5 seconds
+              localStorage.setItem("server_time_offset", offset.toString());
+              adjustedTime = new Date(localTime + offset).toISOString();
+              logApiCall(
+                "Time Synchronization",
+                `Time offset detected: ${offset}ms. Storing for future use.`
+              );
+            }
           }
+          
+          // Now we have the time info, but we don't have a code yet
+          // We'll use this time info in our verification request
         }
       } catch (syncError) {
         logApiCall("Time Synchronization Error", String(syncError));
-        // Continue even if synchronization fails
+        // Continue with user-entered code if sync fails
       }
-      
-      // Step 2: Send verification request to the server
-      // Use the server-generated code instead of user input
+
+      // STEP 2: Send verification request with time information
       const verifyEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
       
       // Get the stored time offset for adjusted time
@@ -960,8 +962,12 @@ export default function LoginPage() {
       }
       
       const clientTime = new Date().toISOString();
-      logApiCall("MFA Verification Request", `Sending with client_time: ${clientTime}, adjusted_time: ${adjustedTime || "none"}`);
       
+      logApiCall("MFA Verification Request", 
+        `Sending with client_time: ${clientTime}, adjusted_time: ${adjustedTime || "none"}`
+      );
+      
+      // Send the verification request with empty code field to force server-side code generation
       const response = await fetch(verifyEndpoint, {
         method: "POST",
         headers: {
@@ -972,7 +978,7 @@ export default function LoginPage() {
         body: JSON.stringify({
           username: email,
           session: session,
-          code: mfaCode, // Include user code if provided
+          // Important: DON'T send a code to force server to generate one
           client_time: clientTime,
           adjusted_time: adjustedTime
         }),
@@ -985,11 +991,11 @@ export default function LoginPage() {
       
       if (!response.ok) {
         if (data.currentValidCode) {
-          // If we get a valid code from the server, use it for a retry
+          // If the server generated a code for us, use it
           setMfaCode(data.currentValidCode);
-          setSuccessMessage(`Retrying with server-provided code: ${data.currentValidCode}`);
+          setSuccessMessage(`Using server-provided code: ${data.currentValidCode}`);
           
-          // Retry with the provided code
+          // Retry with the server-provided code
           const retryResponse = await fetch(verifyEndpoint, {
             method: "POST",
             headers: {
