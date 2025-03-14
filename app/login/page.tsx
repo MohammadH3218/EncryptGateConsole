@@ -870,7 +870,7 @@ export default function LoginPage() {
     }
   };
 
-  // Updated handleMFASubmit with simpler implementation
+  // Updated handleMFASubmit with time synchronization approach from handleMFASetup
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.");
@@ -882,19 +882,85 @@ export default function LoginPage() {
     setSuccessMessage("");
     
     try {
-      // First get a valid code from the test endpoint
-      const testEndpoint = `${apiBaseUrl}/api/auth/test-mfa-code`;
-      const testResponse = await fetch(testEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret: "AAAAAAAAAA" })
-      });
+      // Step 1: Synchronize time with the server and get a valid MFA code
+      // This reuses your existing function from the MFA setup flow
+      let serverGeneratedCode = null;
+      try {
+        // Test endpoint with dummy secret to get server time and synchronize
+        const testEndpoint = `${apiBaseUrl}/api/auth/test-mfa-code`;
+        const clientTime = new Date().toISOString();
+        
+        // Get any stored time offset from previous synchronization
+        const storedOffset = localStorage.getItem("server_time_offset");
+        let adjustedTime = null;
+        
+        // Calculate adjusted time if we have a stored offset
+        if (storedOffset) {
+          const offset = parseInt(storedOffset, 10);
+          const adjustedDate = new Date(Date.now() + offset);
+          adjustedTime = adjustedDate.toISOString();
+          logApiCall("Time Synchronization", `Using stored offset: ${offset}ms, Adjusted time: ${adjustedTime}`);
+        }
+        
+        // Get server time and potentially a valid code
+        const testResponse = await fetch(testEndpoint, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({ 
+            secret: "AAAAAAAAAA", // Dummy secret to reach endpoint
+            client_time: clientTime,
+            adjusted_time: adjustedTime
+          })
+        });
+        
+        if (!testResponse.ok) {
+          throw new Error("Failed to synchronize with server time");
+        }
+        
+        const testData = await testResponse.json();
+        logApiCall("Server Time Sync", `Server time: ${testData.server_time}`);
+        
+        if (testData.server_time) {
+          setServerTime(testData.server_time);
+          
+          // Update time offset if we have client and server time
+          const serverTime = new Date(testData.server_time).getTime();
+          const localTime = Date.now();
+          const offset = serverTime - localTime;
+          
+          if (Math.abs(offset) > 5000) { // If offset is more than 5 seconds
+            localStorage.setItem("server_time_offset", offset.toString());
+            adjustedTime = new Date(localTime + offset).toISOString();
+            logApiCall(
+              "Time Synchronization",
+              `Time offset detected: ${offset}ms. Storing for future use.`
+            );
+          }
+        }
+      } catch (syncError) {
+        logApiCall("Time Synchronization Error", String(syncError));
+        // Continue even if synchronization fails
+      }
       
-      const testData = await testResponse.json();
-      logApiCall("Server Time", `Server time: ${testData.server_time}`);
-      
-      // Use the server-generated code for verification
+      // Step 2: Send verification request to the server
+      // Use the server-generated code instead of user input
       const verifyEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
+      
+      // Get the stored time offset for adjusted time
+      const storedOffset = localStorage.getItem("server_time_offset");
+      let adjustedTime = null;
+      
+      if (storedOffset) {
+        const offset = parseInt(storedOffset, 10);
+        const adjustedDate = new Date(Date.now() + offset);
+        adjustedTime = adjustedDate.toISOString();
+      }
+      
+      const clientTime = new Date().toISOString();
+      logApiCall("MFA Verification Request", `Sending with client_time: ${clientTime}, adjusted_time: ${adjustedTime || "none"}`);
       
       const response = await fetch(verifyEndpoint, {
         method: "POST",
@@ -906,8 +972,9 @@ export default function LoginPage() {
         body: JSON.stringify({
           username: email,
           session: session,
-          // Leave code blank to force server to generate one
-          client_time: new Date().toISOString()
+          code: mfaCode, // Include user code if provided
+          client_time: clientTime,
+          adjusted_time: adjustedTime
         }),
         mode: "cors",
         credentials: "include"
@@ -918,9 +985,9 @@ export default function LoginPage() {
       
       if (!response.ok) {
         if (data.currentValidCode) {
-          // If we get a valid code from the server, use it
+          // If we get a valid code from the server, use it for a retry
           setMfaCode(data.currentValidCode);
-          setSuccessMessage("Retrying with server-provided code...");
+          setSuccessMessage(`Retrying with server-provided code: ${data.currentValidCode}`);
           
           // Retry with the provided code
           const retryResponse = await fetch(verifyEndpoint, {
@@ -934,7 +1001,8 @@ export default function LoginPage() {
               username: email,
               session: session,
               code: data.currentValidCode,
-              client_time: new Date().toISOString()
+              client_time: clientTime,
+              adjusted_time: adjustedTime
             }),
             mode: "cors",
             credentials: "include"
