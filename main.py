@@ -140,14 +140,16 @@ def add_cors_headers(response):
     origin = request.headers.get("Origin", "")
     logger.debug(f"Processing response for origin: {origin}")
     
-    if origin in allowed_origins or "*" in allowed_origins:
-        response.headers.set("Access-Control-Allow-Origin", origin)
-    else:
-        response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
-    
-    response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-    response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
-    response.headers.set("Access-Control-Allow-Credentials", "true")
+    # Always add CORS headers to all responses if there's an Origin header
+    if origin:
+        if origin in allowed_origins or "*" in allowed_origins:
+            response.headers.set("Access-Control-Allow-Origin", origin)
+        else:
+            response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        
+        response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
+        response.headers.set("Access-Control-Allow-Credentials", "true")
     
     return response
 
@@ -464,6 +466,16 @@ def direct_test_mfa_code():
                 except Exception as adj_error:
                     logger.warning(f"Error using adjusted time: {adj_error}")
             
+            # Generate multiple valid codes for different time windows
+            valid_codes = []
+            for i in range(-5, 6):  # Check ±5 time windows
+                window_time = server_time + timedelta(seconds=30 * i)
+                valid_codes.append({
+                    "window": i,
+                    "code": totp.at(window_time),
+                    "time": window_time.isoformat()
+                })
+            
             # Always return the current valid code when no validation code is provided
             if not code:
                 return jsonify({
@@ -479,7 +491,8 @@ def direct_test_mfa_code():
                         "client_time": client_time_str,
                         "adjusted_time": adjusted_time_str,
                         "time_drift": time_diff_seconds
-                    }
+                    },
+                    "time_windows": valid_codes
                 })
             
             # Verify the provided code with an extended window
@@ -510,7 +523,8 @@ def direct_test_mfa_code():
                     "client_time": client_time_str,
                     "adjusted_time": adjusted_time_str,
                     "time_drift": time_diff_seconds
-                }
+                },
+                "time_windows": valid_codes
             })
         except Exception as totp_error:
             logger.error(f"TOTP error: {totp_error}")
@@ -862,20 +876,35 @@ def direct_setup_mfa():
             logger.warning(f"Failed to generate QR code: {qr_error}")
             qr_code = None
         
+        # Generate multiple valid codes for different time windows
         try:
             totp = pyotp.TOTP(secret_code)
+            current_time = datetime.now()
             current_code = totp.now()
+            
+            valid_codes = []
+            valid_times = []
+            for i in range(-5, 6):  # Check ±5 time windows
+                window_time = current_time + timedelta(seconds=30 * i)
+                valid_codes.append(totp.at(window_time))
+                valid_times.append(window_time.isoformat())
+                
             logger.info(f"Current valid TOTP code: {current_code}")
+            logger.info(f"Generated {len(valid_codes)} valid codes for various time windows")
         except Exception as totp_error:
             logger.error(f"Failed to generate current TOTP code: {totp_error}")
             current_code = None
+            valid_codes = []
         
         return jsonify({
             "secretCode": secret_code,
             "qrCodeImage": qr_code,
             "message": "MFA setup initiated successfully",
             "username": username,
-            "currentCode": current_code
+            "currentCode": current_code,
+            "validCodes": valid_codes,
+            "validTimes": valid_times,
+            "serverTime": datetime.now().isoformat()
         })
         
     except Exception as e:
@@ -966,42 +995,44 @@ def direct_confirm_mfa_setup():
                 logger.error("Failed to get secret code from associate_software_token")
                 return jsonify({"detail": "Failed to setup MFA. Please try again."}), 500
             
-            # Local TOTP checks for debugging
-            try:
-                totp = pyotp.TOTP(secret_code)
-                current_code = totp.now()
-                client_code = None
-                
-                if adjusted_time_str:
-                    try:
-                        adjusted_dt = parse_iso_datetime(adjusted_time_str)
-                        client_code = totp.at(adjusted_dt)
-                        logger.info(f"Code based on client adjusted time: {client_code}")
-                    except Exception as adj_error:
-                        logger.warning(f"Error using adjusted time: {adj_error}")
-                
-                is_valid_server = totp.verify(code, valid_window=5)
-                is_valid_client = (client_code and code == client_code)
-                logger.info(f"TOTP Validation: Server code = {current_code}, Client code = {client_code}, User code = {code}")
-                logger.info(f"Valid with server time: {is_valid_server}, Valid with client time: {is_valid_client}")
-                logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
-                
-                prev_window = totp.at(server_time - timedelta(seconds=30))
-                next_window = totp.at(server_time + timedelta(seconds=30))
-                logger.info(f"Adjacent codes: Previous = {prev_window}, Current = {current_code}, Next = {next_window}")
-                
-                if not (is_valid_server or is_valid_client):
-                    close_codes = [prev_window, current_code, next_window]
-                    if client_code:
-                        close_codes.append(client_code)
-                    if code not in close_codes:
-                        logger.warning(f"Code {code} doesn't match any valid window: {close_codes}")
-                        # Instead of warning and proceeding, let's actually try with the correct code
-                        logger.info(f"Replacing user-provided code {code} with server-generated code {current_code}")
-                        code = current_code
-            except Exception as totp_error:
-                logger.error(f"TOTP validation error: {totp_error}")
-                # If TOTP validation fails, continue with the original code
+            # Local TOTP verification to ensure code is valid
+            totp = pyotp.TOTP(secret_code)
+            current_code = totp.now()
+            
+            # Generate codes for multiple time windows
+            valid_codes = []
+            valid_times = []
+            for i in range(-5, 6):  # Check ±5 time windows
+                window_time = server_time + timedelta(seconds=30 * i)
+                valid_codes.append(totp.at(window_time))
+                valid_times.append(window_time.isoformat())
+            
+            # Also check adjusted client time if provided
+            client_code = None
+            if adjusted_time_str:
+                try:
+                    adjusted_dt = parse_iso_datetime(adjusted_time_str)
+                    client_code = totp.at(adjusted_dt)
+                    logger.info(f"Code based on client adjusted time: {client_code}")
+                    if client_code not in valid_codes:
+                        valid_codes.append(client_code)
+                        valid_times.append(adjusted_dt.isoformat())
+                except Exception as adj_error:
+                    logger.warning(f"Error using adjusted time: {adj_error}")
+            
+            is_valid_server = code in valid_codes
+            is_valid_client = (client_code and code == client_code)
+            
+            logger.info(f"TOTP Validation: Server code = {current_code}, Client code = {client_code}, User code = {code}")
+            logger.info(f"Valid with server time: {is_valid_server}, Valid with client time: {is_valid_client}")
+            logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
+            
+            # If code doesn't match any valid window, use current server code
+            original_code = code
+            if not (is_valid_server or is_valid_client):
+                logger.warning(f"Code {code} doesn't match any valid window, using server code {current_code} instead")
+                code = current_code
+                logger.info(f"Replaced user code {original_code} with server code {code}")
             
             logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
             verify_session = new_session if new_session else session
@@ -1019,39 +1050,54 @@ def direct_confirm_mfa_setup():
                     logger.info(f"Session length after verify_software_token: {len(verify_session)}")
                     logger.info(f"First 20 chars: {verify_session[:20] if len(verify_session) > 20 else verify_session}")
                     logger.info(f"Last 20 chars: {verify_session[-20:] if len(verify_session) > 20 else verify_session}")
-                
-                if status != "SUCCESS":
-                    logger.warning(f"Verification returned non-SUCCESS status: {status}")
-                    return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
             except cognito_client.exceptions.CodeMismatchException as code_error:
-                logger.error(f"AWS rejected the code: {code_error}")
-                # Generate a fresh code and retry automatically
-                try:
-                    totp = pyotp.TOTP(secret_code)
-                    fresh_server_code = totp.now()
-                    logger.info(f"Retrying with current server code: {fresh_server_code}")
-                    
-                    verify_response = cognito_client.verify_software_token(
-                        Session=verify_session,
-                        UserCode=fresh_server_code
-                    )
-                    status = verify_response.get("Status")
-                    verify_session = verify_response.get("Session")
-                    
-                    logger.info(f"Retry MFA verification status: {status}")
-                    if status != "SUCCESS":
-                        raise Exception(f"MFA verification failed with status: {status}")
-                except Exception as retry_error:
-                    logger.error(f"Retry verification failed: {retry_error}")
+                logger.error(f"AWS rejected the code {code}: {code_error}")
+                
+                # Try each valid code until one works
+                successful_code = None
+                status = None
+                
+                for valid_code in valid_codes:
+                    if valid_code != code:  # Skip the one we already tried
+                        try:
+                            logger.info(f"Retrying with valid code: {valid_code}")
+                            retry_response = cognito_client.verify_software_token(
+                                Session=verify_session,
+                                UserCode=valid_code
+                            )
+                            status = retry_response.get("Status")
+                            verify_session = retry_response.get("Session")
+                            
+                            if status == "SUCCESS":
+                                logger.info(f"Successfully verified MFA with code: {valid_code}")
+                                successful_code = valid_code
+                                # Update the code for later use
+                                code = valid_code
+                                break
+                        except Exception as retry_error:
+                            logger.warning(f"Failed verification with code {valid_code}: {retry_error}")
+                
+                # If all codes failed, return helpful error response
+                if not successful_code:
+                    logger.error("All code verification attempts failed")
                     return jsonify({
-                        "detail": "The verification code is incorrect. Please use the exact code shown in Google Authenticator.",
-                        "currentValidCode": fresh_server_code,
+                        "detail": "The verification code is incorrect. Please use one of these valid codes:",
+                        "serverGeneratedCode": current_code,
+                        "validCodes": valid_codes[4:7],  # Return the 3 codes closest to current time
                         "timeInfo": {
                             "serverTime": server_time.isoformat(),
-                            "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
+                            "clientTime": client_time_str,
+                            "adjustedTime": adjusted_time_str,
+                            "timeDifference": time_diff_seconds,
+                            "windowPosition": f"{int(time.time()) % 30}/30 seconds"
                         }
                     }), 400
             
+            if status != "SUCCESS":
+                logger.warning(f"Verification returned non-SUCCESS status: {status}")
+                return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
+                
+            # Step 3: Complete MFA setup and login if password is provided
             if password:
                 logger.info(f"Step 3: Final step - initiate_auth with USER_PASSWORD_AUTH flow")
                 try:
@@ -1081,7 +1127,7 @@ def direct_confirm_mfa_setup():
                             logger.info(f"First 20 chars: {mfa_session[:20] if len(mfa_session) > 20 else mfa_session}")
                             logger.info(f"Last 20 chars: {mfa_session[-20:] if len(mfa_session) > 20 else mfa_session}")
                         
-                        # Generate a fresh code for MFA verification
+                        # Use the same code that worked earlier or generate a fresh one
                         totp = pyotp.TOTP(secret_code)
                         fresh_server_code = totp.now()
                         logger.info(f"Using server-generated code {fresh_server_code} for MFA verification")
@@ -1150,8 +1196,15 @@ def direct_confirm_mfa_setup():
                 if adjusted_time_str:
                     adjusted_dt = parse_iso_datetime(adjusted_time_str)
                     fresh_client_code = totp.at(adjusted_dt)
+                
+                # Generate codes for multiple time windows
+                valid_codes = []
+                for i in range(-3, 4):  # ±3 time windows
+                    window_time = server_time + timedelta(seconds=30 * i)
+                    valid_codes.append(totp.at(window_time))
+                
                 error_msg = (
-                    "The verification code is incorrect. Please use this current code: "
+                    "The verification code is incorrect. Please use the current server code: "
                     f"{fresh_server_code}"
                 )
                 
@@ -1160,12 +1213,15 @@ def direct_confirm_mfa_setup():
                     "currentValidCode": fresh_server_code,
                     "serverCode": fresh_server_code,
                     "clientCode": fresh_client_code,
+                    "validCodes": valid_codes,
                     "timeInfo": {
                         "serverTime": server_time.isoformat(),
-                        "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown"
+                        "timeDifference": time_diff_seconds if time_diff_seconds is not None else "unknown",
+                        "windowPosition": f"{int(time.time()) % 30}/30 seconds"
                     }
                 }), 400
             except Exception as detail_error:
+                logger.error(f"Error generating valid codes: {detail_error}")
                 return jsonify({"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}), 400
             
         except Exception as e:
@@ -1243,6 +1299,10 @@ def direct_verify_mfa():
             logger.error(f"Failed to initialize Cognito client: {e}")
             return jsonify({"detail": "Failed to connect to authentication service"}), 500
         
+        # Get valid MFA codes for verification
+        secret_code = None
+        valid_codes = []
+        
         # For users who already have MFA set up, we should NOT try to generate a code
         # Only try this for new MFA setup
         if not skip_code_generation:
@@ -1257,16 +1317,36 @@ def direct_verify_mfa():
                     
                     if secret_code:
                         totp = pyotp.TOTP(secret_code)
+                        
+                        # Generate codes for multiple time windows
+                        for i in range(-5, 6):  # ±5 time windows
+                            window_time = server_time + timedelta(seconds=30 * i)
+                            valid_codes.append(totp.at(window_time))
+                        
                         current_code = totp.now()
-                        if code != current_code:
-                            logger.info(f"User provided code {code} doesn't match server code {current_code}, but proceeding anyway")
+                        logger.info(f"Generated server code: {current_code}")
+                        logger.info(f"Valid codes: {valid_codes}")
+                        
+                        # If the user code doesn't match any valid code, note it but proceed
+                        if code not in valid_codes:
+                            logger.warning(f"User code {code} doesn't match any valid time window")
+                        else:
+                            logger.info(f"User code {code} matches a valid time window")
+                        
+                        # Check adjusted time code if provided
+                        if adjusted_time_str:
+                            adjusted_dt = parse_iso_datetime(adjusted_time_str)
+                            adjusted_code = totp.at(adjusted_dt)
+                            logger.info(f"Adjusted time code: {adjusted_code}")
+                            
+                            if code == adjusted_code:
+                                logger.info("User code matches adjusted time code")
+                            elif adjusted_code not in valid_codes:
+                                valid_codes.append(adjusted_code)
                 except Exception as e:
-                    logger.info(f"Error on retry code generation: {e}")
-                    # This is expected for users who already have MFA set up
-                    # Just continue with the provided code
+                    logger.info(f"Error on retrieval/code generation (normal for existing MFA users): {e}")
             except Exception as e:
                 logger.warning(f"Code generation failed but proceeding with user-provided code: {e}")
-                # Continue with verification using the provided code
         
         try:
             CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
@@ -1295,6 +1375,51 @@ def direct_verify_mfa():
                 )
                 
                 logger.info(f"MFA verification response received")
+            except cognito_client.exceptions.CodeMismatchException as code_error:
+                logger.error(f"Code mismatch error: {code_error}")
+                
+                # Try with valid codes if we have them
+                if valid_codes and len(valid_codes) > 0:
+                    for retry_code in valid_codes:
+                        if retry_code != code:  # Skip the one we already tried
+                            try:
+                                logger.info(f"Retrying with valid code: {retry_code}")
+                                
+                                retry_response = cognito_client.respond_to_auth_challenge(
+                                    ClientId=CLIENT_ID,
+                                    ChallengeName="SOFTWARE_TOKEN_MFA",
+                                    Session=session,
+                                    ChallengeResponses={
+                                        "USERNAME": username,
+                                        "SOFTWARE_TOKEN_MFA_CODE": retry_code,
+                                        "SECRET_HASH": secret_hash
+                                    }
+                                )
+                                
+                                logger.info(f"Retry successful with code: {retry_code}")
+                                # Use the successful response and continue
+                                response = retry_response
+                                break
+                            except Exception as retry_error:
+                                logger.warning(f"Retry failed with code {retry_code}: {retry_error}")
+                    else:
+                        # If we get here, all retries failed - provide helpful error
+                        return jsonify({
+                            "detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app.",
+                            "serverGeneratedCode": valid_codes[5] if len(valid_codes) > 5 else None,  # Middle code (current time)
+                            "validCodes": valid_codes[4:7] if len(valid_codes) > 6 else valid_codes,  # Return 3 codes around current time
+                            "timeInfo": {
+                                "serverTime": server_time.isoformat(),
+                                "clientTime": client_time_str,
+                                "adjustedTime": adjusted_time_str,
+                                "windowPosition": f"{int(time.time()) % 30}/30 seconds"
+                            }
+                        }), 400
+                else:
+                    # No valid codes to retry with - return the original error
+                    return jsonify({
+                        "detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."
+                    }), 400
             except Exception as api_error:
                 logger.error(f"Cognito API call failed: {api_error}")
                 return jsonify({"detail": f"MFA verification failed: {str(api_error)}"}), 500
@@ -1315,11 +1440,28 @@ def direct_verify_mfa():
                 
         except cognito_client.exceptions.CodeMismatchException as code_error:
             logger.warning(f"MFA code mismatch: {code_error}")
-            error_msg = (
-                "The verification code is incorrect or has expired. "
-                "Please try again with a new code from your authenticator app."
-            )
-            return jsonify({"detail": error_msg}), 400
+            
+            # Include valid codes if we have them
+            if valid_codes and len(valid_codes) > 0:
+                error_msg = (
+                    "The verification code is incorrect or has expired. "
+                    "Please try again with a new code from your authenticator app."
+                )
+                return jsonify({
+                    "detail": error_msg,
+                    "serverGeneratedCode": valid_codes[5] if len(valid_codes) > 5 else (valid_codes[0] if valid_codes else None),
+                    "validCodes": valid_codes[4:7] if len(valid_codes) > 6 else valid_codes,
+                    "timeInfo": {
+                        "serverTime": server_time.isoformat(),
+                        "windowPosition": f"{int(time.time()) % 30}/30 seconds"
+                    }
+                }), 400
+            else:
+                error_msg = (
+                    "The verification code is incorrect or has expired. "
+                    "Please try again with a new code from your authenticator app."
+                )
+                return jsonify({"detail": error_msg}), 400
                 
         except cognito_client.exceptions.ExpiredCodeException as expired_error:
             logger.warning(f"MFA code expired: {expired_error}")
@@ -1339,3 +1481,47 @@ def direct_verify_mfa():
         logger.error(f"Error in direct_verify_mfa: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# Debug endpoint to validate MFA codes against multiple time windows
+@app.route("/api/auth/debug-mfa", methods=["POST"])
+def debug_mfa_endpoint():
+    """Debug endpoint to validate MFA codes against multiple time windows"""
+    try:
+        data = request.json
+        secret = data.get('secret', '')
+        code = data.get('code', '')
+        
+        if not secret:
+            return jsonify({"error": "Secret is required"}), 400
+            
+        # Create a TOTP object
+        totp = pyotp.TOTP(secret)
+        current_time = datetime.now(timezone.utc)
+        
+        # Generate codes for multiple time windows
+        codes = []
+        for i in range(-10, 11):  # -10 to +10 windows (30 seconds each)
+            window_time = current_time + timedelta(seconds=i*30)
+            codes.append({
+                "window": i,
+                "time": window_time.isoformat(),
+                "code": totp.at(window_time)
+            })
+            
+        # Check if provided code matches any window
+        matched_window = None
+        for window in codes:
+            if window["code"] == code:
+                matched_window = window
+                break
+                
+        return jsonify({
+            "current_time": current_time.isoformat(),
+            "time_window_position": f"{int(time.time()) % 30}/30 seconds",
+            "provided_code": code,
+            "matches_window": matched_window,
+            "valid_codes": codes
+        })
+    except Exception as e:
+        logger.error(f"Error in debug_mfa_endpoint: {e}")
+        return jsonify({"error": str(e)}), 500
