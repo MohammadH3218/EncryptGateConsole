@@ -833,170 +833,198 @@ export default function LoginPage() {
     }
   };
 
-  // Updated MFA verification for existing MFA users
-  const handleMFASubmit = async () => {
-    if (!apiBaseUrl) {
-      setError("API URL is not available.");
-      return;
+// Updated MFA verification for existing MFA users
+const handleMFASubmit = async () => {
+  if (!apiBaseUrl) {
+    setError("API URL is not available.");
+    return;
+  }
+  
+  // Validate the MFA code format
+  if (!mfaCode || mfaCode.length !== 6 || !mfaCode.match(/^\d{6}$/)) {
+    setError("Please enter the 6-digit verification code from your authenticator app");
+    return;
+  }
+  
+  setError("");
+  setSuccessMessage("");
+  setIsLoading(true);
+  const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
+  
+  try {
+    // First, synchronize with the server to get time-adjusted codes
+    const serverTimeResponse = await fetch(`${apiBaseUrl}/api/auth/test-mfa-code`, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
+      body: JSON.stringify({ 
+        secret: "AAAAAAAAAA", // Just to get server time
+        client_time: new Date().toISOString()
+      }),
+    });
+    
+    const timeData = await serverTimeResponse.json();
+    if (timeData.server_time) {
+      // Update the local time offset for better synchronization
+      const serverDate = new Date(timeData.server_time);
+      const clientDate = new Date();
+      const timeOffset = serverDate.getTime() - clientDate.getTime();
+      localStorage.setItem("server_time_offset", timeOffset.toString());
     }
     
-    // Validate the MFA code format
-    if (!mfaCode || mfaCode.length !== 6 || !mfaCode.match(/^\d{6}$/)) {
-      setError("Please enter the 6-digit verification code from your authenticator app");
-      return;
-    }
+    // Get adjusted time for verification
+    const adjustedTime = getAdjustedTime();
+    const clientTime = new Date().toISOString();
     
-    setError("");
-    setSuccessMessage("");
-    setIsLoading(true);
-    const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`;
-    console.log(`Verifying MFA for user: ${email}`);
+    console.log(`Verifying MFA code: ${mfaCode}`);
     
+    // First attempt - with user-provided code
+    let response = await fetchWithRetry(mfaEndpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Origin": window.location.origin,
+      },
+      body: JSON.stringify({
+        code: mfaCode,
+        session,
+        username: email,
+        client_time: clientTime,
+        adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined
+        // No skip_code_generation flag - allowing the server to try generating codes
+      }),
+      mode: "cors",
+      credentials: "include",
+    }, 2);
+    
+    let data: LoginResponse;
     try {
-      // Get the adjusted time for better synchronization
-      const adjustedTime = getAdjustedTime();
-      const clientTime = new Date().toISOString();
-      
-      console.log(`Verifying MFA code: ${mfaCode}`);
-      
-      const response = await fetchWithRetry(mfaEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Origin": window.location.origin,
-        },
-        body: JSON.stringify({
-          code: mfaCode,
-          session,
-          username: email,
-          client_time: clientTime,
-          adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined
-          // Removed the skip_code_generation flag to allow server to generate verification codes
-        }),
-        mode: "cors",
-        credentials: "include",
-      }, 2).catch((fetchError) => { // Increased retry count for reliability
-        console.error("MFA verification network error:", fetchError.message);
-        throw new Error(`Network error: ${fetchError.message}`);
-      });
-      
-      let data: LoginResponse;
-      try {
-        data = await response.json();
-        console.log(`MFA verification response status: ${response.status}`);
-      } catch (jsonError) {
-        console.error("MFA verification parse error:", jsonError);
-        throw new Error("Invalid response from server. Please try again.");
-      }
-      
-      if (!response.ok) {
-        // Handle error cases with server-provided recovery codes
-        if (response.status === 400 && data.detail) {
-          if (data.serverGeneratedCode || data.currentValidCode) {
-            // Store the server-provided codes for recovery
-            if (data.validCodes) {
-              setMfaRecoveryCodes(data.validCodes);
-            }
-            
-            // Try the server-generated code automatically
-            const serverCode = data.serverGeneratedCode || data.currentValidCode;
-            console.log(`Retrying with server-generated code: ${serverCode}`);
-            
-            // Retry with the server-provided code
-            const retryResponse = await fetchWithRetry(mfaEndpoint, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "Origin": window.location.origin,
-              },
-              body: JSON.stringify({
-                code: serverCode,
-                session,
-                username: email,
-                client_time: clientTime,
-                adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined
-              }),
-              mode: "cors",
-              credentials: "include",
-            }, 1);
-            
-            // If retry succeeds, use that response instead
-            if (retryResponse.ok) {
-              const retryData = await retryResponse.json();
-              console.log("Successfully authenticated with server-generated code");
-              
-              // Store tokens in localStorage for authenticated session
-              localStorage.setItem("access_token", retryData.access_token || "");
-              localStorage.setItem("id_token", retryData.id_token || "");
-              localStorage.setItem("refresh_token", retryData.refresh_token || "");
-              sessionStorage.removeItem("temp_password");
-              
-              // Successful MFA verification - redirect to dashboard
-              router.push("/admin/dashboard");
-              return;
-            }
-            
-            // If retry failed, continue with original error handling
-            setMfaCode(serverCode || "");
-            setError("Automatic retry failed. Please use this server-generated code and try again: " + serverCode);
-            setIsLoading(false);
-            return;
-          }
-          
-          if (data.detail.includes("verification code")) {
-            setMfaCode("");
-            console.error("Invalid MFA code:", data.detail || "Invalid MFA code");
-          } else if (data.detail.includes("session")) {
-            console.error("Session expired");
-            throw new Error("Your session has expired. Please log in again.");
-          }
-        }
-        throw new Error(data?.detail || "Invalid MFA code");
-      }
-      
-      // Store tokens in localStorage for authenticated session
+      data = await response.json();
+      console.log(`MFA verification response status: ${response.status}`);
+    } catch (jsonError) {
+      throw new Error("Invalid response from server. Please try again.");
+    }
+    
+    // If first attempt succeeded, we're done
+    if (response.ok) {
+      // Success - store tokens and redirect
       localStorage.setItem("access_token", data.access_token || "");
       localStorage.setItem("id_token", data.id_token || "");
       localStorage.setItem("refresh_token", data.refresh_token || "");
       sessionStorage.removeItem("temp_password");
-      console.log("MFA verification successful, redirecting to dashboard");
       
-      // Successful MFA verification - redirect to dashboard
       router.push("/admin/dashboard");
-    } catch (error: any) {
-      setError(error.message || "MFA verification failed. Please try again.");
-      console.error("MFA verification error:", error.message || "Unknown error");
-      
-      // Handle session expired error
-      if (error.message.includes("session has expired")) {
-        setTimeout(() => {
-          setShowMFA(false);
-          sessionStorage.removeItem("temp_password");
-        }, 3000);
-      }
-      
-      // Try automatic recovery if we have any recovery codes
-      if (mfaRecoveryCodes.length > 0 && error.message.includes("verification code")) {
-        // Try the first recovery code
-        const recoveryCode = mfaRecoveryCodes[0];
-        setMfaRecoveryCodes(prev => prev.filter(code => code !== recoveryCode)); // Remove the used code
-        
-        setMfaCode(recoveryCode);
-        setError(`Automatic retry with recovery code: ${recoveryCode}`);
-        
-        // Delay and retry
-        setTimeout(() => {
-          setIsLoading(false);
-          handleMFASubmit();
-        }, 1500);
-        return;
-      }
-    } finally {
-      setIsLoading(false);
+      return;
     }
-  };
+    
+    // If we got server-generated codes, try those automatically
+    if (data.serverGeneratedCode || data.currentValidCode || data.validCodes) {
+      setSuccessMessage("First code didn't work. Trying with server-suggested code...");
+      
+      // Get the server-suggested code
+      const serverCode = data.serverGeneratedCode || data.currentValidCode;
+      
+      // Store any recovery codes
+      if (data.validCodes) {
+        setMfaRecoveryCodes(Array.isArray(data.validCodes) ? data.validCodes : [data.validCodes]);
+      }
+      
+      // If we have a specific server code, try it
+      if (serverCode) {
+        console.log(`Retrying with server-suggested code: ${serverCode}`);
+        
+        const retryResponse = await fetchWithRetry(mfaEndpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Origin": window.location.origin,
+          },
+          body: JSON.stringify({
+            code: serverCode,
+            session,
+            username: email,
+            client_time: clientTime,
+            adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined
+          }),
+          mode: "cors",
+          credentials: "include",
+        }, 1);
+        
+        if (retryResponse.ok) {
+          const retryData = await retryResponse.json();
+          
+          // Success - store tokens and redirect
+          localStorage.setItem("access_token", retryData.access_token || "");
+          localStorage.setItem("id_token", retryData.id_token || "");
+          localStorage.setItem("refresh_token", retryData.refresh_token || "");
+          sessionStorage.removeItem("temp_password");
+          
+          router.push("/admin/dashboard");
+          return;
+        }
+      }
+      
+      // If we have recovery codes, try them one by one
+      if (mfaRecoveryCodes.length > 0) {
+        for (const recoveryCode of mfaRecoveryCodes.slice(0, 3)) { // Try up to 3 codes
+          console.log(`Retrying with recovery code: ${recoveryCode}`);
+          
+          const recoveryResponse = await fetchWithRetry(mfaEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+              "Origin": window.location.origin,
+            },
+            body: JSON.stringify({
+              code: recoveryCode,
+              session,
+              username: email,
+              client_time: clientTime,
+              adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined
+            }),
+            mode: "cors",
+            credentials: "include",
+          }, 1);
+          
+          if (recoveryResponse.ok) {
+            const recoveryData = await recoveryResponse.json();
+            
+            // Success - store tokens and redirect
+            localStorage.setItem("access_token", recoveryData.access_token || "");
+            localStorage.setItem("id_token", recoveryData.id_token || "");
+            localStorage.setItem("refresh_token", recoveryData.refresh_token || "");
+            sessionStorage.removeItem("temp_password");
+            
+            router.push("/admin/dashboard");
+            return;
+          }
+        }
+      }
+    }
+    
+    // If we get here, all verification attempts failed
+    throw new Error(data?.detail || "MFA verification failed. Please try again with a new code from your authenticator app.");
+    
+  } catch (error: any) {
+    const errorMessage = error.message || "MFA verification failed. Please try again.";
+    setError(errorMessage);
+    
+    // If session expired, close the MFA dialog
+    if (errorMessage.includes("session has expired")) {
+      setTimeout(() => {
+        setShowMFA(false);
+        sessionStorage.removeItem("temp_password");
+      }, 3000);
+    }
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
