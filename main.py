@@ -26,80 +26,17 @@ load_dotenv()
 # Initialize the Flask app (Global for Gunicorn)
 app = Flask(__name__)
 
-# === Logging Setup ===
-def setup_comprehensive_logging():
-    try:
-        log_dir = "/var/log/encryptgate"
-        try:
-            os.makedirs(log_dir, exist_ok=True)
-        except PermissionError:
-            # Fall back to a directory we can write to
-            log_dir = "/tmp/encryptgate_logs"
-            os.makedirs(log_dir, exist_ok=True)
-            print(f"WARNING: Could not access /var/log/encryptgate, using {log_dir} instead")
-
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="%(asctime)s [%(levelname)s] %(pathname)s:%(lineno)d - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-            handlers=[
-                logging.StreamHandler(sys.stdout),
-                logging.FileHandler(os.path.join(log_dir, "application_debug.log"), mode='a')
-            ]
-        )
-
-        # Capture unhandled exceptions
-        def handle_unhandled_exception(exc_type, exc_value, exc_traceback):
-            if issubclass(exc_type, KeyboardInterrupt):
-                sys.__excepthook__(exc_type, exc_value, exc_traceback)
-                return
-            logging.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
-
-        sys.excepthook = handle_unhandled_exception
-    except Exception as e:
-        # Ensure setup_comprehensive_logging never fails the application startup
-        print(f"WARNING: Could not set up comprehensive logging: {e}")
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format="%(asctime)s [%(levelname)s] %(pathname)s:%(lineno)d - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-            handlers=[
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
-
-setup_comprehensive_logging()
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(pathname)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('/tmp/application.log', mode='a')
+    ]
+)
 logger = logging.getLogger(__name__)
-
-# === Log Environment Details ===
-def log_environment_details():
-    logger.info("=== Environment and System Details ===")
-    logger.info(f"Python Executable: {sys.executable}")
-    logger.info(f"Python Version: {sys.version}")
-    logger.info(f"Current Working Directory: {os.getcwd()}")
-
-    logger.info("Python Path:")
-    for path in sys.path:
-        logger.info(f"  {path}")
-
-    logger.info("Environment Variables:")
-    for key, value in os.environ.items():
-        if key.lower() not in ['password', 'secret', 'token', 'aws_secret_access_key']:
-            logger.info(f"  {key}: {value}")
-
-log_environment_details()
-
-# === Ensure Required Directories Exist ===
-try:
-    pid_dir = "/var/pids"
-    os.makedirs(pid_dir, exist_ok=True)
-    logger.info(f"PID directory set: {pid_dir}")
-except PermissionError:
-    pid_dir = "/tmp/pids"
-    os.makedirs(pid_dir, exist_ok=True)
-    logger.info(f"Could not use /var/pids, using {pid_dir} instead")
-except Exception as e:
-    logger.error(f"Error setting up PID directory: {e}")
 
 # === Helper Functions for Time Parsing / Calculation ===
 def parse_iso_datetime(datetime_str: str) -> datetime:
@@ -130,7 +67,7 @@ allowed_origins = [origin.strip() for origin in cors_origins.split(",")]
 logger.info(f"CORS Origins: {allowed_origins}")
 
 CORS(app,
-     resources={r"/*": {"origins": allowed_origins}},  # Changed from /api/* to /* to cover all routes
+     resources={r"/*": {"origins": allowed_origins}},
      supports_credentials=True,
      methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type", "Accept", "Origin"])
@@ -138,34 +75,18 @@ CORS(app,
 @app.after_request
 def add_cors_headers(response):
     origin = request.headers.get("Origin", "")
-    logger.debug(f"Processing response for origin: {origin}")
     
-    # Always add CORS headers to all responses if there's an Origin header
+    # Always add CORS headers for any request with an origin
     if origin:
         if origin in allowed_origins or "*" in allowed_origins:
             response.headers.set("Access-Control-Allow-Origin", origin)
         else:
             response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
         
+        # Always set these headers too
         response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
         response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
         response.headers.set("Access-Control-Allow-Credentials", "true")
-    
-    return response
-
-@app.after_request
-def log_cors_debug_info(response):
-    origin = request.headers.get("Origin", "None")
-    method = request.method
-    path = request.path
-    
-    logger.info(f"CORS Debug - Request: {method} {path} from Origin: {origin}")
-    logger.info(f"CORS Debug - Response Headers: {dict(response.headers)}")
-    
-    has_cors_origin = "Access-Control-Allow-Origin" in response.headers
-    logger.info(f"CORS Debug - Has Allow-Origin Header: {has_cors_origin}")
-    
-    logger.info(f"CORS Debug - Configured Allowed Origins: {allowed_origins}")
     
     return response
 
@@ -174,46 +95,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
     logger.info(f"Added {current_dir} to Python path")
-
-@app.route("/api/check-app-structure", methods=["GET"])
-def check_app_structure():
-    """Checks the application structure and files"""
-    app_structure = {
-        "current_directory": os.getcwd(),
-        "files_in_current_dir": os.listdir(),
-        "python_path": sys.path,
-        "auth_services_exists": os.path.exists("auth_services_routes.py"),
-        "auth_routes_exists": os.path.exists("auth_routes.py"),
-        "main_exists": os.path.exists("main.py"),
-        "wsgi_exists": os.path.exists("wsgi.py"),
-        "application_exists": os.path.exists("application.py"),
-        "modules": [m.__name__ for m in sys.modules.values() if hasattr(m, '__name__') and not m.__name__.startswith('_')]
-    }
-    
-    try:
-        import auth_services_routes
-        app_structure["auth_services_import"] = "success"
-        app_structure["auth_services_functions"] = dir(auth_services_routes)
-    except ImportError as e:
-        app_structure["auth_services_import"] = f"failed: {str(e)}"
-    
-    return jsonify(app_structure)
-
-@app.route("/debug-routes", methods=["GET"])
-def debug_routes():
-    """Debug endpoint to list all registered routes"""
-    routes = []
-    for rule in app.url_map.iter_rules():
-        routes.append({
-            "endpoint": rule.endpoint,
-            "methods": list(rule.methods),
-            "path": str(rule)
-        })
-    return jsonify({
-        "registered_routes": routes,
-        "blueprints": list(app.blueprints.keys()) if hasattr(app, 'blueprints') else [],
-        "blueprint_paths": {name: bp.url_prefix for name, bp in app.blueprints.items()} if hasattr(app, 'blueprints') else {}
-    })
 
 # Register Blueprints
 try:
@@ -243,21 +124,13 @@ try:
             logger.info("Successfully imported blueprints using file location")
         else:
             logger.error(f"Route files not found in: {current_dir}")
-            logger.info(f"Files in directory: {os.listdir(current_dir)}")
             raise ImportError("Route files not found")
     
     app.register_blueprint(auth_services_routes, url_prefix="/api/auth")
     app.register_blueprint(auth_routes, url_prefix="/api/user")
     
     logger.info("Successfully registered blueprints")
-    logger.info(f"Registered blueprints: {list(app.blueprints.keys())}")
     
-    routes = []
-    for rule in app.url_map.iter_rules():
-        routes.append(f"{rule.endpoint}: {rule.methods} - {rule}")
-    logger.info(f"Registered routes: {len(routes)}")
-    for route in routes:
-        logger.info(f"Route: {route}")
 except Exception as e:
     logger.error(f"Failed to register blueprints: {e}")
     logger.error(traceback.format_exc())
@@ -283,7 +156,6 @@ def get_cognito_public_keys():
         return {"keys": []}
     except Exception as e:
         logger.error(f"Unexpected error fetching Cognito public keys: {e}")
-        logger.error(traceback.format_exc())
         return {"keys": []}
 
 try:
@@ -315,27 +187,23 @@ def api_health_check():
         "timestamp": datetime.now(timezone.utc).isoformat()
     }), 200
 
-@app.route("/api/debug", methods=["GET"])
-def debug_route():
-    debug_info = {
-        "python_version": sys.version,
-        "current_directory": os.getcwd(),
-        "environment_variables": {
-            key: value for key, value in os.environ.items()
-            if key.lower() not in ['password', 'secret', 'token', 'aws_secret_access_key']
-        },
-        "python_path": sys.path,
-        "flask_debug": app.debug,
-        "cors_origins": allowed_origins,
-        "api_url": API_URL,
-        "running_processes": os.popen("ps aux | grep gunicorn").read().strip()
-    }
-    return jsonify(debug_info), 200
-
 @app.route("/api/simple-cors-test", methods=["GET", "OPTIONS", "POST"])
 def simple_cors_test():
     logger.info(f"Simple CORS test endpoint accessed - Method: {request.method}")
-    logger.info(f"Request headers: {dict(request.headers)}")
+    
+    if request.method == "OPTIONS":
+        logger.info("Handling OPTIONS preflight request")
+        return handle_preflight_request()
+    
+    response = jsonify({
+        "message": "CORS test successful!",
+        "method": request.method,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request_origin": request.headers.get("Origin", "None"),
+        "your_ip": request.remote_addr
+    })
+    
+    return response
 
 def handle_preflight_request():
     response = jsonify({"status": "success"})
@@ -353,38 +221,18 @@ def handle_preflight_request():
     response.headers.set("Access-Control-Max-Age", "3600")
     
     return response, 204
-    
-    if request.method == "OPTIONS":
-        logger.info("Handling OPTIONS preflight request")
-        return handle_preflight_request()
-    
-    response = jsonify({
-        "message": "CORS test successful!",
-        "method": request.method,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "request_origin": request.headers.get("Origin", "None"),
-        "your_ip": request.remote_addr
-    })
-    
-    logger.info(f"Returning simple test response with headers: {dict(response.headers)}")
-    return response
 
 @app.route("/api/auth/test-mfa-code", methods=["POST", "OPTIONS"])
 def direct_test_mfa_code():
     """Direct fallback for MFA code testing with improved time handling"""
     logger.info(f"test-mfa-code endpoint accessed with method: {request.method}")
-    logger.info(f"Request headers: {dict(request.headers)}")
     
     if request.method == "OPTIONS":
-        logger.info("Handling OPTIONS preflight request")
-        response = handle_preflight_request()
-        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
-        return response
+        return handle_preflight_request()
     
     try:
         try:
             data = request.json
-            logger.info(f"Request body: {data}")
         except Exception as e:
             logger.info(f"Could not parse request body: {e}")
             data = {}
@@ -398,7 +246,6 @@ def direct_test_mfa_code():
         
         # Use timezone-aware server time
         server_time = datetime.now(timezone.utc)
-        logger.info(f"Server time: {server_time.isoformat()}")
         
         # Parse client_time and adjusted_time with parse_iso_datetime
         time_diff_seconds = None
@@ -425,12 +272,6 @@ def direct_test_mfa_code():
                     logger.info(f"Retrieved secret from session: {actual_secret}")
                 except Exception as assoc_error:
                     logger.warning(f"Could not associate token with session: {assoc_error}")
-                    
-                # If we can't get a secret from the session, try to use a stored secret for the user
-                if not actual_secret:
-                    # This is where you would implement looking up the user's TOTP secret from a database
-                    # For security reasons, we're not implementing this here
-                    pass
             except Exception as secret_error:
                 logger.warning(f"Error retrieving secret: {secret_error}")
         
@@ -546,13 +387,9 @@ def direct_test_mfa_code():
 def direct_authenticate():
     """Direct fallback for authentication"""
     logger.info(f"Direct authenticate endpoint accessed - Method: {request.method}")
-    logger.info(f"Request headers: {dict(request.headers)}")
     
     if request.method == "OPTIONS":
-        logger.info("Handling OPTIONS preflight request")
-        response = handle_preflight_request()
-        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
-        return response
+        return handle_preflight_request()
     
     try:
         data = request.json
@@ -668,13 +505,9 @@ def direct_authenticate():
 def direct_respond_to_challenge():
     """Direct fallback for responding to auth challenges"""
     logger.info(f"Respond to challenge endpoint accessed - Method: {request.method}")
-    logger.info(f"Request headers: {dict(request.headers)}")
     
     if request.method == "OPTIONS":
-        logger.info("Handling OPTIONS preflight request")
-        response = handle_preflight_request()
-        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
-        return response
+        return handle_preflight_request()
     
     try:
         data = request.json
@@ -797,13 +630,9 @@ def direct_respond_to_challenge():
 def direct_setup_mfa():
     """Set up MFA for a user with access token"""
     logger.info(f"Setup MFA endpoint accessed - Method: {request.method}")
-    logger.info(f"Request headers: {dict(request.headers)}")
     
     if request.method == "OPTIONS":
-        logger.info("Handling OPTIONS preflight request")
-        response = handle_preflight_request()
-        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
-        return response
+        return handle_preflight_request()
     
     try:
         data = request.json
@@ -916,13 +745,9 @@ def direct_setup_mfa():
 def direct_confirm_mfa_setup():
     """Direct fallback for confirming MFA setup with improved time handling"""
     logger.info(f"Confirm MFA setup endpoint accessed - Method: {request.method}")
-    logger.info(f"Request headers: {dict(request.headers)}")
     
     if request.method == "OPTIONS":
-        logger.info("Handling OPTIONS preflight request")
-        response = handle_preflight_request()
-        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
-        return response
+        return handle_preflight_request()
     
     logger.info("Starting MFA Confirmation")
     
@@ -956,8 +781,6 @@ def direct_confirm_mfa_setup():
         
         if session:
             logger.info(f"Session token length: {len(session)}")
-            logger.info(f"First 20 chars of session: {session[:20] if len(session) > 20 else session}")
-            logger.info(f"Last 20 chars of session: {session[-20:] if len(session) > 20 else session}")
             
         logger.info(f"MFA setup parameters: username={username}, code length={len(code) if code else 0}, password provided={bool(password)}")
         
@@ -988,8 +811,6 @@ def direct_confirm_mfa_setup():
             logger.info(f"Got secret code: {secret_code}")
             if new_session:
                 logger.info(f"New session length after associate_software_token: {len(new_session)}")
-                logger.info(f"First 20 chars of new session: {new_session[:20] if len(new_session) > 20 else new_session}")
-                logger.info(f"Last 20 chars of new session: {new_session[-20:] if len(new_session) > 20 else new_session}")
             
             if not secret_code:
                 logger.error("Failed to get secret code from associate_software_token")
@@ -1046,10 +867,6 @@ def direct_confirm_mfa_setup():
                 verify_session = verify_response.get("Session")
                 
                 logger.info(f"MFA verification status: {status}")
-                if verify_session:
-                    logger.info(f"Session length after verify_software_token: {len(verify_session)}")
-                    logger.info(f"First 20 chars: {verify_session[:20] if len(verify_session) > 20 else verify_session}")
-                    logger.info(f"Last 20 chars: {verify_session[-20:] if len(verify_session) > 20 else verify_session}")
             except cognito_client.exceptions.CodeMismatchException as code_error:
                 logger.error(f"AWS rejected the code {code}: {code_error}")
                 
@@ -1122,10 +939,6 @@ def direct_confirm_mfa_setup():
                     
                     if final_auth_response.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
                         mfa_session = final_auth_response.get("Session")
-                        if mfa_session:
-                            logger.info(f"MFA challenge session length: {len(mfa_session)}")
-                            logger.info(f"First 20 chars: {mfa_session[:20] if len(mfa_session) > 20 else mfa_session}")
-                            logger.info(f"Last 20 chars: {mfa_session[-20:] if len(mfa_session) > 20 else mfa_session}")
                         
                         # Use the same code that worked earlier or generate a fresh one
                         totp = pyotp.TOTP(secret_code)
@@ -1238,13 +1051,9 @@ def direct_confirm_mfa_setup():
 def direct_verify_mfa():
     """Direct fallback for verifying MFA with improved time handling"""
     logger.info(f"Verify MFA endpoint accessed - Method: {request.method}")
-    logger.info(f"Request headers: {dict(request.headers)}")
     
     if request.method == "OPTIONS":
-        logger.info("Handling OPTIONS preflight request")
-        response = handle_preflight_request()
-        logger.info(f"Preflight response headers: {dict(response[0].headers)}")
-        return response
+        return handle_preflight_request()
     
     try:
         data = request.json
@@ -1257,7 +1066,6 @@ def direct_verify_mfa():
         username = data.get('username')
         client_time_str = data.get('client_time')
         adjusted_time_str = data.get('adjusted_time')
-        skip_code_generation = data.get('skip_code_generation', False)  # New flag to skip code generation
         
         server_time = datetime.now(timezone.utc)
         logger.info(f"Server time: {server_time.isoformat()}")
@@ -1277,8 +1085,6 @@ def direct_verify_mfa():
         logger.info(f"MFA verification for user: {username}")
         if session:
             logger.info(f"Session token length: {len(session)}")
-            logger.info(f"First 20 chars of session: {session[:20] if len(session) > 20 else session}")
-            logger.info(f"Last 20 chars of session: {session[-20:] if len(session) > 20 else session}")
         
         if not code or not isinstance(code, str):
             logger.error(f"Invalid code format")
@@ -1303,50 +1109,47 @@ def direct_verify_mfa():
         secret_code = None
         valid_codes = []
         
-        # For users who already have MFA set up, we should NOT try to generate a code
-        # Only try this for new MFA setup
-        if not skip_code_generation:
+        try:
+            # Try to generate a code from the session
+            logger.info("Attempting to generate MFA code from session")
             try:
-                # Try to generate a code from the session
-                logger.info("Attempting to generate MFA code from session (for new MFA setup)")
-                try:
-                    associate_response = cognito_client.associate_software_token(
-                        Session=session
-                    )
-                    secret_code = associate_response.get("SecretCode")
+                associate_response = cognito_client.associate_software_token(
+                    Session=session
+                )
+                secret_code = associate_response.get("SecretCode")
+                
+                if secret_code:
+                    totp = pyotp.TOTP(secret_code)
                     
-                    if secret_code:
-                        totp = pyotp.TOTP(secret_code)
+                    # Generate codes for multiple time windows
+                    for i in range(-5, 6):  # ±5 time windows
+                        window_time = server_time + timedelta(seconds=30 * i)
+                        valid_codes.append(totp.at(window_time))
+                    
+                    current_code = totp.now()
+                    logger.info(f"Generated server code: {current_code}")
+                    logger.info(f"Valid codes: {valid_codes}")
+                    
+                    # If the user code doesn't match any valid code, note it but proceed
+                    if code not in valid_codes:
+                        logger.warning(f"User code {code} doesn't match any valid time window")
+                    else:
+                        logger.info(f"User code {code} matches a valid time window")
+                    
+                    # Check adjusted time code if provided
+                    if adjusted_time_str:
+                        adjusted_dt = parse_iso_datetime(adjusted_time_str)
+                        adjusted_code = totp.at(adjusted_dt)
+                        logger.info(f"Adjusted time code: {adjusted_code}")
                         
-                        # Generate codes for multiple time windows
-                        for i in range(-5, 6):  # ±5 time windows
-                            window_time = server_time + timedelta(seconds=30 * i)
-                            valid_codes.append(totp.at(window_time))
-                        
-                        current_code = totp.now()
-                        logger.info(f"Generated server code: {current_code}")
-                        logger.info(f"Valid codes: {valid_codes}")
-                        
-                        # If the user code doesn't match any valid code, note it but proceed
-                        if code not in valid_codes:
-                            logger.warning(f"User code {code} doesn't match any valid time window")
-                        else:
-                            logger.info(f"User code {code} matches a valid time window")
-                        
-                        # Check adjusted time code if provided
-                        if adjusted_time_str:
-                            adjusted_dt = parse_iso_datetime(adjusted_time_str)
-                            adjusted_code = totp.at(adjusted_dt)
-                            logger.info(f"Adjusted time code: {adjusted_code}")
-                            
-                            if code == adjusted_code:
-                                logger.info("User code matches adjusted time code")
-                            elif adjusted_code not in valid_codes:
-                                valid_codes.append(adjusted_code)
-                except Exception as e:
-                    logger.info(f"Error on retrieval/code generation (normal for existing MFA users): {e}")
+                        if code == adjusted_code:
+                            logger.info("User code matches adjusted time code")
+                        elif adjusted_code not in valid_codes:
+                            valid_codes.append(adjusted_code)
             except Exception as e:
-                logger.warning(f"Code generation failed but proceeding with user-provided code: {e}")
+                logger.info(f"Error on code generation (normal for existing MFA users): {e}")
+        except Exception as e:
+            logger.warning(f"Code generation failed but proceeding with user-provided code: {e}")
         
         try:
             CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
@@ -1481,47 +1284,3 @@ def direct_verify_mfa():
         logger.error(f"Error in direct_verify_mfa: {e}")
         logger.error(traceback.format_exc())
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
-
-# Debug endpoint to validate MFA codes against multiple time windows
-@app.route("/api/auth/debug-mfa", methods=["POST"])
-def debug_mfa_endpoint():
-    """Debug endpoint to validate MFA codes against multiple time windows"""
-    try:
-        data = request.json
-        secret = data.get('secret', '')
-        code = data.get('code', '')
-        
-        if not secret:
-            return jsonify({"error": "Secret is required"}), 400
-            
-        # Create a TOTP object
-        totp = pyotp.TOTP(secret)
-        current_time = datetime.now(timezone.utc)
-        
-        # Generate codes for multiple time windows
-        codes = []
-        for i in range(-10, 11):  # -10 to +10 windows (30 seconds each)
-            window_time = current_time + timedelta(seconds=i*30)
-            codes.append({
-                "window": i,
-                "time": window_time.isoformat(),
-                "code": totp.at(window_time)
-            })
-            
-        # Check if provided code matches any window
-        matched_window = None
-        for window in codes:
-            if window["code"] == code:
-                matched_window = window
-                break
-                
-        return jsonify({
-            "current_time": current_time.isoformat(),
-            "time_window_position": f"{int(time.time()) % 30}/30 seconds",
-            "provided_code": code,
-            "matches_window": matched_window,
-            "valid_codes": codes
-        })
-    except Exception as e:
-        logger.error(f"Error in debug_mfa_endpoint: {e}")
-        return jsonify({"error": str(e)}), 500
