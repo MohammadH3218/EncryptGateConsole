@@ -5,7 +5,7 @@ from auth_services_routes import (
     confirm_signup,
     handle_cors_preflight
 )
-import logging
+import logging #test
 import os
 import traceback
 
