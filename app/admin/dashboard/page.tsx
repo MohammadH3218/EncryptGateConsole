@@ -10,7 +10,7 @@ import { AssignmentsOverview } from "@/components/dashboard/assignments-overview
 import { useRouter } from "next/navigation"
 import { AssignedDetections } from "@/components/dashboard/assigned-detections"
 import type { CompletedDetection } from "@/components/dashboard/completed-detections" 
-// Mock data for dashboard
+// test data
 const mockDashboardStats = {
   totalIncomingEmails: 1245,
   totalOutgoingEmails: 876,
