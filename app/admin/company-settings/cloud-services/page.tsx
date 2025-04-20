@@ -48,12 +48,12 @@ export default function CloudServicesPage() {
   const { toast } = useToast()
 
   // Check if user is logged in
-  useEffect(() => {
+   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (!token) {
       router.push("/login")
     }
-  }, [router])
+  }, [router]) 
 
   const handleConnect = () => {
     setIsConnecting(true)

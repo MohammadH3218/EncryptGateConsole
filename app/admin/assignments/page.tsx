@@ -69,11 +69,11 @@ export default function AssignmentsPage() {
   const router = useRouter()
 
   // Check if user is logged in
-  useEffect(() => {
+   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (!token) {
       router.push("/login")
-    }
+    } 
 
     // Load in-progress investigations
     const investigations = getInProgressInvestigations()

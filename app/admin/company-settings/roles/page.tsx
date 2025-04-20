@@ -134,11 +134,11 @@ export default function RolesPage() {
   const { toast } = useToast()
 
   // Check if user is logged in
-  useEffect(() => {
+   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (!token) {
       router.push("/login")
-    }
+    } 
 
     // If userId is provided, find the user and open the edit dialog
     if (userId) {

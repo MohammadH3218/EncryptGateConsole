@@ -86,7 +86,7 @@ export default function UserManagementPage() {
     if (!token) {
       router.push("/login")
     }
-  }, [router])
+  }, [router]) 
 
   const filteredUsers = users.filter(
     (user) =>

@@ -165,11 +165,11 @@ export default function AdminInvestigatePage() {
   const visitedTabsRef = useRef<Set<string>>(new Set(["overview"]))
 
   // Check if user is logged in and load investigation state
-  useEffect(() => {
+   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (!token) {
       router.push("/login")
-      return
+      return 
     }
 
     // Load investigation state if it exists

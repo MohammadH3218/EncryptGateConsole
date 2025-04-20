@@ -11,12 +11,12 @@ export default function DetectionsPage() {
   const router = useRouter()
 
   // Check if user is logged in
-  useEffect(() => {
+   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (!token) {
       router.push("/login")
     }
-  }, [router])
+  }, [router]) 
 
   const handleAssign = (id: number, assignedTo: string[], action: "assign" | "unassign") => {
     // In a real app, this would call an API to update the detection

@@ -13,7 +13,7 @@ export default function AdminAllEmailsPage() {
   const employeeFilter = searchParams.get("employee")
 
   // Check if user is logged in
-  useEffect(() => {
+   useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (!token) {
       router.push("/login")
