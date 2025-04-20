@@ -728,10 +728,15 @@ export default function LoginPage() {
           if (responseData.detail.includes("ExpiredCodeException") || 
               responseData.detail.includes("already been used")) {
             console.log("MFA appears to have been set up successfully but final auth step failed")
-            setSuccessMessage("MFA setup successful. Please log in with your new credentials.")
+            // This is actually a success case - MFA setup worked
             setShowMFASetup(false)
             localStorage.removeItem("temp_access_token")
             sessionStorage.removeItem("temp_password")
+            
+            // Show a more detailed success message
+            alert("MFA setup successful! You will now need to log in again with your new password and use your authenticator app to generate verification codes.")
+            setSuccessMessage("MFA setup successful. Please log in with your new credentials.")
+            
             setTimeout(() => {
               setIsLoading(false)
             }, 1000)
@@ -774,7 +779,7 @@ export default function LoginPage() {
     }
   }
 
-  // Updated MFA verification function with better error handling and automatic retries
+  // Updated MFA verification function using a simpler approach like the MFA setup
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.")
@@ -792,42 +797,16 @@ export default function LoginPage() {
     setIsLoading(true)
     
     try {
-      // First get the server time and valid codes
-      const testMfaResponse = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/test-mfa-code`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            secret: "AAAAAAAAAA", // Just to get server time
-            client_time: new Date().toISOString(),
-          }),
-        }
-      )
+      // Synchronize time with server first
+      await fetchServerTime(apiBaseUrl)
       
-      const timeData = await testMfaResponse.json()
-      let serverGeneratedCode = timeData.current_code
-      
-      if (timeData.server_time) {
-        // Update the local time offset for better synchronization
-        const serverDate = new Date(timeData.server_time)
-        const clientDate = new Date()
-        const timeOffset = serverDate.getTime() - clientDate.getTime()
-        localStorage.setItem("server_time_offset", timeOffset.toString())
-        console.log(`Time offset updated: ${timeOffset}ms`)
-      }
-
       // Get adjusted time for verification
       const adjustedTime = getAdjustedTime()
       const clientTime = new Date().toISOString()
 
       console.log(`Verifying MFA code: ${mfaCode}`)
 
-      // Try the user-provided code first
+      // Try with the user's code first
       try {
         const response = await fetchWithRetry(
           `${apiBaseUrl}/api/auth/verify-mfa`,
@@ -861,69 +840,77 @@ export default function LoginPage() {
           sessionStorage.removeItem("temp_password")
           router.push("/admin/dashboard")
           return
-        } else {
-          // Save any server codes for potential retry
-          if (data.serverGeneratedCode || data.currentValidCode) {
-            serverGeneratedCode = data.serverGeneratedCode || data.currentValidCode
-          }
-          if (data.validCodes) {
-            setMfaRecoveryCodes(Array.isArray(data.validCodes) ? data.validCodes : [data.validCodes])
-          }
-          throw new Error(data.detail || "Code verification failed")
         }
-      } catch (userCodeError) {
-        // If user code failed and we have a server code, try with that
-        if (serverGeneratedCode) {
-          setSuccessMessage(`Trying with server-generated code...`)
+        
+        // If error response contains valid codes, try those
+        if (data.serverGeneratedCode || data.currentValidCode || 
+            (data.validCodes && Array.isArray(data.validCodes) && data.validCodes.length > 0)) {
           
-          const serverCodeResponse = await fetchWithRetry(
-            `${apiBaseUrl}/api/auth/verify-mfa`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-                Origin: window.location.origin,
-              },
-              body: JSON.stringify({
-                code: serverGeneratedCode,
-                session,
-                username: email,
-                client_time: clientTime,
-                adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
-              }),
-              mode: "cors",
-              credentials: "include",
-            },
-            2
-          )
+          // Try server-generated code if available
+          const serverCode = data.serverGeneratedCode || data.currentValidCode
+          const validCodes = Array.isArray(data.validCodes) ? data.validCodes : []
           
-          const serverCodeData = await serverCodeResponse.json()
-          
-          if (serverCodeResponse.ok) {
-            // Success with server code
-            localStorage.setItem("access_token", serverCodeData.access_token || "")
-            localStorage.setItem("id_token", serverCodeData.id_token || "")
-            localStorage.setItem("refresh_token", serverCodeData.refresh_token || "")
-            sessionStorage.removeItem("temp_password")
-            router.push("/admin/dashboard")
-            return
-          } else {
-            // Both user code and server code failed
-            throw new Error("MFA verification failed with both user and server codes. Please try again.")
+          // Store recovery codes for UI display
+          if (validCodes.length > 0) {
+            setMfaRecoveryCodes(validCodes)
           }
+          
+          // Try with server code if available
+          if (serverCode) {
+            setSuccessMessage(`Trying with server-generated code...`)
+            
+            const retryResponse = await fetchWithRetry(
+              `${apiBaseUrl}/api/auth/verify-mfa`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Accept: "application/json",
+                  Origin: window.location.origin,
+                },
+                body: JSON.stringify({
+                  code: serverCode,
+                  session,
+                  username: email,
+                  client_time: clientTime,
+                  adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
+                }),
+                mode: "cors",
+                credentials: "include",
+              }
+            )
+            
+            if (retryResponse.ok) {
+              const retryData = await retryResponse.json()
+              localStorage.setItem("access_token", retryData.access_token || "")
+              localStorage.setItem("id_token", retryData.id_token || "")
+              localStorage.setItem("refresh_token", retryData.refresh_token || "")
+              sessionStorage.removeItem("temp_password")
+              router.push("/admin/dashboard")
+              return
+            }
+          }
+        }
+        
+        // If we reach here, all code attempts failed
+        throw new Error(data.detail || "Code verification failed. Please try again with a new code.")
+      } catch (verificationError: any) {
+        // Handle known error types - CodeMismatchException is similar to ExpiredCodeException
+        if (verificationError.message && 
+            (verificationError.message.includes("CodeMismatchException") ||
+             verificationError.message.includes("Invalid code"))) {
+          throw new Error("Verification code doesn't match. Please enter a new code from your authenticator app.")
         } else {
-          // No server code available, re-throw original error
-          throw userCodeError
+          throw verificationError
         }
       }
     } catch (error: any) {
-      const errorMessage = error.message || "MFA verification failed. Please try again."
+      const errorMessage = error.message || "MFA verification failed. Please try again with a new code."
       setError(errorMessage)
       
       // If we have recovery codes, show them in the UI
       if (mfaRecoveryCodes.length > 0) {
-        setError(`${errorMessage} Please try one of the suggested codes below.`)
+        setError(`${errorMessage} You may try one of these alternative codes:`)
       }
     } finally {
       setIsLoading(false)
@@ -1186,6 +1173,13 @@ export default function LoginPage() {
                 </ol>
               </AlertDescription>
             </Alert>
+            {error && error.includes("ExpiredCodeException") && (
+              <Alert>
+                <AlertDescription className="text-sm">
+                  Your MFA has been set up successfully, but the final authentication step failed. This is normal. Please close this dialog and log in again with your new credentials.
+                </AlertDescription>
+              </Alert>
+            )}
             {qrCodeUrl && (
               <div className="flex flex-col items-center justify-center space-y-2">
                 <Label>
@@ -1259,7 +1253,7 @@ export default function LoginPage() {
                 </div>
               )}
             </div>
-            {error && (
+            {error && !error.includes("ExpiredCodeException") && (
               <Alert variant="destructive">
                 <AlertDescription className="text-sm">
                   {error}
