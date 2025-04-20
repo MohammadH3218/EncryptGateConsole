@@ -156,12 +156,14 @@ export default function LoginPage() {
         otpauthUrl
       )}`
       setQrCodeUrl(qrCodeApiUrl)
-      getServerGeneratedCodes()
+      
+      // Store valid codes for recovery but don't auto-populate
+      getServerGeneratedCodes(false)
     }
   }, [mfaSecretCode, email])
 
   // Get server-generated MFA codes with time window information
-  const getServerGeneratedCodes = async () => {
+  const getServerGeneratedCodes = async (populateCode = false) => {
     if (!apiBaseUrl || !mfaSecretCode) return
 
     try {
@@ -186,7 +188,10 @@ export default function LoginPage() {
       const result = await response.json()
 
       if (result.current_code) {
-        setSetupMfaCode(result.current_code)
+        // Only set the code if populateCode is true
+        if (populateCode) {
+          setSetupMfaCode(result.current_code)
+        }
 
         if (result.time_windows) {
           setValidMfaCodes(result.time_windows.map((w: any) => w.code))
@@ -468,12 +473,6 @@ export default function LoginPage() {
               if (mfaData.validCodes) {
                 setValidMfaCodes(Array.isArray(mfaData.validCodes) ? mfaData.validCodes : [mfaData.validCodes])
               }
-
-              if (mfaData.currentCode) {
-                setSetupMfaCode(mfaData.currentCode)
-              } else if (mfaData.currentValidCode) {
-                setSetupMfaCode(mfaData.currentValidCode)
-              }
               
               setShowMFASetup(true)
               return
@@ -601,12 +600,6 @@ export default function LoginPage() {
               if (mfaData.validCodes) {
                 setValidMfaCodes(Array.isArray(mfaData.validCodes) ? mfaData.validCodes : [mfaData.validCodes])
               }
-
-              if (mfaData.currentCode) {
-                setSetupMfaCode(mfaData.currentCode)
-              } else if (mfaData.currentValidCode) {
-                setSetupMfaCode(mfaData.currentValidCode)
-              }
               
               setShowMFASetup(true)
               return
@@ -668,30 +661,15 @@ export default function LoginPage() {
       return
     }
 
+    // Validate the code input
+    if (!setupMfaCode || setupMfaCode.length !== 6 || !setupMfaCode.match(/^\d{6}$/)) {
+      setError("Please enter the 6-digit verification code from your authenticator app")
+      return
+    }
+
     setIsLoading(true)
     setError("")
     setSuccessMessage("")
-
-    // First ensure we have a valid MFA code
-    try {
-      // If the code is empty or not 6 digits, get a server-generated code
-      if (!setupMfaCode || setupMfaCode.length !== 6 || !setupMfaCode.match(/^\d{6}$/)) {
-        const serverCode = await synchronizeTimeAndGetCode()
-        if (serverCode) {
-          setSetupMfaCode(serverCode)
-          console.log(`Using server-generated code: ${serverCode}`)
-          setSuccessMessage("Using server-generated verification code...")
-        } else {
-          setError("Failed to get verification code from server. Please try again.")
-          setIsLoading(false)
-          return
-        }
-      }
-    } catch (error) {
-      setError("Failed to get verification code. Please try again.")
-      setIsLoading(false)
-      return
-    }
 
     console.log("Starting MFA setup verification")
     const savedPassword = sessionStorage.getItem("temp_password") || ""
@@ -746,28 +724,6 @@ export default function LoginPage() {
       if (!response.ok) {
         // Handle error responses with suggested codes
         if (response.status === 400 && responseData.detail) {
-          if (responseData.currentValidCode || responseData.serverGeneratedCode) {
-            // Use the server-provided code for automatic retry
-            const validCode = responseData.currentValidCode || responseData.serverGeneratedCode
-            setSetupMfaCode(validCode || "")
-
-            // If we have valid codes, store them
-            if (responseData.validCodes) {
-              setValidMfaCodes(responseData.validCodes)
-            }
-
-            console.log(`Retrying with correct code: ${validCode}`)
-            setError("")
-            setSuccessMessage("Using correct verification code...")
-
-            // Small delay then retry
-            setTimeout(() => {
-              setIsLoading(false)
-              handleMFASetup()
-            }, 1000)
-            return
-          }
-
           // Handle ExpiredCodeException - this means the MFA setup was actually successful
           if (responseData.detail.includes("ExpiredCodeException") || 
               responseData.detail.includes("already been used")) {
@@ -813,27 +769,7 @@ export default function LoginPage() {
       const errorMessage = error.message || "Failed to set up MFA"
       setError(errorMessage)
       console.error("MFA setup error:", errorMessage)
-
-      // Try automated recovery
-      if (errorMessage.includes("code") || errorMessage.includes("verification")) {
-        // Try to get a fresh code from the server
-        try {
-          const freshCode = await synchronizeTimeAndGetCode()
-          if (freshCode) {
-            setSetupMfaCode(freshCode)
-            setError(`Verification failed. Trying with server-generated code: ${freshCode}`)
-
-            setTimeout(() => {
-              setIsLoading(false)
-              handleMFASetup()
-            }, 1500)
-            return
-          }
-        } catch (codeError) {
-          setError("Verification failed. Please try again with a new code.")
-        }
-      }
-
+    } finally {
       setIsLoading(false)
     }
   }
@@ -856,87 +792,140 @@ export default function LoginPage() {
     setIsLoading(true)
     
     try {
-      // Synchronize time with server first
-      await fetchServerTime(apiBaseUrl)
+      // First get the server time and valid codes
+      const testMfaResponse = await fetchWithRetry(
+        `${apiBaseUrl}/api/auth/test-mfa-code`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            secret: "AAAAAAAAAA", // Just to get server time
+            client_time: new Date().toISOString(),
+          }),
+        }
+      )
       
+      const timeData = await testMfaResponse.json()
+      let serverGeneratedCode = timeData.current_code
+      
+      if (timeData.server_time) {
+        // Update the local time offset for better synchronization
+        const serverDate = new Date(timeData.server_time)
+        const clientDate = new Date()
+        const timeOffset = serverDate.getTime() - clientDate.getTime()
+        localStorage.setItem("server_time_offset", timeOffset.toString())
+        console.log(`Time offset updated: ${timeOffset}ms`)
+      }
+
       // Get adjusted time for verification
       const adjustedTime = getAdjustedTime()
       const clientTime = new Date().toISOString()
 
       console.log(`Verifying MFA code: ${mfaCode}`)
 
-      const response = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/verify-mfa`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Origin: window.location.origin,
-          },
-          body: JSON.stringify({
-            code: mfaCode,
-            session,
-            username: email,
-            client_time: clientTime,
-            adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
-          }),
-          mode: "cors",
-          credentials: "include",
-        },
-        2
-      )
-
-      let data: LoginResponse
+      // Try the user-provided code first
       try {
-        data = await response.json()
-        console.log(`MFA verification response status: ${response.status}`)
-      } catch (jsonError) {
-        throw new Error("Invalid response from server. Please try again.")
-      }
+        const response = await fetchWithRetry(
+          `${apiBaseUrl}/api/auth/verify-mfa`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+              Origin: window.location.origin,
+            },
+            body: JSON.stringify({
+              code: mfaCode,
+              session,
+              username: email,
+              client_time: clientTime,
+              adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
+            }),
+            mode: "cors",
+            credentials: "include",
+          },
+          2
+        )
 
-      if (!response.ok) {
-        if (data.serverGeneratedCode || data.currentValidCode || data.validCodes) {
-          setSuccessMessage("Trying with server-suggested code...")
-          
-          // Store any recovery codes
+        const data = await response.json()
+        
+        if (response.ok) {
+          // Success with user code
+          localStorage.setItem("access_token", data.access_token || "")
+          localStorage.setItem("id_token", data.id_token || "")
+          localStorage.setItem("refresh_token", data.refresh_token || "")
+          sessionStorage.removeItem("temp_password")
+          router.push("/admin/dashboard")
+          return
+        } else {
+          // Save any server codes for potential retry
+          if (data.serverGeneratedCode || data.currentValidCode) {
+            serverGeneratedCode = data.serverGeneratedCode || data.currentValidCode
+          }
           if (data.validCodes) {
             setMfaRecoveryCodes(Array.isArray(data.validCodes) ? data.validCodes : [data.validCodes])
           }
-          
-          // Try server-generated code if available
-          const serverCode = data.serverGeneratedCode || data.currentValidCode
-          if (serverCode) {
-            setMfaCode(serverCode)
-            
-            // Small delay then retry
-            setTimeout(() => {
-              setIsLoading(false)
-              handleMFASubmit()
-            }, 1000)
-            return
-          }
+          throw new Error(data.detail || "Code verification failed")
         }
-        
-        throw new Error(data?.detail || "MFA verification failed. Please try again with a new code.")
+      } catch (userCodeError) {
+        // If user code failed and we have a server code, try with that
+        if (serverGeneratedCode) {
+          setSuccessMessage(`Trying with server-generated code...`)
+          
+          const serverCodeResponse = await fetchWithRetry(
+            `${apiBaseUrl}/api/auth/verify-mfa`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                Origin: window.location.origin,
+              },
+              body: JSON.stringify({
+                code: serverGeneratedCode,
+                session,
+                username: email,
+                client_time: clientTime,
+                adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
+              }),
+              mode: "cors",
+              credentials: "include",
+            },
+            2
+          )
+          
+          const serverCodeData = await serverCodeResponse.json()
+          
+          if (serverCodeResponse.ok) {
+            // Success with server code
+            localStorage.setItem("access_token", serverCodeData.access_token || "")
+            localStorage.setItem("id_token", serverCodeData.id_token || "")
+            localStorage.setItem("refresh_token", serverCodeData.refresh_token || "")
+            sessionStorage.removeItem("temp_password")
+            router.push("/admin/dashboard")
+            return
+          } else {
+            // Both user code and server code failed
+            throw new Error("MFA verification failed with both user and server codes. Please try again.")
+          }
+        } else {
+          // No server code available, re-throw original error
+          throw userCodeError
+        }
       }
-
-      // Success - store tokens and redirect
-      localStorage.setItem("access_token", data.access_token || "")
-      localStorage.setItem("id_token", data.id_token || "")
-      localStorage.setItem("refresh_token", data.refresh_token || "")
-      sessionStorage.removeItem("temp_password")
-
-      router.push("/admin/dashboard")
     } catch (error: any) {
       const errorMessage = error.message || "MFA verification failed. Please try again."
       setError(errorMessage)
       
       // If we have recovery codes, show them in the UI
       if (mfaRecoveryCodes.length > 0) {
-        setError(`${errorMessage} Please try one of the suggested codes.`)
+        setError(`${errorMessage} Please try one of the suggested codes below.`)
       }
-      
+    } finally {
       setIsLoading(false)
     }
   }
@@ -1188,8 +1177,7 @@ export default function LoginPage() {
                     QR code below
                   </li>
                   <li>
-                    The verification code will be
-                    automatically populated below
+                    Enter the 6-digit code from your authenticator app
                   </li>
                   <li>
                     Click "Verify & Complete" to finish the
@@ -1233,7 +1221,7 @@ export default function LoginPage() {
               </Label>
               <Input
                 id="setup-mfa-code"
-                placeholder="000000"
+                placeholder="Enter 6-digit code from your authenticator app"
                 value={setupMfaCode}
                 onChange={(e) =>
                   setSetupMfaCode(
@@ -1245,16 +1233,12 @@ export default function LoginPage() {
                 maxLength={6}
                 className="text-center text-2xl tracking-widest"
               />
-              <p className="text-xs text-center text-muted-foreground">
-                A server-generated verification code has
-                been provided. Click verify to continue.
-              </p>
               {validMfaCodes.length > 0 && (
                 <div className="text-xs text-center text-muted-foreground mt-2">
                   <details>
-                    <summary>Need a different code?</summary>
+                    <summary>Need help with verification codes?</summary>
                     <div className="mt-2 p-2 bg-muted rounded">
-                      <p>These codes may also work:</p>
+                      <p>If your code isn't being accepted, you may try one of these codes:</p>
                       <div className="flex flex-wrap gap-2 mt-1 justify-center">
                         {validMfaCodes
                           .slice(0, 5)
@@ -1331,7 +1315,7 @@ export default function LoginPage() {
               </Label>
               <Input
                 id="mfa-code"
-                placeholder="000000"
+                placeholder="Enter 6-digit code"
                 value={mfaCode}
                 onChange={(e) =>
                   setMfaCode(
