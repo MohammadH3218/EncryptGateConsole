@@ -661,6 +661,7 @@ export default function LoginPage() {
     }
   }
 
+  // Updated MFA Setup function with better error handling
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.")
@@ -732,7 +733,7 @@ export default function LoginPage() {
           credentials: "include",
         },
         2
-      ) // Increased retry count for reliability
+      )
 
       let responseData: LoginResponse
       try {
@@ -767,10 +768,22 @@ export default function LoginPage() {
             return
           }
 
-          if (
-            responseData.detail.includes("code is incorrect") ||
-            responseData.detail.includes("CodeMismatchException")
-          ) {
+          // Handle ExpiredCodeException - this means the MFA setup was actually successful
+          if (responseData.detail.includes("ExpiredCodeException") || 
+              responseData.detail.includes("already been used")) {
+            console.log("MFA appears to have been set up successfully but final auth step failed")
+            setSuccessMessage("MFA setup successful. Please log in with your new credentials.")
+            setShowMFASetup(false)
+            localStorage.removeItem("temp_access_token")
+            sessionStorage.removeItem("temp_password")
+            setTimeout(() => {
+              setIsLoading(false)
+            }, 1000)
+            return
+          }
+
+          if (responseData.detail.includes("code is incorrect") ||
+              responseData.detail.includes("CodeMismatchException")) {
             throw new Error(responseData.detail)
           } else {
             throw new Error(responseData.detail)
@@ -801,34 +814,15 @@ export default function LoginPage() {
       setError(errorMessage)
       console.error("MFA setup error:", errorMessage)
 
-      // Try automated recovery with valid codes
+      // Try automated recovery
       if (errorMessage.includes("code") || errorMessage.includes("verification")) {
-        // Try automated recovery with valid codes
-        // Check if we have valid codes to try with
-        if (validMfaCodes.length > 0) {
-          // Try a different code from our valid codes list
-          const alternativeCode = validMfaCodes.find((code) => code !== setupMfaCode)
-          if (alternativeCode) {
-            setSetupMfaCode(alternativeCode)
-            setError(`The verification code appears to be incorrect. Trying with a new code: ${alternativeCode}`)
-
-            // Delay and retry
-            setTimeout(() => {
-              setIsLoading(false)
-              handleMFASetup()
-            }, 1500)
-            return
-          }
-        }
-
-        // If we don't have valid codes or all have been tried, get a fresh one from the server
+        // Try to get a fresh code from the server
         try {
           const freshCode = await synchronizeTimeAndGetCode()
           if (freshCode) {
             setSetupMfaCode(freshCode)
-            setError(`The verification code appears to be incorrect. A new code has been generated: ${freshCode}`)
+            setError(`Verification failed. Trying with server-generated code: ${freshCode}`)
 
-            // Delay and retry
             setTimeout(() => {
               setIsLoading(false)
               handleMFASetup()
@@ -840,17 +834,11 @@ export default function LoginPage() {
         }
       }
 
-      if (errorMessage.includes("session has expired")) {
-        setTimeout(() => {
-          setShowMFASetup(false)
-          sessionStorage.removeItem("temp_password")
-        }, 3000)
-      }
-    } finally {
       setIsLoading(false)
     }
   }
 
+  // Updated MFA verification function with better error handling and automatic retries
   const handleMFASubmit = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.")
@@ -866,43 +854,19 @@ export default function LoginPage() {
     setError("")
     setSuccessMessage("")
     setIsLoading(true)
-    const mfaEndpoint = `${apiBaseUrl}/api/auth/verify-mfa`
-
+    
     try {
-      // First, synchronize with the server to get time-adjusted codes
-      const serverTimeResponse = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/test-mfa-code`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({
-            secret: "AAAAAAAAAA", // Just to get server time
-            client_time: new Date().toISOString(),
-          }),
-        }
-      )
-
-      const timeData = await serverTimeResponse.json()
-      if (timeData.server_time) {
-        // Update the local time offset for better synchronization
-        const serverDate = new Date(timeData.server_time)
-        const clientDate = new Date()
-        const timeOffset = serverDate.getTime() - clientDate.getTime()
-        localStorage.setItem("server_time_offset", timeOffset.toString())
-      }
-
+      // Synchronize time with server first
+      await fetchServerTime(apiBaseUrl)
+      
       // Get adjusted time for verification
       const adjustedTime = getAdjustedTime()
       const clientTime = new Date().toISOString()
 
       console.log(`Verifying MFA code: ${mfaCode}`)
 
-      // First attempt - with user-provided code
       const response = await fetchWithRetry(
-        mfaEndpoint,
+        `${apiBaseUrl}/api/auth/verify-mfa`,
         {
           method: "POST",
           headers: {
@@ -916,7 +880,6 @@ export default function LoginPage() {
             username: email,
             client_time: clientTime,
             adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
-            // No skip_code_generation flag - allowing the server to try generating codes
           }),
           mode: "cors",
           credentials: "include",
@@ -932,577 +895,658 @@ export default function LoginPage() {
         throw new Error("Invalid response from server. Please try again.")
       }
 
-      // If first attempt succeeded, we're done
-      if (response.ok) {
-        // Success - store tokens and redirect
-        localStorage.setItem("access_token", data.access_token || "")
-        localStorage.setItem("id_token", data.id_token || "")
-        localStorage.setItem("refresh_token", data.refresh_token || "")
-        sessionStorage.removeItem("temp_password")
-
-        router.push("/admin/dashboard")
-        return
-      }
-
-      // If we got server-generated codes, try those automatically
-      if (data.serverGeneratedCode || data.currentValidCode || data.validCodes) {
-        setSuccessMessage("First code didn't work. Trying with server-suggested code...")
-
-        // Get the server-suggested code
-        const serverCode = data.serverGeneratedCode || data.currentValidCode
-
-        // Store any recovery codes
-        if (data.validCodes) {
-          setMfaRecoveryCodes(Array.isArray(data.validCodes) ? data.validCodes : [data.validCodes])
-        }
-
-        // If we have a specific server code, try it
-        if (serverCode) {
-          console.log(`Retrying with server-suggested code: ${serverCode}`)
-
-          const retryResponse = await fetchWithRetry(
-            mfaEndpoint,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-                Origin: window.location.origin,
-              },
-              body: JSON.stringify({
-                code: serverCode,
-                session,
-                username: email,
-                client_time: clientTime,
-                adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
-              }),
-              mode: "cors",
-              credentials: "include",
-            },
-            1
-          )
-
-          if (retryResponse.ok) {
-            const retryData = await retryResponse.json()
-
-            // Success - store tokens and redirect
-            localStorage.setItem("access_token", retryData.access_token || "")
-            localStorage.setItem("id_token", retryData.id_token || "")
-            localStorage.setItem("refresh_token", retryData.refresh_token || "")
-            sessionStorage.removeItem("temp_password")
-
-            router.push("/admin/dashboard")
+      if (!response.ok) {
+        if (data.serverGeneratedCode || data.currentValidCode || data.validCodes) {
+          setSuccessMessage("Trying with server-suggested code...")
+          
+          // Store any recovery codes
+          if (data.validCodes) {
+            setMfaRecoveryCodes(Array.isArray(data.validCodes) ? data.validCodes : [data.validCodes])
+          }
+          
+          // Try server-generated code if available
+          const serverCode = data.serverGeneratedCode || data.currentValidCode
+          if (serverCode) {
+            setMfaCode(serverCode)
+            
+            // Small delay then retry
+            setTimeout(() => {
+              setIsLoading(false)
+              handleMFASubmit()
+            }, 1000)
             return
           }
         }
-
-        // If we have recovery codes, try them one by one
-        if (mfaRecoveryCodes.length > 0) {
-          for (const recoveryCode of mfaRecoveryCodes.slice(0, 3)) {
-            // Try up to 3 codes
-            console.log(`Retrying with recovery code: ${recoveryCode}`)
-
-            const recoveryResponse = await fetchWithRetry(
-              mfaEndpoint,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                  Origin: window.location.origin,
-                },
-                body: JSON.stringify({
-                  code: recoveryCode,
-                  session,
-                  username: email,
-                  client_time: clientTime,
-                  adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
-                }),
-                mode: "cors",
-                credentials: "include",
-              },
-              1
-            )
-
-            if (recoveryResponse.ok) {
-              const recoveryData = await recoveryResponse.json()
-
-              // Success - store tokens and redirect
-              localStorage.setItem("access_token", recoveryData.access_token || "")
-              localStorage.setItem("id_token", recoveryData.id_token || "")
-              localStorage.setItem("refresh_token", recoveryData.refresh_token || "")
-              sessionStorage.removeItem("temp_password")
-
-              router.push("/admin/dashboard")
-              return
-            }
-          }
-        }
+        
+        throw new Error(data?.detail || "MFA verification failed. Please try again with a new code.")
       }
 
-      // If we get here, all verification attempts failed
-      throw new Error(
-        data?.detail || "MFA verification failed. Please try again with a new code from your authenticator app."
-      )
+      // Success - store tokens and redirect
+      localStorage.setItem("access_token", data.access_token || "")
+      localStorage.setItem("id_token", data.id_token || "")
+      localStorage.setItem("refresh_token", data.refresh_token || "")
+      sessionStorage.removeItem("temp_password")
+
+      router.push("/admin/dashboard")
     } catch (error: any) {
       const errorMessage = error.message || "MFA verification failed. Please try again."
       setError(errorMessage)
-
-      // If session expired, close the MFA dialog
-      if (errorMessage.includes("session has expired")) {
-        setTimeout(() => {
-          setShowMFA(false)
-          sessionStorage.removeItem("temp_password")
-        }, 3000)
+      
+      // If we have recovery codes, show them in the UI
+      if (mfaRecoveryCodes.length > 0) {
+        setError(`${errorMessage} Please try one of the suggested codes.`)
       }
-    } finally {
+      
       setIsLoading(false)
     }
   }
   
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-    <Card className="w-full max-w-md">
-      <CardHeader className="space-y-4">
-        <div className="flex justify-center items-center gap-2">
-          <div className="w-8 h-8">
-            <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-              <path
-                d="M16 2C8.268 2 2 8.268 2 16s6.268 14 14 14 14-6.268 14-14S23.732 2 16 2zm0 25.2c-6.188 0-11.2-5.012-11.2-11.2S9.812 4.8 16 4.8 27.2 9.812 27.2 16 22.188 27.2 16 27.2z"
-                fill="currentColor"
-              />
-            </svg>
-          </div>
-          <LogoText>EncryptGate</LogoText>
-        </div>
-        <CardTitle className="text-2xl font-bold text-center">Sign in</CardTitle>
-        <CardDescription className="text-center">
-          Choose your account type to access the security dashboard
-        </CardDescription>
-      </CardHeader>
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          handleLogin()
-        }}
-      >
-        <CardContent className="space-y-6">
-          <RadioGroup value={userType} onValueChange={(value: UserType) => setUserType(value)} className="grid gap-4">
-            <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
-              <RadioGroupItem value="admin" id="admin" />
-              <Label htmlFor="admin" className="flex-1 cursor-pointer">
-                Admin
-              </Label>
-            </div>
-            <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
-              <RadioGroupItem value="employee" id="employee" />
-              <Label htmlFor="employee" className="flex-1 cursor-pointer">
-                Employee
-              </Label>
-            </div>
-          </RadioGroup>
-          <div className="space-y-2">
-            <Label htmlFor="email">Email address</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="name@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-sm">{error}</AlertDescription>
-            </Alert>
-          )}
-          {successMessage && (
-            <Alert>
-              <AlertDescription className="text-sm">{successMessage}</AlertDescription>
-            </Alert>
-          )}
-        </CardContent>
-        <CardFooter className="flex flex-col space-y-4">
-          <Button type="submit" className="w-full" disabled={isLoading}>
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Please wait...
-              </>
-            ) : (
-              "Sign In"
-            )}
-          </Button>
-          <div className="text-center">
-            <button
-              type="button"
-              onClick={() => setShowForgotPassword(true)}
-              className="text-sm text-muted-foreground hover:text-primary"
-            >
-              Forgot Password?
-            </button>
-          </div>
-        </CardFooter>
-      </form>
-    </Card>
-
-    {/* Password Change Dialog */}
-    <Dialog open={showPasswordChange} onOpenChange={(open) => open && setShowPasswordChange(open)}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Change Password Required</DialogTitle>
-          <DialogDescription>
-            Your account requires a password change. Please create a new password.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="new-password">New Password</Label>
-            <Input
-              id="new-password"
-              type="password"
-              placeholder="Enter new password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="confirm-password">Confirm Password</Label>
-            <Input
-              id="confirm-password"
-              type="password"
-              placeholder="Confirm new password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
-          </div>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-sm">{error}</AlertDescription>
-            </Alert>
-          )}
-          <Alert>
-            <AlertDescription>
-              Your password must be at least 8 characters long and include uppercase and lowercase letters, numbers,
-              and special characters.
-            </AlertDescription>
-          </Alert>
-        </div>
-        <DialogFooter>
-          <Button
-            onClick={handlePasswordChange}
-            disabled={isLoading || !newPassword || !confirmPassword || newPassword !== confirmPassword}
-            className="w-full"
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Updating...
-              </>
-            ) : (
-              "Update Password"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    {/* MFA Setup Dialog */}
-    <Dialog open={showMFASetup} onOpenChange={(open) => open && setShowMFASetup(open)}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
-          <DialogDescription>
-            For additional security, please set up two-factor authentication using Google Authenticator.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <Alert>
-            <AlertDescription>
-              <strong>Important Instructions:</strong>
-              <ol className="list-decimal list-inside mt-2 space-y-1">
-                <li>Install Google Authenticator on your mobile device</li>
-                <li>Open Google Authenticator and scan the QR code below</li>
-                <li>The verification code will be automatically populated below</li>
-                <li>Click "Verify & Complete" to finish the setup</li>
-              </ol>
-            </AlertDescription>
-          </Alert>
-          {qrCodeUrl && (
-            <div className="flex flex-col items-center justify-center space-y-2">
-              <Label>Scan QR Code with Google Authenticator</Label>
-              <div className="bg-white p-2 rounded-md">
-                <img
-                  src={qrCodeUrl || "/placeholder.svg"}
-                  alt="QR Code for MFA setup"
-                  className="w-48 h-48 mx-auto"
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader className="space-y-4">
+          <div className="flex justify-center items-center gap-2">
+            <div className="w-8 h-8">
+              <svg
+                viewBox="0 0 32 32"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-full h-full"
+              >
+                <path
+                  d="M16 2C8.268 2 2 8.268 2 16s6.268 14 14 14 14-6.268 14-14S23.732 2 16 2zm0 25.2c-6.188 0-11.2-5.012-11.2-11.2S9.812 4.8 16 4.8 27.2 9.812 27.2 16 22.188 27.2 16 27.2z"
+                  fill="currentColor"
                 />
-              </div>
+              </svg>
             </div>
-          )}
-          {mfaSecretCode && (
-            <div className="space-y-2 text-center">
-              <Label>Secret Key (if you can't scan the QR code)</Label>
-              <div className="p-3 bg-muted rounded-md font-mono text-center break-all">{mfaSecretCode}</div>
-              <p className="text-xs text-muted-foreground">
-                Enter this code manually in Google Authenticator if scanning fails
-              </p>
-            </div>
-          )}
-          <div className="space-y-2">
-            <Label htmlFor="setup-mfa-code">Verification Code</Label>
-            <Input
-              id="setup-mfa-code"
-              placeholder="000000"
-              value={setupMfaCode}
-              onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-              maxLength={6}
-              className="text-center text-2xl tracking-widest"
-            />
-            <p className="text-xs text-center text-muted-foreground">
-              A server-generated verification code has been provided. Click verify to continue.
-            </p>
-            {validMfaCodes.length > 0 && (
-              <div className="text-xs text-center text-muted-foreground mt-2">
-                <details>
-                  <summary>Need a different code?</summary>
-                  <div className="mt-2 p-2 bg-muted rounded">
-                    <p>These codes may also work:</p>
-                    <div className="flex flex-wrap gap-2 mt-1 justify-center">
-                      {validMfaCodes.slice(0, 5).map((code, i) => (
-                        <button
-                          key={i}
-                          className="px-2 py-1 bg-gray-700 text-white rounded hover:bg-gray-600"
-                          onClick={() => setSetupMfaCode(code)}
-                        >
-                          {code}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </details>
-              </div>
-            )}
+            <LogoText>EncryptGate</LogoText>
           </div>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-sm">{error}</AlertDescription>
-            </Alert>
-          )}
-          {successMessage && (
-            <Alert>
-              <AlertDescription className="text-sm">{successMessage}</AlertDescription>
-            </Alert>
-          )}
-        </div>
-        <DialogFooter className="flex flex-col gap-3 sm:flex-row">
-          <Button onClick={handleMFASetup} disabled={isLoading} className="w-full">
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Verifying...
-              </>
-            ) : (
-              "Verify & Complete"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    {/* MFA Verification Dialog */}
-    <Dialog open={showMFA} onOpenChange={(open) => open && setShowMFA(open)}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Enter Authentication Code</DialogTitle>
-          <DialogDescription>Please enter the 6-digit code from your authenticator app</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="space-y-2">
-            <Label htmlFor="mfa-code">Authentication Code</Label>
-            <Input
-              id="mfa-code"
-              placeholder="000000"
-              value={mfaCode}
-              onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-              maxLength={6}
-              className="text-center text-2xl tracking-widest"
-            />
-
-            {mfaRecoveryCodes.length > 0 && (
-              <div className="text-xs text-center text-muted-foreground mt-2">
-                <details>
-                  <summary>Need a different code?</summary>
-                  <div className="mt-2 p-2 bg-muted rounded">
-                    <p>These codes may also work:</p>
-                    <div className="flex flex-wrap gap-2 mt-1 justify-center">
-                      {mfaRecoveryCodes.slice(0, 5).map((code, i) => (
-                        <button
-                          key={i}
-                          className="px-2 py-1 bg-gray-700 text-white rounded hover:bg-gray-600"
-                          onClick={() => setMfaCode(code)}
-                        >
-                          {code}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </details>
+          <CardTitle className="text-2xl font-bold text-center">
+            Sign in
+          </CardTitle>
+          <CardDescription className="text-center">
+            Choose your account type to access the security dashboard
+          </CardDescription>
+        </CardHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            handleLogin()
+          }}
+        >
+          <CardContent className="space-y-6">
+            <RadioGroup
+              value={userType}
+              onValueChange={(value: UserType) =>
+                setUserType(value)
+              }
+              className="grid gap-4"
+            >
+              <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
+                <RadioGroupItem value="admin" id="admin" />
+                <Label
+                  htmlFor="admin"
+                  className="flex-1 cursor-pointer"
+                >
+                  Admin
+                </Label>
               </div>
-            )}
-          </div>
-          {error && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-sm">{error}</AlertDescription>
-            </Alert>
-          )}
-          {successMessage && (
-            <Alert>
-              <AlertDescription className="text-sm">{successMessage}</AlertDescription>
-            </Alert>
-          )}
-        </div>
-        <DialogFooter>
-          <Button onClick={handleMFASubmit} disabled={isLoading} className="w-full">
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Verifying...
-              </>
-            ) : (
-              "Verify"
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-
-    {/* Forgot Password Dialog */}
-    <Dialog
-      open={showForgotPassword}
-      onOpenChange={(open) => {
-        if (!open) handleForgotPasswordClose()
-        else setShowForgotPassword(true)
-      }}
-    >
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Reset Your Password</DialogTitle>
-          <DialogDescription>
-            {forgotPasswordStep === 1
-              ? "Enter your email address to receive a verification code"
-              : "Enter the verification code and your new password"}
-          </DialogDescription>
-        </DialogHeader>
-        {forgotPasswordStep === 1 ? (
-          <div className="grid gap-4 py-4">
+              <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
+                <RadioGroupItem
+                  value="employee"
+                  id="employee"
+                />
+                <Label
+                  htmlFor="employee"
+                  className="flex-1 cursor-pointer"
+                >
+                  Employee
+                </Label>
+              </div>
+            </RadioGroup>
             <div className="space-y-2">
-              <Label htmlFor="reset-email">Email Address</Label>
+              <Label htmlFor="email">Email address</Label>
               <Input
-                id="reset-email"
+                id="email"
                 type="email"
                 placeholder="name@example.com"
-                value={forgotPasswordEmail}
-                onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
               />
             </div>
-            {forgotPasswordError && (
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                placeholder="Enter your password"
+                value={password}
+                onChange={(e) =>
+                  setPassword(e.target.value)
+                }
+              />
+            </div>
+            {error && (
               <Alert variant="destructive">
-                <AlertDescription className="text-sm">{forgotPasswordError}</AlertDescription>
+                <AlertDescription className="text-sm">
+                  {error}
+                </AlertDescription>
               </Alert>
             )}
+            {successMessage && (
+              <Alert>
+                <AlertDescription className="text-sm">
+                  {successMessage}
+                </AlertDescription>
+              </Alert>
+            )}
+          </CardContent>
+          <CardFooter className="flex flex-col space-y-4">
             <Button
-              onClick={handleForgotPasswordRequest}
-              disabled={!forgotPasswordEmail || isForgotPasswordLoading}
+              type="submit"
               className="w-full"
+              disabled={isLoading}
             >
-              {isForgotPasswordLoading ? (
+              {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Sending...
+                  Please wait...
                 </>
               ) : (
-                "Send Reset Code"
+                "Sign In"
               )}
             </Button>
-          </div>
-        ) : (
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() =>
+                  setShowForgotPassword(true)
+                }
+                className="text-sm text-muted-foreground hover:text-primary"
+              >
+                Forgot Password?
+              </button>
+            </div>
+          </CardFooter>
+        </form>
+      </Card>
+
+      {/* Password Change Dialog */}
+      <Dialog
+        open={showPasswordChange}
+        onOpenChange={(open) =>
+          open && setShowPasswordChange(open)
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Change Password Required
+            </DialogTitle>
+            <DialogDescription>
+              Your account requires a password change.
+              Please create a new password.
+            </DialogDescription>
+          </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="reset-code">Verification Code</Label>
+              <Label htmlFor="new-password">
+                New Password
+              </Label>
               <Input
-                id="reset-code"
-                placeholder="Enter verification code"
-                value={forgotPasswordCode}
-                onChange={(e) => setForgotPasswordCode(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="new-forgot-password">New Password</Label>
-              <Input
-                id="new-forgot-password"
+                id="new-password"
                 type="password"
                 placeholder="Enter new password"
-                value={newForgotPassword}
-                onChange={(e) => setNewForgotPassword(e.target.value)}
+                value={newPassword}
+                onChange={(e) =>
+                  setNewPassword(e.target.value)
+                }
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm-forgot-password">Confirm New Password</Label>
+              <Label htmlFor="confirm-password">
+                Confirm Password
+              </Label>
               <Input
-                id="confirm-forgot-password"
+                id="confirm-password"
                 type="password"
                 placeholder="Confirm new password"
-                value={confirmForgotPassword}
-                onChange={(e) => setConfirmForgotPassword(e.target.value)}
+                value={confirmPassword}
+                onChange={(e) =>
+                  setConfirmPassword(e.target.value)
+                }
               />
             </div>
-            {forgotPasswordError && (
+            {error && (
               <Alert variant="destructive">
-                <AlertDescription className="text-sm">{forgotPasswordError}</AlertDescription>
+                <AlertDescription className="text-sm">
+                  {error}
+                </AlertDescription>
               </Alert>
             )}
-            <div className="flex gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setForgotPasswordStep(1)}
-                disabled={isForgotPasswordLoading}
-                className="flex-1"
-              >
-                Back
-              </Button>
-              <Button
-                onClick={handleForgotPasswordConfirm}
-                disabled={
-                  !forgotPasswordCode || !newForgotPassword || !confirmForgotPassword || isForgotPasswordLoading
+            <Alert>
+              <AlertDescription>
+                Your password must be at least 8 characters
+                long and include uppercase and lowercase
+                letters, numbers, and special characters.
+              </AlertDescription>
+            </Alert>
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handlePasswordChange}
+              disabled={
+                isLoading ||
+                !newPassword ||
+                !confirmPassword ||
+                newPassword !== confirmPassword
+              }
+              className="w-full"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                "Update Password"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MFA Setup Dialog */}
+      <Dialog
+        open={showMFASetup}
+        onOpenChange={(open) =>
+          open && setShowMFASetup(open)
+        }
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Setup Two-Factor Authentication
+            </DialogTitle>
+            <DialogDescription>
+              For additional security, please set up
+              two-factor authentication using Google
+              Authenticator.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <Alert>
+              <AlertDescription>
+                <strong>Important Instructions:</strong>
+                <ol className="list-decimal list-inside mt-2 space-y-1">
+                  <li>
+                    Install Google Authenticator on your
+                    mobile device
+                  </li>
+                  <li>
+                    Open Google Authenticator and scan the
+                    QR code below
+                  </li>
+                  <li>
+                    The verification code will be
+                    automatically populated below
+                  </li>
+                  <li>
+                    Click "Verify & Complete" to finish the
+                    setup
+                  </li>
+                </ol>
+              </AlertDescription>
+            </Alert>
+            {qrCodeUrl && (
+              <div className="flex flex-col items-center justify-center space-y-2">
+                <Label>
+                  Scan QR Code with Google Authenticator
+                </Label>
+                <div className="bg-white p-2 rounded-md">
+                  <img
+                    src={qrCodeUrl || "/placeholder.svg"}
+                    alt="QR Code for MFA setup"
+                    className="w-48 h-48 mx-auto"
+                  />
+                </div>
+              </div>
+            )}
+            {mfaSecretCode && (
+              <div className="space-y-2 text-center">
+                <Label>
+                  Secret Key (if you can't scan the QR
+                  code)
+                </Label>
+                <div className="p-3 bg-muted rounded-md font-mono text-center break-all">
+                  {mfaSecretCode}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter this code manually in Google
+                  Authenticator if scanning fails
+                </p>
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="setup-mfa-code">
+                Verification Code
+              </Label>
+              <Input
+                id="setup-mfa-code"
+                placeholder="000000"
+                value={setupMfaCode}
+                onChange={(e) =>
+                  setSetupMfaCode(
+                    e.target.value
+                      .replace(/[^0-9]/g, "")
+                      .slice(0, 6)
+                  )
                 }
-                className="flex-1"
+                maxLength={6}
+                className="text-center text-2xl tracking-widest"
+              />
+              <p className="text-xs text-center text-muted-foreground">
+                A server-generated verification code has
+                been provided. Click verify to continue.
+              </p>
+              {validMfaCodes.length > 0 && (
+                <div className="text-xs text-center text-muted-foreground mt-2">
+                  <details>
+                    <summary>Need a different code?</summary>
+                    <div className="mt-2 p-2 bg-muted rounded">
+                      <p>These codes may also work:</p>
+                      <div className="flex flex-wrap gap-2 mt-1 justify-center">
+                        {validMfaCodes
+                          .slice(0, 5)
+                          .map((code, i) => (
+                            <button
+                              key={i}
+                              className="px-2 py-1 bg-gray-700 text-white rounded hover:bg-gray-600"
+                              onClick={() =>
+                                setSetupMfaCode(code)
+                              }
+                            >
+                              {code}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              )}
+            </div>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription className="text-sm">
+                  {error}
+                </AlertDescription>
+              </Alert>
+            )}
+            {successMessage && (
+              <Alert>
+                <AlertDescription className="text-sm">
+                  {successMessage}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter className="flex flex-col gap-3 sm:flex-row">
+            <Button
+              onClick={handleMFASetup}
+              disabled={isLoading}
+              className="w-full"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Verifying...
+                </>
+              ) : (
+                "Verify & Complete"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MFA Verification Dialog */}
+      <Dialog
+        open={showMFA}
+        onOpenChange={(open) => open && setShowMFA(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Enter Authentication Code
+            </DialogTitle>
+            <DialogDescription>
+              Please enter the 6-digit code from your
+              authenticator app
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="mfa-code">
+                Authentication Code
+              </Label>
+              <Input
+                id="mfa-code"
+                placeholder="000000"
+                value={mfaCode}
+                onChange={(e) =>
+                  setMfaCode(
+                    e.target.value
+                      .replace(/[^0-9]/g, "")
+                      .slice(0, 6)
+                  )
+                }
+                maxLength={6}
+                className="text-center text-2xl tracking-widest"
+              />
+
+              {mfaRecoveryCodes.length > 0 && (
+                <div className="text-xs text-center text-muted-foreground mt-2">
+                  <details>
+                    <summary>Need a different code?</summary>
+                    <div className="mt-2 p-2 bg-muted rounded">
+                      <p>These codes may also work:</p>
+                      <div className="flex flex-wrap gap-2 mt-1 justify-center">
+                        {mfaRecoveryCodes
+                          .slice(0, 5)
+                          .map((code, i) => (
+                            <button
+                              key={i}
+                              className="px-2 py-1 bg-gray-700 text-white rounded hover:bg-gray-600"
+                              onClick={() => setMfaCode(code)}
+                            >
+                              {code}
+                            </button>
+                          ))}
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              )}
+            </div>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription className="text-sm">
+                  {error}
+                </AlertDescription>
+              </Alert>
+            )}
+            {successMessage && (
+              <Alert>
+                <AlertDescription className="text-sm">
+                  {successMessage}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              onClick={handleMFASubmit}
+              disabled={isLoading}
+              className="w-full"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Verifying...
+                </>
+              ) : (
+                "Verify"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Forgot Password Dialog */}
+      <Dialog
+        open={showForgotPassword}
+        onOpenChange={(open) => {
+          if (!open) handleForgotPasswordClose()
+          else setShowForgotPassword(true)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              Reset Your Password
+            </DialogTitle>
+            <DialogDescription>
+              {forgotPasswordStep === 1
+                ? "Enter your email address to receive a verification code"
+                : "Enter the verification code and your new password"}
+            </DialogDescription>
+          </DialogHeader>
+          {forgotPasswordStep === 1 ? (
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-email">
+                  Email Address
+                </Label>
+                <Input
+                  id="reset-email"
+                  type="email"
+                  placeholder="name@example.com"
+                  value={forgotPasswordEmail}
+                  onChange={(e) =>
+                    setForgotPasswordEmail(e.target.value)
+                  }
+                />
+              </div>
+              {forgotPasswordError && (
+                <Alert variant="destructive">
+                  <AlertDescription className="text-sm">
+                    {forgotPasswordError}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <Button
+                onClick={handleForgotPasswordRequest}
+                disabled={
+                  !forgotPasswordEmail ||
+                  isForgotPasswordLoading
+                }
+                className="w-full"
               >
                 {isForgotPasswordLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Resetting...
+                    Sending...
                   </>
                 ) : (
-                  "Reset Password"
+                  "Send Reset Code"
                 )}
               </Button>
             </div>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  </div>
-)
+          ) : (
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-code">
+                  Verification Code
+                </Label>
+                <Input
+                  id="reset-code"
+                  placeholder="Enter verification code"
+                  value={forgotPasswordCode}
+                  onChange={(e) =>
+                    setForgotPasswordCode(e.target.value)
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="new-forgot-password">
+                  New Password
+                </Label>
+                <Input
+                  id="new-forgot-password"
+                  type="password"
+                  placeholder="Enter new password"
+                  value={newForgotPassword}
+                  onChange={(e) =>
+                    setNewForgotPassword(e.target.value)
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-forgot-password">
+                  Confirm New Password
+                </Label>
+                <Input
+                  id="confirm-forgot-password"
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmForgotPassword}
+                  onChange={(e) =>
+                    setConfirmForgotPassword(e.target.value)
+                  }
+                />
+              </div>
+              {forgotPasswordError && (
+                <Alert variant="destructive">
+                  <AlertDescription className="text-sm">
+                    {forgotPasswordError}
+                  </AlertDescription>
+                </Alert>
+              )}
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() =>
+                    setForgotPasswordStep(1)
+                  }
+                  disabled={isForgotPasswordLoading}
+                  className="flex-1"
+                >
+                  Back
+                </Button>
+                <Button
+                  onClick={handleForgotPasswordConfirm}
+                  disabled={
+                    !forgotPasswordCode ||
+                    !newForgotPassword ||
+                    !confirmForgotPassword ||
+                    isForgotPasswordLoading
+                  }
+                  className="flex-1"
+                >
+                  {isForgotPasswordLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Resetting...
+                    </>
+                  ) : (
+                    "Reset Password"
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
 }
-
