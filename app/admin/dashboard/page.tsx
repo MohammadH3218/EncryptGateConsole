@@ -65,12 +65,12 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("")
 
   // Check if user is logged in
-  useEffect(() => {
+  /*useEffect(() => {
     const token = localStorage.getItem("access_token")
     if (!token) {
       router.push("/login")
     }
-  }, [router])
+  }, [router])*/ //remove comment when want to fix login page and redirect
 
   const severityData = [
     { name: "Critical", value: stats.severityBreakdown.critical, color: "#ef4444" },
