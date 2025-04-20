@@ -20,9 +20,14 @@ interface Assignment {
   sentBy: string
   timestamp: string
 }
-\
-interface InvestigationWithSeverity extends ReturnType<typeof getInProgressInvestigations>[0] {
-  severity: string;
+
+type InvestigationBase = ReturnType<typeof getInProgressInvestigations>[number];
+
+interface InvestigationWithSeverity extends InvestigationBase {
+  severity: string
+  emailSubject: string
+  sender: string
+  lastUpdated: string
 }
 
 interface AssignmentsOverviewProps {
@@ -35,21 +40,20 @@ export function AssignmentsOverview({ username }: AssignmentsOverviewProps) {
   const [assignments, setAssignments] = useState<Assignment[]>([])
   const [activeTab, setActiveTab] = useState("continue")
 
-  // Fetch in-progress investigations
   useEffect(() => {
     const investigations = getInProgressInvestigations()
 
-    // Add mock severity for demo purposes
-    // In a real app, this would come from the actual investigation data
-    const investigationsWithSeverity = investigations.map((inv) => ({
+    const investigationsWithSeverity: InvestigationWithSeverity[] = investigations.map((inv, index) => ({
       ...inv,
       severity:
         Math.random() > 0.7 ? "Critical" : Math.random() > 0.5 ? "High" : Math.random() > 0.3 ? "Medium" : "Low",
+      emailSubject: `Investigation Subject ${index + 1}`,
+      sender: `user${index}@example.com`,
+      lastUpdated: new Date(Date.now() - index * 3600000).toISOString(),
     }))
 
-    // Sort by severity (Critical -> High -> Medium -> Low)
+    const severityOrder = { Critical: 0, High: 1, Medium: 2, Low: 3 }
     const sortedInvestigations = investigationsWithSeverity.sort((a, b) => {
-      const severityOrder = { Critical: 0, High: 1, Medium: 2, Low: 3 }
       return (
         severityOrder[a.severity as keyof typeof severityOrder] -
         severityOrder[b.severity as keyof typeof severityOrder]
@@ -58,8 +62,6 @@ export function AssignmentsOverview({ username }: AssignmentsOverviewProps) {
 
     setInProgressInvestigations(sortedInvestigations)
 
-    // Mock data for new assignments
-    // In a real app, this would come from an API
     setAssignments([
       {
         id: 1,
@@ -115,16 +117,20 @@ export function AssignmentsOverview({ username }: AssignmentsOverviewProps) {
       <CardContent>
         <Tabs defaultValue={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="continue" className="relative">
+            <TabsTrigger value="continue">
               Continue
               {inProgressInvestigations.length > 0 && (
-                <Badge className="ml-2 bg-primary text-primary-foreground">{inProgressInvestigations.length}</Badge>
+                <Badge className="ml-2 bg-primary text-primary-foreground">
+                  {inProgressInvestigations.length}
+                </Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="new" className="relative">
+            <TabsTrigger value="new">
               New Assignments
               {assignments.length > 0 && (
-                <Badge className="ml-2 bg-primary text-primary-foreground">{assignments.length}</Badge>
+                <Badge className="ml-2 bg-primary text-primary-foreground">
+                  {assignments.length}
+                </Badge>
               )}
             </TabsTrigger>
           </TabsList>
@@ -182,10 +188,10 @@ export function AssignmentsOverview({ username }: AssignmentsOverviewProps) {
                           assignment.severity === "Critical"
                             ? "text-red-500"
                             : assignment.severity === "High"
-                              ? "text-orange-500"
-                              : assignment.severity === "Medium"
-                                ? "text-yellow-500"
-                                : "text-green-500",
+                            ? "text-orange-500"
+                            : assignment.severity === "Medium"
+                            ? "text-yellow-500"
+                            : "text-green-500",
                         )}
                       />
                     </div>
