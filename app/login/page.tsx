@@ -654,7 +654,7 @@ export default function LoginPage() {
     }
   }
 
-  // Updated MFA Setup function with better error handling
+  // Updated MFA Setup function with improved handling for ExpiredCodeException
   const handleMFASetup = async () => {
     if (!apiBaseUrl) {
       setError("API URL is not available.")
@@ -728,18 +728,31 @@ export default function LoginPage() {
           if (responseData.detail.includes("ExpiredCodeException") || 
               responseData.detail.includes("already been used")) {
             console.log("MFA appears to have been set up successfully but final auth step failed")
-            // This is actually a success case - MFA setup worked
+            
+            // This is a success case - MFA setup worked and we should log the user in
             setShowMFASetup(false)
+            
+            // Store any tokens we received
+            const tempAccessToken = localStorage.getItem("temp_access_token")
+            if (tempAccessToken) {
+              localStorage.setItem("access_token", tempAccessToken)
+              localStorage.removeItem("temp_access_token")
+              sessionStorage.removeItem("temp_password")
+              
+              // Redirect to dashboard since we have an access token
+              console.log("Using temp access token to log in user after MFA setup")
+              router.push("/admin/dashboard")
+              return
+            }
+            
+            // If we don't have a token, prompt for login
+            setSuccessMessage("MFA setup successful! Please log in with your new credentials.")
+            
+            // Clean up
             localStorage.removeItem("temp_access_token")
             sessionStorage.removeItem("temp_password")
             
-            // Show a more detailed success message
-            alert("MFA setup successful! You will now need to log in again with your new password and use your authenticator app to generate verification codes.")
-            setSuccessMessage("MFA setup successful. Please log in with your new credentials.")
-            
-            setTimeout(() => {
-              setIsLoading(false)
-            }, 1000)
+            setIsLoading(false)
             return
           }
 
@@ -756,6 +769,7 @@ export default function LoginPage() {
         }
       }
 
+      // Success case - we got a valid response
       setShowMFASetup(false)
       localStorage.removeItem("temp_access_token")
       sessionStorage.removeItem("temp_password")
@@ -860,7 +874,7 @@ export default function LoginPage() {
             setSuccessMessage(`Trying with server-generated code...`)
             
             const retryResponse = await fetchWithRetry(
-              `${apiBaseUrl}/api/auth/verify-mfa`,
+             `${apiBaseUrl}/api/auth/verify-mfa`,
               {
                 method: "POST",
                 headers: {
