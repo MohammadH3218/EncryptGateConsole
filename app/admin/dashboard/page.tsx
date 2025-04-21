@@ -9,8 +9,8 @@ import { AutoBlockedEmails } from "@/components/dashboard/auto-blocked-emails"
 import { AssignmentsOverview } from "@/components/dashboard/assignments-overview"
 import { useRouter } from "next/navigation"
 import { AssignedDetections } from "@/components/dashboard/assigned-detections"
-import type { CompletedDetection } from "@/components/dashboard/completed-detections"
-
+import type { CompletedDetection } from "@/components/dashboard/completed-detections" 
+// test data
 const mockDashboardStats = {
   totalIncomingEmails: 1245,
   totalOutgoingEmails: 876,
@@ -30,22 +30,22 @@ const mockCompletedDetections: CompletedDetection[] = [
     name: "Phishing Attempt",
     severity: "Critical",
     resolvedBy: "John Doe",
-    completedAt: "2024-01-31T14:30:00Z",
+    completedAt: "2024-01-31T14:30:00Z"
   },
   {
     id: "2",
     name: "Suspicious Login",
     severity: "High",
     resolvedBy: "Jane Smith",
-    completedAt: "2024-01-31T12:15:00Z",
+    completedAt: "2024-01-31T12:15:00Z"
   },
   {
     id: "3",
     name: "Malware Detection",
     severity: "Critical",
     resolvedBy: "John Doe",
-    completedAt: "2024-01-31T10:45:00Z",
-  },
+    completedAt: "2024-01-31T10:45:00Z"
+  }
 ]
 
 const mockAutoBlockedEmails = {
@@ -59,38 +59,18 @@ const mockAutoBlockedEmails = {
 
 export default function DashboardPage() {
   const router = useRouter()
-  const [stats] = useState(mockDashboardStats)
-  const [completedDetections] = useState(mockCompletedDetections)
-  const [autoBlockedEmails] = useState(mockAutoBlockedEmails)
+  const [stats, setStats] = useState(mockDashboardStats)
+  const [completedDetections, setCompletedDetections] = useState(mockCompletedDetections)
+  const [autoBlockedEmails, setAutoBlockedEmails] = useState(mockAutoBlockedEmails)
   const [searchQuery, setSearchQuery] = useState("")
-  const [loading, setLoading] = useState(true)
 
-  // on mount, verify token + userType
-  useEffect(() => {
-    // run only in browser
-    const token = typeof window !== "undefined" && localStorage.getItem("access_token")
-    const type = typeof window !== "undefined" && localStorage.getItem("userType")
-
+  // Check if user is logged in
+  /*useEffect(() => {
+    const token = localStorage.getItem("access_token")
     if (!token) {
-      // no token → go to login
-      router.replace("/login")
-    } else if (type !== "admin") {
-      // wrong dashboard for this user → redirect to their dashboard
-      router.replace(`/${type}/dashboard`)
-    } else {
-      // good to go
-      setLoading(false)
+      router.push("/login")
     }
-  }, [router])
-
-  // while we’re still checking auth/userType, don’t flash real UI
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
-        <p>Loading…</p>
-      </div>
-    )
-  }
+  }, [router])*/ //remove comment when want to fix login page and redirect
 
   const severityData = [
     { name: "Critical", value: stats.severityBreakdown.critical, color: "#ef4444" },
@@ -100,11 +80,7 @@ export default function DashboardPage() {
   ]
 
   return (
-    <AppLayout
-      username={localStorage.getItem("username") ?? "Admin"}
-      onSearch={setSearchQuery}
-      notificationsCount={5}
-    >
+    <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={5}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
         <StatCard
           title="Incoming Emails"
@@ -119,7 +95,7 @@ export default function DashboardPage() {
         <StatCard title="Total Detections" value={stats.totalDetections} description="Suspicious emails detected" />
 
         <div className="md:col-span-2">
-          <AssignmentsOverview username={localStorage.getItem("username") ?? "Admin"} />
+          <AssignmentsOverview username="John Doe" />
         </div>
 
         <div>
