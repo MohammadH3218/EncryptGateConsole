@@ -654,144 +654,155 @@ export default function LoginPage() {
     }
   }
 
-  // Updated MFA Setup function with improved handling for ExpiredCodeException
-  const handleMFASetup = async () => {
-    if (!apiBaseUrl) {
-      setError("API URL is not available.")
-      return
+ // Updated MFA Setup function with better redirect
+const handleMFASetup = async () => {
+  if (!apiBaseUrl) {
+    setError("API URL is not available.")
+    return
+  }
+
+  // Validate the code input
+  if (!setupMfaCode || setupMfaCode.length !== 6 || !setupMfaCode.match(/^\d{6}$/)) {
+    setError("Please enter the 6-digit verification code from your authenticator app")
+    return
+  }
+
+  setIsLoading(true)
+  setError("")
+  setSuccessMessage("")
+
+  console.log("Starting MFA setup verification")
+  const savedPassword = sessionStorage.getItem("temp_password") || ""
+  console.log(`Password available for MFA setup: ${!!savedPassword}`)
+
+  if (!session) {
+    setError("Your session has expired. Please log in again to restart the MFA setup process.")
+    setIsLoading(false)
+    return
+  }
+
+  try {
+    // Get adjusted time for better synchronization
+    const adjustedTime = getAdjustedTime()
+
+    const endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`
+    const requestBody = {
+      username: email,
+      session: session,
+      code: setupMfaCode,
+      password: savedPassword,
+      client_time: new Date().toISOString(),
+      adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
     }
 
-    // Validate the code input
-    if (!setupMfaCode || setupMfaCode.length !== 6 || !setupMfaCode.match(/^\d{6}$/)) {
-      setError("Please enter the 6-digit verification code from your authenticator app")
-      return
-    }
+    console.log(`Sending MFA setup verification request with code ${setupMfaCode}`)
 
-    setIsLoading(true)
-    setError("")
-    setSuccessMessage("")
-
-    console.log("Starting MFA setup verification")
-    const savedPassword = sessionStorage.getItem("temp_password") || ""
-    console.log(`Password available for MFA setup: ${!!savedPassword}`)
-
-    if (!session) {
-      setError("Your session has expired. Please log in again to restart the MFA setup process.")
-      setIsLoading(false)
-      return
-    }
-
-    try {
-      // Get adjusted time for better synchronization
-      const adjustedTime = getAdjustedTime()
-
-      const endpoint = `${apiBaseUrl}/api/auth/confirm-mfa-setup`
-      const requestBody = {
-        username: email,
-        session: session,
-        code: setupMfaCode,
-        password: savedPassword,
-        client_time: new Date().toISOString(),
-        adjusted_time: adjustedTime ? adjustedTime.toISOString() : undefined,
-      }
-
-      console.log(`Sending MFA setup verification request with code ${setupMfaCode}`)
-
-      const response = await fetchWithRetry(
-        endpoint,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            Origin: window.location.origin,
-          },
-          body: JSON.stringify(requestBody),
-          mode: "cors",
-          credentials: "include",
+    const response = await fetchWithRetry(
+      endpoint,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Origin: window.location.origin,
         },
-        2
-      )
+        body: JSON.stringify(requestBody),
+        mode: "cors",
+        credentials: "include",
+      },
+      2
+    )
 
-      let responseData: LoginResponse
-      try {
-        responseData = await response.json()
-        console.log(`MFA setup verification response status: ${response.status}`)
-      } catch (parseError) {
-        throw new Error("Unable to parse server response. Please try again.")
-      }
+    let responseData: LoginResponse
+    try {
+      responseData = await response.json()
+      console.log(`MFA setup verification response status: ${response.status}`)
+    } catch (parseError) {
+      throw new Error("Unable to parse server response. Please try again.")
+    }
 
-      if (!response.ok) {
-        // Handle error responses with suggested codes
-        if (response.status === 400 && responseData.detail) {
-          // Handle ExpiredCodeException - this means the MFA setup was actually successful
-          if (responseData.detail.includes("ExpiredCodeException") || 
-              responseData.detail.includes("already been used")) {
-            console.log("MFA appears to have been set up successfully but final auth step failed")
-            
-            // This is a success case - MFA setup worked and we should log the user in
-            setShowMFASetup(false)
-            
-            // Store any tokens we received
-            const tempAccessToken = localStorage.getItem("temp_access_token")
-            if (tempAccessToken) {
-              localStorage.setItem("access_token", tempAccessToken)
-              localStorage.removeItem("temp_access_token")
-              sessionStorage.removeItem("temp_password")
-              
-              // Redirect to dashboard since we have an access token
-              console.log("Using temp access token to log in user after MFA setup")
-              router.push("/admin/dashboard")
-              return
-            }
-            
-            // If we don't have a token, prompt for login
-            setSuccessMessage("MFA setup successful! Please log in with your new credentials.")
-            
-            // Clean up
+    if (!response.ok) {
+      // Handle error responses with suggested codes
+      if (response.status === 400 && responseData.detail) {
+        // Handle ExpiredCodeException - this means the MFA setup was actually successful
+        if (responseData.detail.includes("ExpiredCodeException") || 
+            responseData.detail.includes("already been used")) {
+          console.log("MFA appears to have been set up successfully but final auth step failed")
+          
+          // This is a success case - MFA setup worked
+          setShowMFASetup(false)
+          
+          // Store any tokens we received
+          const tempAccessToken = localStorage.getItem("temp_access_token")
+          if (tempAccessToken) {
+            localStorage.setItem("access_token", tempAccessToken)
             localStorage.removeItem("temp_access_token")
             sessionStorage.removeItem("temp_password")
-            
-            setIsLoading(false)
-            return
-          }
-
-          if (responseData.detail.includes("code is incorrect") ||
-              responseData.detail.includes("CodeMismatchException")) {
-            throw new Error(responseData.detail)
           } else {
-            throw new Error(responseData.detail)
+            // If we don't have the temp access token, try to use the one from the login flow
+            console.log("No temp access token found. Trying stored credentials")
+            
+            // Attempt a new login automatically
+            try {
+              const savedPassword = sessionStorage.getItem("temp_password")
+              if (email && savedPassword) {
+                // Instead of showing a message, try an automatic login
+                console.log("Attempting automatic login with saved credentials")
+                setPassword(savedPassword)
+                await handleLogin()
+                return
+              }
+            } catch (loginError) {
+              console.error("Auto-login failed:", loginError)
+              // If auto-login fails, we'll still redirect to dashboard
+            }
           }
-        } else if (response.status === 401) {
-          throw new Error("Your session has expired. Please log in again to restart the MFA setup process.")
-        } else {
-          throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`)
+          
+          // Regardless of token presence, redirect to dashboard
+          // This ensures the user always gets redirected after successful MFA setup
+          console.log("MFA setup complete, redirecting to dashboard")
+          router.push("/admin/dashboard")
+          return
         }
-      }
 
-      // Success case - we got a valid response
-      setShowMFASetup(false)
-      localStorage.removeItem("temp_access_token")
-      sessionStorage.removeItem("temp_password")
-
-      if (responseData.access_token) {
-        // Store tokens and redirect to dashboard
-        localStorage.setItem("access_token", responseData.access_token)
-        localStorage.setItem("id_token", responseData.id_token || "")
-        localStorage.setItem("refresh_token", responseData.refresh_token || "")
-        console.log("MFA setup complete, redirecting to dashboard")
-        router.push("/admin/dashboard")
+        if (responseData.detail.includes("code is incorrect") ||
+            responseData.detail.includes("CodeMismatchException")) {
+          throw new Error(responseData.detail)
+        } else {
+          throw new Error(responseData.detail)
+        }
+      } else if (response.status === 401) {
+        throw new Error("Your session has expired. Please log in again to restart the MFA setup process.")
       } else {
-        setSuccessMessage("MFA setup successful. Please log in again.")
+        throw new Error(responseData.detail || `Failed to verify MFA setup (${response.status})`)
       }
-    } catch (error: any) {
-      const errorMessage = error.message || "Failed to set up MFA"
-      setError(errorMessage)
-      console.error("MFA setup error:", errorMessage)
-    } finally {
-      setIsLoading(false)
     }
+
+    // Standard success case - we got a valid response
+    setShowMFASetup(false)
+    localStorage.removeItem("temp_access_token")
+    sessionStorage.removeItem("temp_password")
+
+    if (responseData.access_token) {
+      // Store tokens and redirect to dashboard
+      localStorage.setItem("access_token", responseData.access_token)
+      localStorage.setItem("id_token", responseData.id_token || "")
+      localStorage.setItem("refresh_token", responseData.refresh_token || "")
+      console.log("MFA setup complete, redirecting to dashboard")
+      router.push("/admin/dashboard")
+    } else {
+      // Even without tokens, redirect to dashboard
+      console.log("MFA setup complete but no tokens received, redirecting anyway")
+      router.push("/admin/dashboard")
+    }
+  } catch (error: any) {
+    const errorMessage = error.message || "Failed to set up MFA"
+    setError(errorMessage)
+    console.error("MFA setup error:", errorMessage)
+  } finally {
+    setIsLoading(false)
   }
+}
 
   // Updated MFA verification function using a simpler approach like the MFA setup
   const handleMFASubmit = async () => {
