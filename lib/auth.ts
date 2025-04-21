@@ -3,8 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useEffect } from "react"
 
-// Check for authentication in a way that works with SSR
-export const checkAuth = () => {
+export const checkAuth = (): boolean => {
   if (typeof window !== "undefined") {
     return localStorage.getItem("access_token") !== null
   }
@@ -28,8 +27,14 @@ export const useRequireAuth = () => {
   const router = useRouter()
 
   useEffect(() => {
-    if (!checkAuth()) {
-      router.push("/admin/dashboard")
+    const token = localStorage.getItem("access_token")
+    if (!token) {
+      router.push("/login")
     }
   }, [router])
+}
+
+export const getUserType = (): "admin" | "employee" | null => {
+  const val = localStorage.getItem("userType")
+  return val === "admin" || val === "employee" ? val : null
 }

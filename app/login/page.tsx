@@ -486,6 +486,7 @@ export default function LoginPage() {
           localStorage.setItem("access_token", responseData.access_token)
           localStorage.setItem("id_token", responseData.id_token || "")
           localStorage.setItem("refresh_token", responseData.refresh_token || "")
+          localStorage.setItem("userType", userType)
           sessionStorage.removeItem("temp_password")
           router.push("/admin/dashboard")
         } catch (mfaError: any) {
@@ -494,6 +495,7 @@ export default function LoginPage() {
           localStorage.setItem("access_token", responseData.access_token)
           localStorage.setItem("id_token", responseData.id_token || "")
           localStorage.setItem("refresh_token", responseData.refresh_token || "")
+          localStorage.setItem("userType", userType)
           sessionStorage.removeItem("temp_password")
           router.push("/admin/dashboard")
         }
@@ -615,6 +617,7 @@ export default function LoginPage() {
           localStorage.setItem("access_token", responseData.access_token)
           localStorage.setItem("id_token", responseData.id_token || "")
           localStorage.setItem("refresh_token", responseData.refresh_token || "")
+          localStorage.setItem("userType", userType)
           setShowPasswordChange(false)
           sessionStorage.removeItem("temp_password")
           router.push("/admin/dashboard")
@@ -624,6 +627,7 @@ export default function LoginPage() {
           localStorage.setItem("access_token", responseData.access_token)
           localStorage.setItem("id_token", responseData.id_token || "")
           localStorage.setItem("refresh_token", responseData.refresh_token || "")
+          localStorage.setItem("userType", userType)
           setShowPasswordChange(false)
           sessionStorage.removeItem("temp_password")
           router.push("/admin/dashboard")
@@ -746,11 +750,12 @@ export default function LoginPage() {
               localStorage.removeItem("temp_access_token")
               localStorage.removeItem("temp_id_token")
               localStorage.removeItem("temp_refresh_token")
-              sessionStorage.removeItem("temp_password")
-              
+              localStorage.setItem("userType", userType)
+
               // Add a small delay to ensure tokens are saved before redirect
               setTimeout(() => {
                 console.log("MFA setup complete, redirecting to dashboard")
+                sessionStorage.removeItem("temp_password")
                 router.push("/admin/dashboard")
               }, 500)
               return
@@ -785,6 +790,7 @@ export default function LoginPage() {
                     localStorage.setItem("access_token", loginData.access_token)
                     localStorage.setItem("id_token", loginData.id_token || "")
                     localStorage.setItem("refresh_token", loginData.refresh_token || "")
+                    localStorage.setItem("userType", userType)
                     sessionStorage.removeItem("temp_password")
                     
                     // Add a small delay to ensure tokens are saved before redirect
@@ -830,7 +836,8 @@ export default function LoginPage() {
         localStorage.setItem("access_token", responseData.access_token)
         localStorage.setItem("id_token", responseData.id_token || "")
         localStorage.setItem("refresh_token", responseData.refresh_token || "")
-        
+        localStorage.setItem("userType", userType)
+
         // Add a small delay to ensure tokens are saved before redirect
         setTimeout(() => {
           console.log("MFA setup complete, redirecting to dashboard")
@@ -907,6 +914,7 @@ export default function LoginPage() {
          localStorage.setItem("access_token", data.access_token || "")
          localStorage.setItem("id_token", data.id_token || "")
          localStorage.setItem("refresh_token", data.refresh_token || "")
+         localStorage.setItem("userType", userType)
          sessionStorage.removeItem("temp_password")
          
          // Add a small delay to ensure tokens are saved before redirect
@@ -960,6 +968,7 @@ export default function LoginPage() {
              localStorage.setItem("access_token", retryData.access_token || "")
              localStorage.setItem("id_token", retryData.id_token || "")
              localStorage.setItem("refresh_token", retryData.refresh_token || "")
+             localStorage.setItem("userType", userType)
              sessionStorage.removeItem("temp_password")
              
              // Add a small delay to ensure tokens are saved before redirect
