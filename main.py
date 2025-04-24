@@ -1106,50 +1106,17 @@ def direct_verify_mfa():
             return jsonify({"detail": "Failed to connect to authentication service"}), 500
         
         # Get valid MFA codes for verification
+        # Skip secret generation completely for MFA verification
+        # We don't need to attempt to generate a new secret for existing MFA users
         secret_code = None
         valid_codes = []
-        
-        try:
-            # Try to generate a code from the session
-            logger.info("Attempting to generate MFA code from session")
-            try:
-                associate_response = cognito_client.associate_software_token(
-                    Session=session
-                )
-                secret_code = associate_response.get("SecretCode")
-                
-                if secret_code:
-                    totp = pyotp.TOTP(secret_code)
-                    
-                    # Generate codes for multiple time windows
-                    for i in range(-5, 6):  # ±5 time windows
-                        window_time = server_time + timedelta(seconds=30 * i)
-                        valid_codes.append(totp.at(window_time))
-                    
-                    current_code = totp.now()
-                    logger.info(f"Generated server code: {current_code}")
-                    logger.info(f"Valid codes: {valid_codes}")
-                    
-                    # If the user code doesn't match any valid code, note it but proceed
-                    if code not in valid_codes:
-                        logger.warning(f"User code {code} doesn't match any valid time window")
-                    else:
-                        logger.info(f"User code {code} matches a valid time window")
-                    
-                    # Check adjusted time code if provided
-                    if adjusted_time_str:
-                        adjusted_dt = parse_iso_datetime(adjusted_time_str)
-                        adjusted_code = totp.at(adjusted_dt)
-                        logger.info(f"Adjusted time code: {adjusted_code}")
-                        
-                        if code == adjusted_code:
-                            logger.info("User code matches adjusted time code")
-                        elif adjusted_code not in valid_codes:
-                            valid_codes.append(adjusted_code)
-            except Exception as e:
-                logger.info(f"Error on code generation (normal for existing MFA users): {e}")
-        except Exception as e:
-            logger.warning(f"Code generation failed but proceeding with user-provided code: {e}")
+
+        logger.info(f"Processing MFA verification for user: {username}")
+        logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
+
+        # We'll proceed directly to AWS Cognito verification without
+        # attempting to generate a new secret which would invalidate
+        # the user's existing MFA configuration
         
         try:
             CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")

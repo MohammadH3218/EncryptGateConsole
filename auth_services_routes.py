@@ -503,39 +503,16 @@ def verify_mfa(session, code, username):
         secret_code = None
         valid_codes = []
         
-        try:
-            # Try to associate a software token with the session (this will fail for users who already have MFA set up)
-            try:
-                associate_response = cognito_client.associate_software_token(Session=session)
-                secret_code = associate_response.get("SecretCode")
-                
-                if secret_code:
-                    logger.info(f"Retrieved secret code from session for local verification")
-                    
-                    # Generate multiple valid codes
-                    totp = pyotp.TOTP(secret_code)
-                    now = datetime.now()
-                    
-                    # Check ±5 time windows to account for time drift
-                    for i in range(-5, 6):
-                        window_time = now + timedelta(seconds=30 * i)
-                        window_code = totp.at(window_time)
-                        valid_codes.append(window_code)
-                        
-                    logger.info(f"Valid codes for current time windows: {valid_codes}")
-                    
-                    # If the provided code is among valid codes, proceed with AWS validation
-                    # If not, we'll still try with AWS but with logged warning
-                    if code in valid_codes:
-                        logger.info(f"Provided code {code} matches a valid time window")
-                    else:
-                        logger.warning(f"Provided code {code} does not match any valid time window")
-                else:
-                    logger.info("No secret code returned from associate_software_token - user likely has MFA already set up")
-            except Exception as assoc_error:
-                logger.info(f"Could not associate token with session (expected for existing MFA users): {assoc_error}")
-        except Exception as local_verify_error:
-            logger.warning(f"Local verification attempt failed: {local_verify_error}")
+        # Skip generating secrets for users who already have MFA set up
+        secret_code = None
+        valid_codes = []
+
+        # Only log the verification attempt
+        logger.info(f"Processing MFA verification with code: {code}")
+        logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
+
+        # Skip secret generation completely for existing MFA users
+        # We'll rely on Cognito's verification directly
         
         # Generate secret hash
         try:
