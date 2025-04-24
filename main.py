@@ -130,6 +130,7 @@ try:
     app.register_blueprint(auth_routes, url_prefix="/api/user")
     
     logger.info("Successfully registered blueprints")
+    
 except Exception as e:
     logger.error(f"Failed to register blueprints: {e}")
     logger.error(traceback.format_exc())
@@ -150,8 +151,11 @@ def get_cognito_public_keys():
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Network error fetching Cognito public keys: {e}")
+        return {"keys": []}
     except Exception as e:
-        logger.error(f"Error fetching public keys: {e}")
+        logger.error(f"Unexpected error fetching Cognito public keys: {e}")
         return {"keys": []}
 
 try:
@@ -175,6 +179,7 @@ def health():
 
 @app.route("/api/health", methods=["GET"])
 def api_health_check():
+    """Health check endpoint for API monitoring."""
     return jsonify({
         "status": "healthy",
         "service": "EncryptGate API",
@@ -184,61 +189,196 @@ def api_health_check():
 
 @app.route("/api/simple-cors-test", methods=["GET", "OPTIONS", "POST"])
 def simple_cors_test():
+    logger.info(f"Simple CORS test endpoint accessed - Method: {request.method}")
+    
     if request.method == "OPTIONS":
+        logger.info("Handling OPTIONS preflight request")
         return handle_preflight_request()
-    return jsonify({
+    
+    response = jsonify({
         "message": "CORS test successful!",
         "method": request.method,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "request_origin": request.headers.get("Origin", "None"),
         "your_ip": request.remote_addr
     })
+    
+    return response
 
 def handle_preflight_request():
     response = jsonify({"status": "success"})
     origin = request.headers.get("Origin", "")
+    logger.info(f"Handling CORS preflight for origin: {origin}")
+    
     if origin in allowed_origins or "*" in allowed_origins:
         response.headers.set("Access-Control-Allow-Origin", origin)
     else:
         response.headers.set("Access-Control-Allow-Origin", "https://console-encryptgate.net")
+        
     response.headers.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
     response.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept, Origin")
     response.headers.set("Access-Control-Allow-Credentials", "true")
     response.headers.set("Access-Control-Max-Age", "3600")
+    
     return response, 204
 
 @app.route("/api/auth/test-mfa-code", methods=["POST", "OPTIONS"])
 def direct_test_mfa_code():
+    """Direct fallback for MFA code testing with improved time handling"""
+    logger.info(f"test-mfa-code endpoint accessed with method: {request.method}")
+    
     if request.method == "OPTIONS":
         return handle_preflight_request()
+    
     try:
-        data = request.json or {}
+        try:
+            data = request.json
+        except Exception as e:
+            logger.info(f"Could not parse request body: {e}")
+            data = {}
+            
         secret = data.get('secret', '')
+        code = data.get('code', '')
         session = data.get('session', '')
+        username = data.get('username', '')
         client_time_str = data.get('client_time')
-        # Always use server time for code generation:
+        adjusted_time_str = data.get('adjusted_time')
+        
+        # Use timezone-aware server time
         server_time = datetime.now(timezone.utc)
-        totp = pyotp.TOTP(secret)
-        current_code = totp.now()
-        # Return only current code and windowed codes:
-        codes = [totp.at(server_time + timedelta(seconds=30 * i)) for i in range(-1, 2)]
-        return jsonify({
-            "current_code": current_code,
-            "valid_codes": codes,
-            "server_time": server_time.isoformat(),
-            "time_window": f"{int(datetime.now().timestamp()) % 30}/30 seconds"
-        })
+        
+        # Parse client_time and adjusted_time with parse_iso_datetime
+        time_diff_seconds = None
+        if client_time_str:
+            try:
+                client_dt = parse_iso_datetime(client_time_str)
+                time_diff_seconds = get_time_difference_seconds(server_time, client_dt)
+                logger.info(f"Client time: {client_time_str}, Time difference: {time_diff_seconds} seconds")
+            except Exception as time_error:
+                logger.warning(f"Error parsing client time: {time_error}")
+        
+        if adjusted_time_str:
+            logger.info(f"Client adjusted time: {adjusted_time_str}")
+        
+        # If session is provided, try to get a secret code from it
+        actual_secret = secret
+        if session and username and secret == "AAAAAAAAAA":
+            try:
+                # Try to associate a software token with the session
+                try:
+                    cognito_client = boto3.client("cognito-idp", region_name=os.getenv("REGION", "us-east-1"))
+                    associate_response = cognito_client.associate_software_token(Session=session)
+                    actual_secret = associate_response.get("SecretCode", "")
+                    logger.info(f"Retrieved secret from session: {actual_secret}")
+                except Exception as assoc_error:
+                    logger.warning(f"Could not associate token with session: {assoc_error}")
+            except Exception as secret_error:
+                logger.warning(f"Error retrieving secret: {secret_error}")
+        
+        if not actual_secret:
+            # If we still don't have a secret, just return the server time
+            return jsonify({
+                "server_time": server_time.isoformat(),
+                "time_sync_info": {
+                    "server_time": server_time.isoformat(),
+                    "client_time": client_time_str,
+                    "adjusted_time": adjusted_time_str,
+                    "time_drift": time_diff_seconds
+                }
+            })
+        
+        # Now generate TOTP codes with the secret we have
+        try:
+            totp = pyotp.TOTP(actual_secret)
+            current_time = time.time()
+            current_code = totp.now()
+            
+            # Generate adjacent codes using server_time
+            prev_code = totp.at(server_time - timedelta(seconds=30))
+            next_code = totp.at(server_time + timedelta(seconds=30))
+            
+            # Generate a code based on adjusted_time if provided
+            client_current_code = None
+            if adjusted_time_str:
+                try:
+                    adjusted_dt = parse_iso_datetime(adjusted_time_str)
+                    client_current_code = totp.at(adjusted_dt)
+                    logger.info(f"Code based on client adjusted time: {client_current_code}")
+                except Exception as adj_error:
+                    logger.warning(f"Error using adjusted time: {adj_error}")
+            
+            # Generate multiple valid codes for different time windows
+            valid_codes = []
+            for i in range(-5, 6):  # Check ±5 time windows
+                window_time = server_time + timedelta(seconds=30 * i)
+                valid_codes.append({
+                    "window": i,
+                    "code": totp.at(window_time),
+                    "time": window_time.isoformat()
+                })
+            
+            # Always return the current valid code when no validation code is provided
+            if not code:
+                return jsonify({
+                    "valid": True,
+                    "current_code": current_code,
+                    "client_code": client_current_code or current_code,
+                    "prev_code": prev_code,
+                    "next_code": next_code,
+                    "timestamp": int(current_time),
+                    "server_time": server_time.isoformat(),
+                    "time_sync_info": {
+                        "server_time": server_time.isoformat(),
+                        "client_time": client_time_str,
+                        "adjusted_time": adjusted_time_str,
+                        "time_drift": time_diff_seconds
+                    },
+                    "time_windows": valid_codes
+                })
+            
+            # Verify the provided code with an extended window
+            is_valid = False
+            if code:
+                is_valid = totp.verify(code, valid_window=5)
+                
+                # If not valid with server time, check if it matches the client_current_code
+                if not is_valid and client_current_code:
+                    is_valid = (code == client_current_code)
+                
+                logger.info(f"Code validation result: {is_valid}, Server code: {current_code}, Client code: {client_current_code}")
+            else:
+                is_valid = True  # If no code is provided, we skip verification
+            
+            return jsonify({
+                "valid": is_valid,
+                "provided_code": code if code else "Not provided",
+                "current_code": current_code,
+                "client_code": client_current_code,
+                "prev_code": prev_code,
+                "next_code": next_code,
+                "timestamp": int(current_time),
+                "time_window": f"{int(current_time) % 30}/30 seconds",
+                "server_time": server_time.isoformat(),
+                "time_sync_info": {
+                    "server_time": server_time.isoformat(),
+                    "client_time": client_time_str,
+                    "adjusted_time": adjusted_time_str,
+                    "time_drift": time_diff_seconds
+                },
+                "time_windows": valid_codes
+            })
+        except Exception as totp_error:
+            logger.error(f"TOTP error: {totp_error}")
+            return jsonify({
+                "valid": False,
+                "error": str(totp_error),
+                "server_time": server_time.isoformat()
+            }), 500
     except Exception as e:
         logger.error(f"Error in direct_test_mfa_code: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/auth/authenticate", methods=["POST", "OPTIONS"])
-def direct_authenticate():
-    if request.method == "OPTIONS":
-        return handle_preflight_request()
-    # (rest of authenticate logic unchanged)
-    
-# All other direct fallback routes remain unchanged and should map to your blueprint handlers
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 8080)))
+        logger.error(traceback.format_exc())
+        return jsonify({
+            "valid": False,
+            "error": str(e),
+            "server_time": datetime.now(timezone.utc).isoformat()
+        }), 500
