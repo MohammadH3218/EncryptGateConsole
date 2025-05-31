@@ -13,11 +13,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2 } from "lucide-react";
 
-// Only keep the fields your backend actually uses:
+// If you truly need to distinguish between “admin” vs. “employee,” keep this.
+// Otherwise you can remove it and remove any references to `userType`.
 type UserType = "admin" | "employee";
 
 interface LoginResponse {
@@ -28,7 +35,6 @@ interface LoginResponse {
   ChallengeName?: string;
   session?: string;
   secretCode?: string;
-  message?: string;
   detail?: string;
   serverGeneratedCode?: string;
 }
@@ -36,15 +42,15 @@ interface LoginResponse {
 export default function LoginPage() {
   const router = useRouter();
 
-  // If you do need “admin” vs. “employee” on login, keep this.
-  // Otherwise you can remove it entirely and drop “userType” from finalizeLogin.
+  // If you need to send a “userType” to the back end, keep this state.
+  // If not, you may delete `userType` everywhere.
   const [userType, setUserType] = useState<UserType>("admin");
 
   // Basic login fields
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Generic error/success message
+  // Generic error/success
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
@@ -52,26 +58,27 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   // ---- CHALLENGE STATES ----
-  // 1) If NEW_PASSWORD_REQUIRED, show this dialog:
+  // 1) NEW_PASSWORD_REQUIRED
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  // 2) If MFA (SOFTWARE_TOKEN_MFA), show this dialog:
+  // 2) SOFTWARE_TOKEN_MFA (enter code)
   const [showMFA, setShowMFA] = useState(false);
   const [mfaCode, setMfaCode] = useState("");
 
-  // 3) If MFA_SETUP (secretCode from the server), show this dialog:
+  // 3) MFA_SETUP (QR & enter first code)
   const [showMFASetup, setShowMFASetup] = useState(false);
   const [mfaSecretCode, setMfaSecretCode] = useState("");
   const [setupMfaCode, setSetupMfaCode] = useState("");
   const [validMfaCodes, setValidMfaCodes] = useState<string[]>([]);
 
-  // Back-end session handle (returned by challenge flows)
+  // Back-end challenge/session handle
   const [session, setSession] = useState("");
 
-  // Figure out your API base URL (either from env or fallback)
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.console-encryptgate.net";
+  // API base URL (must match where your back end lives)
+  const API_BASE =
+    process.env.NEXT_PUBLIC_API_URL || "https://api.console-encryptgate.net";
 
   // ===========================================
   // 1) MAIN LOGIN SUBMIT
@@ -88,9 +95,16 @@ export default function LoginPage() {
     try {
       const resp = await fetch(`${API_BASE}/api/auth/authenticate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        credentials: "include", // IMPORTANT: let the HttpOnly cookie be set by the backend
-        body: JSON.stringify({ username: email, password }),
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        credentials: "include", // so that the HttpOnly cookie set by the backend is stored
+        body: JSON.stringify({
+          username: email,
+          password,
+          userType, // only if your back end expects it
+        }),
       });
 
       const data: LoginResponse = await resp.json();
@@ -99,54 +113,58 @@ export default function LoginPage() {
         throw new Error(data.detail || `Authentication failed (${resp.status})`);
       }
 
-      // If the back end returns a “session” field, we save it to handle the next challenge
+      // If the backend returns “session” (for next challenge), keep it
       if (data.session) {
         setSession(data.session);
       }
 
-      // If the back end explicitly requests a password change:
+      // Handle NEW_PASSWORD_REQUIRED
       if (data.ChallengeName === "NEW_PASSWORD_REQUIRED") {
         setShowPasswordChange(true);
         return;
       }
 
-      // If the back end returns “mfa_required” or ChallengeName=SOFTWARE_TOKEN_MFA:
+      // Handle SOFTWARE_TOKEN_MFA / mfa_required
       if (data.mfa_required || data.ChallengeName === "SOFTWARE_TOKEN_MFA") {
         setShowMFA(true);
         return;
       }
 
-      // If the back end returned an access_token (fully authenticated):
+      // If we got an access_token, user is fully authenticated—maybe need MFA setup
       if (data.access_token) {
-        // Check if we need to set up MFA for the first time
-        // (some flows do this immediately after password auth).
+        // Check if the backend wants us to set up MFA first
         try {
           const check = await fetch(`${API_BASE}/api/auth/setup-mfa`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
             credentials: "include",
             body: JSON.stringify({ access_token: data.access_token }),
           });
           const m = await check.json();
           if (m.secretCode) {
-            // The back end wants us to run MFA setup now
+            // Backend says: “Here’s your TOTP secret—set up MFA now”
             setMfaSecretCode(m.secretCode);
             if (m.validCodes) {
-              setValidMfaCodes(Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes]);
+              setValidMfaCodes(
+                Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes]
+              );
             }
             setShowMFASetup(true);
             return;
           }
         } catch {
-          // If the /setup-mfa call fails, just move on to finalize
+          // Ignore failures here; just finalize login below
         }
 
-        // No MFA setup needed, so finish login:
+        // No MFA setup required—finish login:
         finalizeLogin(data.access_token, data.id_token || "", data.refresh_token || "");
         return;
       }
 
-      // If none of the above happened, it’s an unexpected response:
+      // If we reach here, it’s unexpected
       throw new Error("Unexpected authentication response");
     } catch (e: any) {
       console.error("Login error:", e);
@@ -157,7 +175,7 @@ export default function LoginPage() {
   };
 
   // ===========================================
-  // 2) HANDLE NEW_PASSWORD_REQUIRED
+  // 2) HANDLE NEW_PASSWORD_REQUIRED CHALLENGE
   // ===========================================
   const handlePasswordChange = async () => {
     if (!newPassword || newPassword.length < 8) {
@@ -179,7 +197,10 @@ export default function LoginPage() {
     try {
       const resp = await fetch(`${API_BASE}/api/auth/respond-to-challenge`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         credentials: "include",
         body: JSON.stringify({
           username: email,
@@ -194,18 +215,20 @@ export default function LoginPage() {
         throw new Error(d.detail || `Password change failed (${resp.status})`);
       }
 
-      // If the back end returned a new session, store it
+      // If the backend returned a new “session” (for next challenge), store it
       if (d.session) {
         setSession(d.session);
       }
 
-      // If the back end now sends an access_token (meaning we passed NEW_PASSWORD_REQUIRED)
+      // If the backend returns an access_token now, check for MFA setup
       if (d.access_token) {
-        // Check for MFA setup again
         try {
           const check = await fetch(`${API_BASE}/api/auth/setup-mfa`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
             credentials: "include",
             body: JSON.stringify({ access_token: d.access_token }),
           });
@@ -213,7 +236,9 @@ export default function LoginPage() {
           if (m.secretCode) {
             setMfaSecretCode(m.secretCode);
             if (m.validCodes) {
-              setValidMfaCodes(Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes]);
+              setValidMfaCodes(
+                Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes]
+              );
             }
             setShowPasswordChange(false);
             setShowMFASetup(true);
@@ -223,19 +248,19 @@ export default function LoginPage() {
           // ignore
         }
 
-        // No MFA setup required; finalize:
+        // No MFA setup—finalize
         finalizeLogin(d.access_token, d.id_token || "", d.refresh_token || "");
         return;
       }
 
-      // Alternatively, if the back end replied with another challenge:
+      // If the backend says “SOFTWARE_TOKEN_MFA” next:
       if (d.ChallengeName === "SOFTWARE_TOKEN_MFA") {
         setShowPasswordChange(false);
         setShowMFA(true);
         return;
       }
 
-      // Otherwise, fallback: attempt a fresh login
+      // Otherwise, fallback to a fresh login attempt
       setShowPasswordChange(false);
       await handleLogin();
     } catch (e: any) {
@@ -247,7 +272,7 @@ export default function LoginPage() {
   };
 
   // ===========================================
-  // 3) HANDLE MFA SETUP (Secret Code → Verify)
+  // 3) HANDLE MFA SETUP (MFA_SETUP challenge)
   // ===========================================
   const handleMFASetup = async () => {
     if (!setupMfaCode.match(/^\d{6}$/)) {
@@ -265,21 +290,23 @@ export default function LoginPage() {
     try {
       const resp = await fetch(`${API_BASE}/api/auth/confirm-mfa-setup`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         credentials: "include",
         body: JSON.stringify({
           username: email,
           session,
           code: setupMfaCode,
-          // We assume the backend knows how to verify against the stored secret
         }),
       });
       const d: LoginResponse = await resp.json();
 
       if (!resp.ok) {
-        // If the server says “ExpiredCodeException,” we treat it as success:
+        // If backend says “ExpiredCodeException,” treat it as success:
         if (resp.status === 400 && d.detail?.includes("ExpiredCodeException")) {
-          // simply finalize with the tokens in localStorage
+          // Some back ends store tokens briefly in localStorage during setup—check and finalize
           const access = localStorage.getItem("temp_access_token") || "";
           const idt = localStorage.getItem("temp_id_token") || "";
           const ref = localStorage.getItem("temp_refresh_token") || "";
@@ -289,7 +316,7 @@ export default function LoginPage() {
         throw new Error(d.detail || `MFA setup failed (${resp.status})`);
       }
 
-      // On success, the back end returns new tokens in JSON
+      // On success, backend returns fresh tokens
       finalizeLogin(d.access_token || "", d.id_token || "", d.refresh_token || "");
     } catch (e: any) {
       console.error("MFA setup error:", e);
@@ -300,7 +327,7 @@ export default function LoginPage() {
   };
 
   // ===========================================
-  // 4) HANDLE MFA VERIFY (Login / Password Change Flow)
+  // 4) HANDLE MFA VERIFY (SOFTWARE_TOKEN_MFA challenge)
   // ===========================================
   const handleMFASubmit = async () => {
     if (!mfaCode.match(/^\d{6}$/)) {
@@ -318,7 +345,10 @@ export default function LoginPage() {
     try {
       const resp = await fetch(`${API_BASE}/api/auth/verify-mfa`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         credentials: "include",
         body: JSON.stringify({
           username: email,
@@ -329,11 +359,14 @@ export default function LoginPage() {
       const d: LoginResponse = await resp.json();
 
       if (!resp.ok) {
-        // If they return a `serverGeneratedCode` (rotating TOTP window), let’s try it
+        // If backend returns `serverGeneratedCode`, try that once:
         if (d.serverGeneratedCode) {
           const retry = await fetch(`${API_BASE}/api/auth/verify-mfa`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "application/json",
+            },
             credentials: "include",
             body: JSON.stringify({
               username: email,
@@ -364,8 +397,8 @@ export default function LoginPage() {
   // 5) FINALIZE LOGIN: store tokens and redirect
   // ===========================================
   const finalizeLogin = (access: string, id: string, refresh: string) => {
-    // These are non-HttpOnly tokens (visible to JS), 
-    // but your back end ALSO set an HttpOnly cookie “gid” at /authenticate.
+    // In addition to the HttpOnly cookie the backend already set,
+    // we store these tokens in localStorage if your front end needs them.
     localStorage.setItem("access_token", access);
     localStorage.setItem("id_token", id);
     localStorage.setItem("refresh_token", refresh);
@@ -392,8 +425,7 @@ export default function LoginPage() {
           }}
         >
           <CardContent className="space-y-6">
-            {/* If you do need the “admin vs. employee” choice, you can re-enable this group.
-                Otherwise, just delete this <div> block entirely. */}
+            {/* Remove this <div> entirely if you don’t need “admin vs. employee” */}
             <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
               <Input
@@ -481,7 +513,8 @@ export default function LoginPage() {
             )}
             <Alert>
               <AlertDescription>
-                Password must be at least 8 characters, include uppercase, lowercase, numbers, and special characters.
+                Password must be at least 8 characters, include uppercase, lowercase,
+                numbers, and special characters.
               </AlertDescription>
             </Alert>
           </div>
@@ -526,7 +559,6 @@ export default function LoginPage() {
               </AlertDescription>
             </Alert>
 
-            {/* QR code (just a data URI showing the base32 secret) */}
             {mfaSecretCode && (
               <div className="flex flex-col items-center space-y-2">
                 <Label>Scan QR Code</Label>
