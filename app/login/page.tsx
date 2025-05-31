@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -9,647 +9,391 @@ import {
   CardHeader,
   CardTitle,
   CardFooter,
-} from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { LogoText } from "@/components/ui/logo-text"
-import { fetchWithRetry, getAdjustedTime } from "@/utils/auth"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2 } from "lucide-react"
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Loader2 } from "lucide-react";
 
-type UserType = "admin" | "employee"
+// Only keep the fields your backend actually uses:
+type UserType = "admin" | "employee";
 
 interface LoginResponse {
-  access_token?: string
-  id_token?: string
-  refresh_token?: string
-  mfa_required?: boolean
-  ChallengeName?: string
-  session?: string
-  secretCode?: string
-  message?: string
-  status?: string
-  current_code?: string
-  time_windows?: { code: string }[]
-  validCodes?: string[]
-  serverGeneratedCode?: string
-  currentValidCode?: string
-  timeInfo?: any
-  detail?: string
+  access_token?: string;
+  id_token?: string;
+  refresh_token?: string;
+  mfa_required?: boolean;
+  ChallengeName?: string;
+  session?: string;
+  secretCode?: string;
+  message?: string;
+  detail?: string;
+  serverGeneratedCode?: string;
 }
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [userType, setUserType] = useState<UserType>("admin")
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState("")
-  const [successMessage, setSuccessMessage] = useState("")
+  const router = useRouter();
 
-  // MFA states
-  const [showMFA, setShowMFA] = useState(false)
-  const [mfaCode, setMfaCode] = useState("")
-  const [mfaRecoveryCodes, setMfaRecoveryCodes] = useState<string[]>([])
+  // If you do need “admin” vs. “employee” on login, keep this.
+  // Otherwise you can remove it entirely and drop “userType” from finalizeLogin.
+  const [userType, setUserType] = useState<UserType>("admin");
 
-  // Password change states
-  const [showPasswordChange, setShowPasswordChange] = useState(false)
-  const [newPassword, setNewPassword] = useState("")
-  const [confirmPassword, setConfirmPassword] = useState("")
+  // Basic login fields
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
-  // MFA setup states
-  const [showMFASetup, setShowMFASetup] = useState(false)
-  const [mfaSecretCode, setMfaSecretCode] = useState("")
-  const [setupMfaCode, setSetupMfaCode] = useState("")
-  const [qrCodeUrl, setQrCodeUrl] = useState("")
-  const [validMfaCodes, setValidMfaCodes] = useState<string[]>([])
+  // Generic error/success message
+  const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
-  // Forgot-password states
-  const [showForgotPassword, setShowForgotPassword] = useState(false)
-  const [forgotPasswordEmail, setForgotPasswordEmail] = useState("")
-  const [forgotPasswordStep, setForgotPasswordStep] = useState(1)
-  const [forgotPasswordCode, setForgotPasswordCode] = useState("")
-  const [newForgotPassword, setNewForgotPassword] = useState("")
-  const [confirmForgotPassword, setConfirmForgotPassword] = useState("")
-  const [forgotPasswordError, setForgotPasswordError] = useState("")
-  const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false)
+  // Loading spinner
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Server/time
-  const [session, setSession] = useState("")
-  const [serverTime, setServerTime] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null)
+  // ---- CHALLENGE STATES ----
+  // 1) If NEW_PASSWORD_REQUIRED, show this dialog:
+  const [showPasswordChange, setShowPasswordChange] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
-  // initialize API base
-  useEffect(() => {
-    const configured = process.env.NEXT_PUBLIC_API_URL
-    const fallback = "https://api.console-encryptgate.net"
-    const base = configured || fallback
-    setApiBaseUrl(base)
-    console.log(`API URL set to ${base}`)
-    if (base) fetchServerTime(base)
-  }, [])
+  // 2) If MFA (SOFTWARE_TOKEN_MFA), show this dialog:
+  const [showMFA, setShowMFA] = useState(false);
+  const [mfaCode, setMfaCode] = useState("");
 
-  // fetch server time & offset
-  const fetchServerTime = async (base: string) => {
-    try {
-      const res = await fetchWithRetry(
-        `${base}/api/auth/test-mfa-code`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            secret: mfaSecretCode || "AAAAAAAAAA",
-            client_time: new Date().toISOString(),
-            adjusted_time: getAdjustedTime()?.toISOString(),
-          }),
-        }
-      )
-      const data = await res.json()
-      if (data.server_time) {
-        setServerTime(data.server_time)
-        const offset = new Date(data.server_time).getTime() - Date.now()
-        localStorage.setItem("server_time_offset", offset.toString())
-        if (Math.abs(offset) > 10000)
-          console.warn(`Time sync diff >10s: ${Math.round(Math.abs(offset)/1000)}s`)
-      }
-    } catch (e) {
-      console.error("Failed fetching server time", e)
-    }
-  }
+  // 3) If MFA_SETUP (secretCode from the server), show this dialog:
+  const [showMFASetup, setShowMFASetup] = useState(false);
+  const [mfaSecretCode, setMfaSecretCode] = useState("");
+  const [setupMfaCode, setSetupMfaCode] = useState("");
+  const [validMfaCodes, setValidMfaCodes] = useState<string[]>([]);
 
-  // build QR code URL
-  useEffect(() => {
-    if (!mfaSecretCode) return
-    const issuer = "EncryptGate"
-    const uri = `otpauth://totp/${issuer.toLowerCase()}:${encodeURIComponent(email)}?secret=${mfaSecretCode}&issuer=${issuer.toLowerCase()}`
-    setQrCodeUrl(
-      `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(uri)}`
-    )
-    getServerGeneratedCodes(false)
-  }, [mfaSecretCode, email])
+  // Back-end session handle (returned by challenge flows)
+  const [session, setSession] = useState("");
 
-  // helper to fetch valid codes array
-  const getServerGeneratedCodes = async (populate = false) => {
-    if (!apiBaseUrl || !mfaSecretCode) return
-    try {
-      const adjusted = getAdjustedTime()
-      const res = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/test-mfa-code`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            secret: mfaSecretCode,
-            client_time: new Date().toISOString(),
-            adjusted_time: adjusted?.toISOString(),
-          }),
-        }
-      )
-      const d = await res.json()
-      if (d.current_code) {
-        if (populate) setSetupMfaCode(d.current_code)
-        if (d.time_windows) {
-          setValidMfaCodes(d.time_windows.map((w: any) => w.code))
-        } else if (d.validCodes) {
-          setValidMfaCodes(d.validCodes)
-        }
-      }
-    } catch (e) {
-      console.error("Error fetching MFA codes", e)
-    }
-  }
+  // Figure out your API base URL (either from env or fallback)
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://api.console-encryptgate.net";
 
-  // ------------------------------
-  // MAIN LOGIN
-  // ------------------------------
+  // ===========================================
+  // 1) MAIN LOGIN SUBMIT
+  // ===========================================
   const handleLogin = async () => {
-    if (!apiBaseUrl) {
-      setError("API URL not set")
-      return
+    if (!email || !password) {
+      setError("Email and password are required");
+      return;
     }
-    setIsLoading(true)
-    setError("")
-    setSuccessMessage("")
-
-    // use temp_password if present
-    const stored = sessionStorage.getItem("temp_password")
-    const pwToUse = stored || password
+    setIsLoading(true);
+    setError("");
+    setSuccessMessage("");
 
     try {
-      console.log("Authenticating:", email)
-      const resp = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/authenticate`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          mode: "cors",
-          body: JSON.stringify({ username: email, password: pwToUse }),
-        }
-      )
-      const data: LoginResponse = await resp.json()
-      console.log("Auth response status:", resp.status)
+      const resp = await fetch(`${API_BASE}/api/auth/authenticate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        credentials: "include", // IMPORTANT: let the HttpOnly cookie be set by the backend
+        body: JSON.stringify({ username: email, password }),
+      });
+
+      const data: LoginResponse = await resp.json();
 
       if (!resp.ok) {
-        throw new Error(data.detail || `Authentication failed (${resp.status})`)
+        throw new Error(data.detail || `Authentication failed (${resp.status})`);
       }
 
-      // store session for challenges
+      // If the back end returns a “session” field, we save it to handle the next challenge
       if (data.session) {
-        setSession(data.session)
+        setSession(data.session);
       }
 
-      // if new-password or mfa required
-      if (
-        data.ChallengeName === "NEW_PASSWORD_REQUIRED" ||
-        data.mfa_required ||
-        data.ChallengeName === "SOFTWARE_TOKEN_MFA"
-      ) {
-        // keep pw for next step
-        sessionStorage.setItem("temp_password", pwToUse)
-      }
-
+      // If the back end explicitly requests a password change:
       if (data.ChallengeName === "NEW_PASSWORD_REQUIRED") {
-        setShowPasswordChange(true)
-      } else if (data.ChallengeName === "SOFTWARE_TOKEN_MFA" || data.mfa_required) {
-        setShowMFA(true)
-        await fetchServerTime(apiBaseUrl)
-      } else if (data.access_token) {
-        // fully authed, check if MFA setup needed
-        try {
-          const check = await fetchWithRetry(
-            `${apiBaseUrl}/api/auth/setup-mfa`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              credentials: "include",
-              mode: "cors",
-              body: JSON.stringify({ access_token: data.access_token }),
-            },
-            1
-          )
-          if (check.ok) {
-            const m = await check.json()
-            if (m.secretCode) {
-              // MFA setup flow
-              setMfaSecretCode(m.secretCode)
-              localStorage.setItem("temp_access_token", data.access_token)
-              localStorage.setItem("temp_id_token", data.id_token||"")
-              localStorage.setItem("temp_refresh_token", data.refresh_token||"")
-              if (m.validCodes) {
-                setValidMfaCodes(Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes])
-              }
-              setShowMFASetup(true)
-              return
-            }
-          }
-        } catch (_) {
-          // ignore
-        }
-        // no setup needed, finalize login
-        finalizeLogin(data.access_token!, data.id_token||"", data.refresh_token||"")
-      } else {
-        throw new Error("Unexpected authentication response")
+        setShowPasswordChange(true);
+        return;
       }
+
+      // If the back end returns “mfa_required” or ChallengeName=SOFTWARE_TOKEN_MFA:
+      if (data.mfa_required || data.ChallengeName === "SOFTWARE_TOKEN_MFA") {
+        setShowMFA(true);
+        return;
+      }
+
+      // If the back end returned an access_token (fully authenticated):
+      if (data.access_token) {
+        // Check if we need to set up MFA for the first time
+        // (some flows do this immediately after password auth).
+        try {
+          const check = await fetch(`${API_BASE}/api/auth/setup-mfa`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ access_token: data.access_token }),
+          });
+          const m = await check.json();
+          if (m.secretCode) {
+            // The back end wants us to run MFA setup now
+            setMfaSecretCode(m.secretCode);
+            if (m.validCodes) {
+              setValidMfaCodes(Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes]);
+            }
+            setShowMFASetup(true);
+            return;
+          }
+        } catch {
+          // If the /setup-mfa call fails, just move on to finalize
+        }
+
+        // No MFA setup needed, so finish login:
+        finalizeLogin(data.access_token, data.id_token || "", data.refresh_token || "");
+        return;
+      }
+
+      // If none of the above happened, it’s an unexpected response:
+      throw new Error("Unexpected authentication response");
     } catch (e: any) {
-      console.error("Login error:", e)
-      setError(e.message || "Login failed")
+      console.error("Login error:", e);
+      setError(e.message || "Login failed");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
-  // helper to store tokens + clear temp
-  const finalizeLogin = (access: string, id: string, refresh: string) => {
-    localStorage.setItem("access_token", access)
-    localStorage.setItem("id_token", id)
-    localStorage.setItem("refresh_token", refresh)
-    localStorage.setItem("userType", userType)
-    sessionStorage.removeItem("temp_password")
-    router.push("/admin/dashboard")
-  }
-
-  // ------------------------------
-  // PASSWORD CHANGE
-  // ------------------------------
+  // ===========================================
+  // 2) HANDLE NEW_PASSWORD_REQUIRED
+  // ===========================================
   const handlePasswordChange = async () => {
-    if (!apiBaseUrl || !session) {
-      setError("Cannot change password now")
-      return
+    if (!newPassword || newPassword.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
     }
     if (newPassword !== confirmPassword) {
-      setError("Passwords do not match")
-      return
+      setError("Passwords do not match");
+      return;
     }
-    if (newPassword.length < 8) {
-      setError("Password must be ≥8 characters")
-      return
-    }
-    setIsLoading(true)
-    setError("")
-
-    try {
-      console.log("NEW_PASSWORD_REQUIRED challenge")
-      const res = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/respond-to-challenge`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          mode: "cors",
-          body: JSON.stringify({
-            username: email,
-            session,
-            challengeName: "NEW_PASSWORD_REQUIRED",
-            challengeResponses: { NEW_PASSWORD: newPassword },
-          }),
-        },
-        1
-      )
-      const d = await res.json()
-      console.log("Password change status:", res.status)
-      if (!res.ok) {
-        throw new Error(d.detail || `Failed to change password (${res.status})`)
-      }
-
-      // store new pw for next login
-      sessionStorage.setItem("temp_password", newPassword)
-      if (d.session) setSession(d.session)
-
-      if (d.access_token) {
-        // same as above: maybe need MFA setup
-        try {
-          const check = await fetchWithRetry(
-            `${apiBaseUrl}/api/auth/setup-mfa`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              credentials: "include",
-              mode: "cors",
-              body: JSON.stringify({ access_token: d.access_token }),
-            },
-            1
-          )
-          if (check.ok) {
-            const m = await check.json()
-            if (m.secretCode) {
-              setShowPasswordChange(false)
-              setMfaSecretCode(m.secretCode)
-              localStorage.setItem("temp_access_token", d.access_token)
-              localStorage.setItem("temp_id_token", d.id_token||"")
-              localStorage.setItem("temp_refresh_token", d.refresh_token||"")
-              if (m.validCodes) {
-                setValidMfaCodes(Array.isArray(m.validCodes)?m.validCodes:[m.validCodes])
-              }
-              setShowMFASetup(true)
-              return
-            }
-          }
-        } catch (_) {}
-        // no setup needed
-        finalizeLogin(d.access_token, d.id_token||"", d.refresh_token||"")
-      } else if (d.ChallengeName) {
-        if (d.ChallengeName === "SOFTWARE_TOKEN_MFA") {
-          setShowPasswordChange(false)
-          setShowMFA(true)
-        } else if (d.ChallengeName === "MFA_SETUP") {
-          setShowPasswordChange(false)
-          setMfaSecretCode(d.secretCode||"")
-          setShowMFASetup(true)
-        } else {
-          throw new Error(`Unexpected challenge: ${d.ChallengeName}`)
-        }
-      } else {
-        // fallback: just attempt login
-        setShowPasswordChange(false)
-        await handleLogin()
-      }
-    } catch (e: any) {
-      console.error("Password change error", e)
-      setError(e.message || "Failed to change password")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // ------------------------------
-  // MFA SETUP
-  // ------------------------------
-  const handleMFASetup = async () => {
-    if (!apiBaseUrl) return setError("API URL missing")
-    if (!setupMfaCode.match(/^\d{6}$/))
-      return setError("Enter 6-digit code from app")
-
-    setIsLoading(true)
-    setError("")
-    setSuccessMessage("")
-    const saved = sessionStorage.getItem("temp_password") || ""
     if (!session) {
-      setError("Session expired, please log in again")
-      setIsLoading(false)
-      return
+      setError("Session expired, please log in again");
+      return;
     }
 
+    setIsLoading(true);
+    setError("");
+
     try {
-      const adjusted = getAdjustedTime()
-      const resp = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/confirm-mfa-setup`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          mode: "cors",
-          body: JSON.stringify({
-            username: email,
-            session,
-            code: setupMfaCode,
-            password: saved,
-            client_time: new Date().toISOString(),
-            adjusted_time: adjusted?.toISOString(),
-          }),
-        },
-        2
-      )
-      const d = await resp.json()
-      console.log("MFA setup verify status:", resp.status)
+      const resp = await fetch(`${API_BASE}/api/auth/respond-to-challenge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          username: email,
+          session,
+          challengeName: "NEW_PASSWORD_REQUIRED",
+          challengeResponses: { NEW_PASSWORD: newPassword },
+        }),
+      });
+      const d: LoginResponse = await resp.json();
+
       if (!resp.ok) {
-        // handle expired-code as success
-        if (
-          resp.status === 400 &&
-          d.detail?.includes("ExpiredCodeException")
-        ) {
-          // treat as success
-          localStorage.setItem("access_token", localStorage.getItem("temp_access_token")||"")
-          localStorage.setItem("id_token", localStorage.getItem("temp_id_token")||"")
-          localStorage.setItem("refresh_token", localStorage.getItem("temp_refresh_token")||"")
-          localStorage.setItem("userType", userType)
-          sessionStorage.removeItem("temp_password")
-          localStorage.removeItem("temp_access_token")
-          localStorage.removeItem("temp_id_token")
-          localStorage.removeItem("temp_refresh_token")
-          router.push("/admin/dashboard")
-          return
-        }
-        throw new Error(d.detail || `MFA setup failed (${resp.status})`)
+        throw new Error(d.detail || `Password change failed (${resp.status})`);
       }
 
-      // success path
-      localStorage.setItem("access_token", d.access_token||"")
-      localStorage.setItem("id_token", d.id_token||"")
-      localStorage.setItem("refresh_token", d.refresh_token||"")
-      localStorage.setItem("userType", userType)
-      sessionStorage.removeItem("temp_password")
-      localStorage.removeItem("temp_access_token")
-      localStorage.removeItem("temp_id_token")
-      localStorage.removeItem("temp_refresh_token")
-      router.push("/admin/dashboard")
-    } catch (e: any) {
-      console.error("MFA setup error", e)
-      setError(e.message || "MFA setup failed")
-    } finally {
-      setIsLoading(false)
-    }
-  }
+      // If the back end returned a new session, store it
+      if (d.session) {
+        setSession(d.session);
+      }
 
-  // ------------------------------
-  // MFA VERIFY
-  // ------------------------------
-  const handleMFASubmit = async () => {
-    if (!apiBaseUrl) return setError("API URL missing")
-    if (!mfaCode.match(/^\d{6}$/))
-      return setError("Enter 6-digit code from app")
-
-    setIsLoading(true)
-    setError("")
-    setSuccessMessage("")
-    try {
-      await fetchServerTime(apiBaseUrl)
-      const adjusted = getAdjustedTime()
-      const resp = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/verify-mfa`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          mode: "cors",
-          body: JSON.stringify({
-            username: email,
-            session,
-            code: mfaCode,
-            client_time: new Date().toISOString(),
-            adjusted_time: adjusted?.toISOString(),
-          }),
-        },
-        2
-      )
-      const d = await resp.json()
-      if (!resp.ok) {
-        // try server-generated code
-        if (d.serverGeneratedCode) {
-          const retry = await fetchWithRetry(
-            `${apiBaseUrl}/api/auth/verify-mfa`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              credentials: "include",
-              mode: "cors",
-              body: JSON.stringify({
-                username: email,
-                session,
-                code: d.serverGeneratedCode,
-                client_time: new Date().toISOString(),
-                adjusted_time: adjusted?.toISOString(),
-              }),
+      // If the back end now sends an access_token (meaning we passed NEW_PASSWORD_REQUIRED)
+      if (d.access_token) {
+        // Check for MFA setup again
+        try {
+          const check = await fetch(`${API_BASE}/api/auth/setup-mfa`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ access_token: d.access_token }),
+          });
+          const m = await check.json();
+          if (m.secretCode) {
+            setMfaSecretCode(m.secretCode);
+            if (m.validCodes) {
+              setValidMfaCodes(Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes]);
             }
-          )
+            setShowPasswordChange(false);
+            setShowMFASetup(true);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        // No MFA setup required; finalize:
+        finalizeLogin(d.access_token, d.id_token || "", d.refresh_token || "");
+        return;
+      }
+
+      // Alternatively, if the back end replied with another challenge:
+      if (d.ChallengeName === "SOFTWARE_TOKEN_MFA") {
+        setShowPasswordChange(false);
+        setShowMFA(true);
+        return;
+      }
+
+      // Otherwise, fallback: attempt a fresh login
+      setShowPasswordChange(false);
+      await handleLogin();
+    } catch (e: any) {
+      console.error("Password change error:", e);
+      setError(e.message || "Failed to change password");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ===========================================
+  // 3) HANDLE MFA SETUP (Secret Code → Verify)
+  // ===========================================
+  const handleMFASetup = async () => {
+    if (!setupMfaCode.match(/^\d{6}$/)) {
+      setError("Enter a 6-digit code");
+      return;
+    }
+    if (!session) {
+      setError("Session expired, please log in again");
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/auth/confirm-mfa-setup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          username: email,
+          session,
+          code: setupMfaCode,
+          // We assume the backend knows how to verify against the stored secret
+        }),
+      });
+      const d: LoginResponse = await resp.json();
+
+      if (!resp.ok) {
+        // If the server says “ExpiredCodeException,” we treat it as success:
+        if (resp.status === 400 && d.detail?.includes("ExpiredCodeException")) {
+          // simply finalize with the tokens in localStorage
+          const access = localStorage.getItem("temp_access_token") || "";
+          const idt = localStorage.getItem("temp_id_token") || "";
+          const ref = localStorage.getItem("temp_refresh_token") || "";
+          finalizeLogin(access, idt, ref);
+          return;
+        }
+        throw new Error(d.detail || `MFA setup failed (${resp.status})`);
+      }
+
+      // On success, the back end returns new tokens in JSON
+      finalizeLogin(d.access_token || "", d.id_token || "", d.refresh_token || "");
+    } catch (e: any) {
+      console.error("MFA setup error:", e);
+      setError(e.message || "MFA setup failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ===========================================
+  // 4) HANDLE MFA VERIFY (Login / Password Change Flow)
+  // ===========================================
+  const handleMFASubmit = async () => {
+    if (!mfaCode.match(/^\d{6}$/)) {
+      setError("Enter a 6-digit code");
+      return;
+    }
+    if (!session) {
+      setError("Session expired, please log in again");
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const resp = await fetch(`${API_BASE}/api/auth/verify-mfa`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          username: email,
+          session,
+          code: mfaCode,
+        }),
+      });
+      const d: LoginResponse = await resp.json();
+
+      if (!resp.ok) {
+        // If they return a `serverGeneratedCode` (rotating TOTP window), let’s try it
+        if (d.serverGeneratedCode) {
+          const retry = await fetch(`${API_BASE}/api/auth/verify-mfa`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              username: email,
+              session,
+              code: d.serverGeneratedCode,
+            }),
+          });
           if (retry.ok) {
-            const r2 = await retry.json()
-            finalizeLogin(r2.access_token||"", r2.id_token||"", r2.refresh_token||"")
-            return
+            const r2: LoginResponse = await retry.json();
+            finalizeLogin(r2.access_token || "", r2.id_token || "", r2.refresh_token || "");
+            return;
           }
         }
-        throw new Error(d.detail || "MFA verify failed")
+        throw new Error(d.detail || "MFA verification failed");
       }
-      // success
-      finalizeLogin(d.access_token||"", d.id_token||"", d.refresh_token||"")
+
+      // On success, finalize:
+      finalizeLogin(d.access_token || "", d.id_token || "", d.refresh_token || "");
     } catch (e: any) {
-      console.error("MFA verify error", e)
-      setError(e.message || "MFA verification failed")
+      console.error("MFA verify error:", e);
+      setError(e.message || "MFA verification failed");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }
+  };
 
-  // ------------------------------
-  // FORGOT PASSWORD
-  // ------------------------------
-  const handleForgotPasswordRequest = async () => {
-    if (!forgotPasswordEmail) return setForgotPasswordError("Enter email")
-    setIsForgotPasswordLoading(true)
-    setForgotPasswordError("")
-    try {
-      const res = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/forgot-password`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          mode: "cors",
-          body: JSON.stringify({ username: forgotPasswordEmail }),
-        }
-      )
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.detail || `Error ${res.status}`)
-      setForgotPasswordStep(2)
-    } catch (e: any) {
-      setForgotPasswordError(e.message || "Failed to send code")
-    } finally {
-      setIsForgotPasswordLoading(false)
-    }
-  }
+  // ===========================================
+  // 5) FINALIZE LOGIN: store tokens and redirect
+  // ===========================================
+  const finalizeLogin = (access: string, id: string, refresh: string) => {
+    // These are non-HttpOnly tokens (visible to JS), 
+    // but your back end ALSO set an HttpOnly cookie “gid” at /authenticate.
+    localStorage.setItem("access_token", access);
+    localStorage.setItem("id_token", id);
+    localStorage.setItem("refresh_token", refresh);
+    localStorage.setItem("userType", userType);
+    router.replace("/admin/dashboard");
+  };
 
-  const handleForgotPasswordConfirm = async () => {
-    if (!forgotPasswordCode) return setForgotPasswordError("Enter code")
-    if (!newForgotPassword) return setForgotPasswordError("Enter new password")
-    if (newForgotPassword !== confirmForgotPassword)
-      return setForgotPasswordError("Passwords don’t match")
-
-    setIsForgotPasswordLoading(true)
-    setForgotPasswordError("")
-    try {
-      const res = await fetchWithRetry(
-        `${apiBaseUrl}/api/auth/confirm-forgot-password`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          mode: "cors",
-          body: JSON.stringify({
-            username: forgotPasswordEmail,
-            code: forgotPasswordCode,
-            password: newForgotPassword,
-          }),
-        }
-      )
-      const d = await res.json()
-      if (!res.ok) throw new Error(d.detail || `Error ${res.status}`)
-      // reset UI
-      setShowForgotPassword(false)
-      setForgotPasswordStep(1)
-      setForgotPasswordEmail("")
-      setForgotPasswordCode("")
-      setNewForgotPassword("")
-      setConfirmForgotPassword("")
-      setSuccessMessage("Password reset! Please log in.")
-    } catch (e: any) {
-      setForgotPasswordError(e.message || "Reset failed")
-    } finally {
-      setIsForgotPasswordLoading(false)
-    }
-  }
-
-  // ------------------------------
-  // RENDER
-  // ------------------------------
+  // ===========================================
+  // 6) RENDER
+  // ===========================================
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-4">
-          <div className="flex justify-center items-center gap-2">
-            <div className="w-8 h-8">
-              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path
-                  d="M16 2C8.268 2 2 8.268 2 16s6.268 14 14 14 14-6.268 14-14S23.732 2 16 2zm0 25.2c-6.188 0-11.2-5.012-11.2-11.2S9.812 4.8 16 4.8 27.2 9.812 27.2 16 22.188 27.2 16 27.2z"
-                  fill="currentColor"
-                />
-              </svg>
-            </div>
-            <LogoText>EncryptGate</LogoText>
-          </div>
           <CardTitle className="text-2xl font-bold text-center">Sign in</CardTitle>
           <CardDescription className="text-center">
-            Choose your account type to access the security dashboard
+            Access your EncryptGate dashboard
           </CardDescription>
         </CardHeader>
-
         <form
           onSubmit={(e) => {
-            e.preventDefault()
-            handleLogin()
+            e.preventDefault();
+            handleLogin();
           }}
         >
           <CardContent className="space-y-6">
-            <RadioGroup
-              value={userType}
-              onValueChange={(v: UserType) => setUserType(v)}
-              className="grid gap-4"
-            >
-              <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
-                <RadioGroupItem value="admin" id="admin" />
-                <Label htmlFor="admin" className="flex-1 cursor-pointer">
-                  Admin
-                </Label>
-              </div>
-              <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
-                <RadioGroupItem value="employee" id="employee" />
-                <Label htmlFor="employee" className="flex-1 cursor-pointer">
-                  Employee
-                </Label>
-              </div>
-            </RadioGroup>
-
+            {/* If you do need the “admin vs. employee” choice, you can re-enable this group.
+                Otherwise, just delete this <div> block entirely. */}
             <div className="space-y-2">
               <Label htmlFor="email">Email address</Label>
               <Input
@@ -694,27 +438,20 @@ export default function LoginPage() {
                 "Sign In"
               )}
             </Button>
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => setShowForgotPassword(true)}
-                className="text-sm text-muted-foreground hover:text-primary"
-              >
-                Forgot Password?
-              </button>
-            </div>
           </CardFooter>
         </form>
       </Card>
 
-      {/* Password Change */}
-      <Dialog open={showPasswordChange} onOpenChange={(o) => o && setShowPasswordChange(o)}>
+      {/* ================================================= */}
+      {/* PASSWORD CHANGE CHALLENGE (NEW_PASSWORD_REQUIRED)  */}
+      {/* ================================================= */}
+      <Dialog
+        open={showPasswordChange}
+        onOpenChange={(o) => o && setShowPasswordChange(o)}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Change Password Required</DialogTitle>
-            <DialogDescription>
-              Your account requires a password change. Please create a new password.
-            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
@@ -772,65 +509,71 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MFA Setup */}
+      {/* ================================================= */}
+      {/* MFA SETUP (MFA_SETUP challenge)                    */}
+      {/* ================================================= */}
       <Dialog open={showMFASetup} onOpenChange={(o) => o && setShowMFASetup(o)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
-            <DialogDescription>
-              For additional security, please set up Google Authenticator.
-            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <Alert>
               <AlertDescription>
-                <ol className="list-decimal list-inside">
-                  <li>Install Google Authenticator</li>
-                  <li>Scan the QR code below</li>
-                  <li>Enter the 6-digit code</li>
-                  <li>Click “Verify & Complete”</li>
-                </ol>
+                1) Install Google Authenticator on your phone  
+                2) Scan the QR code below  
+                3) Enter the 6-digit code from your authenticator app  
               </AlertDescription>
             </Alert>
-            {qrCodeUrl && (
+
+            {/* QR code (just a data URI showing the base32 secret) */}
+            {mfaSecretCode && (
               <div className="flex flex-col items-center space-y-2">
                 <Label>Scan QR Code</Label>
-                <img src={qrCodeUrl} alt="MFA QR" className="w-48 h-48" />
-              </div>
-            )}
-            {mfaSecretCode && (
-              <div className="text-center space-y-2">
-                <Label>Secret Key</Label>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+                    `otpauth://totp/EncryptGate:${encodeURIComponent(
+                      email
+                    )}?secret=${mfaSecretCode}&issuer=EncryptGate`
+                  )}`}
+                  alt="MFA QR Code"
+                  className="w-48 h-48"
+                />
                 <div className="font-mono">{mfaSecretCode}</div>
               </div>
             )}
+
             <div className="space-y-2">
               <Label htmlFor="setup-mfa-code">Verification Code</Label>
               <Input
                 id="setup-mfa-code"
                 placeholder="6-digit code"
                 value={setupMfaCode}
-                onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                onChange={(e) =>
+                  setSetupMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))
+                }
                 maxLength={6}
                 className="text-center text-2xl tracking-widest"
               />
-              {validMfaCodes.length > 0 && (
-                <details className="text-xs text-muted-foreground">
-                  <summary>Need help?</summary>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {validMfaCodes.slice(0, 5).map((c, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setSetupMfaCode(c)}
-                        className="px-2 py-1 border rounded"
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              )}
             </div>
+
+            {validMfaCodes.length > 0 && (
+              <details className="text-xs text-muted-foreground">
+                <summary>Need help? Use one of these codes</summary>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {validMfaCodes.slice(0, 5).map((c, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSetupMfaCode(c)}
+                      className="px-2 py-1 border rounded"
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </details>
+            )}
+
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -852,39 +595,24 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MFA Verify */}
+      {/* ================================================= */}
+      {/* MFA VERIFY (SOFTWARE_TOKEN_MFA challenge)           */}
+      {/* ================================================= */}
       <Dialog open={showMFA} onOpenChange={(o) => o && setShowMFA(o)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Enter Authentication Code</DialogTitle>
-            <DialogDescription>Enter the 6-digit code from your authenticator app</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <Label htmlFor="mfa-code">Code</Label>
             <Input
               id="mfa-code"
-              placeholder="6-digit"
+              placeholder="6-digit code"
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               maxLength={6}
               className="text-center text-2xl tracking-widest"
             />
-            {mfaRecoveryCodes.length > 0 && (
-              <details className="text-xs text-muted-foreground">
-                <summary>Use alternate codes</summary>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {mfaRecoveryCodes.slice(0, 5).map((c, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setMfaCode(c)}
-                      className="px-2 py-1 border rounded"
-                    >
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </details>
-            )}
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -905,122 +633,6 @@ export default function LoginPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Forgot Password */}
-      <Dialog
-        open={showForgotPassword}
-        onOpenChange={(o) => {
-          if (!o) setShowForgotPassword(false)
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reset Your Password</DialogTitle>
-            <DialogDescription>
-              {forgotPasswordStep === 1
-                ? "Enter your email to receive a code"
-                : "Enter code & new password"}
-            </DialogDescription>
-          </DialogHeader>
-          {forgotPasswordStep === 1 ? (
-            <div className="grid gap-4 py-4">
-              <Label htmlFor="reset-email">Email Address</Label>
-              <Input
-                id="reset-email"
-                type="email"
-                placeholder="name@example.com"
-                value={forgotPasswordEmail}
-                onChange={(e) => setForgotPasswordEmail(e.target.value)}
-              />
-              {forgotPasswordError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{forgotPasswordError}</AlertDescription>
-                </Alert>
-              )}
-              <Button
-                onClick={handleForgotPasswordRequest}
-                disabled={!forgotPasswordEmail || isForgotPasswordLoading}
-                className="w-full"
-              >
-                {isForgotPasswordLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Sending...
-                  </>
-                ) : (
-                  "Send Reset Code"
-                )}
-              </Button>
-            </div>
-          ) : (
-            <div className="grid gap-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="reset-code">Verification Code</Label>
-                <Input
-                  id="reset-code"
-                  placeholder="Enter code"
-                  value={forgotPasswordCode}
-                  onChange={(e) => setForgotPasswordCode(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-forgot-password">New Password</Label>
-                <Input
-                  id="new-forgot-password"
-                  type="password"
-                  placeholder="Enter new password"
-                  value={newForgotPassword}
-                  onChange={(e) => setNewForgotPassword(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-forgot-password">Confirm New Password</Label>
-                <Input
-                  id="confirm-forgot-password"
-                  type="password"
-                  placeholder="Confirm password"
-                  value={confirmForgotPassword}
-                  onChange={(e) => setConfirmForgotPassword(e.target.value)}
-                />
-              </div>
-              {forgotPasswordError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{forgotPasswordError}</AlertDescription>
-                </Alert>
-              )}
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
-                  onClick={() => setForgotPasswordStep(1)}
-                  disabled={isForgotPasswordLoading}
-                  className="flex-1"
-                >
-                  Back
-                </Button>
-                <Button
-                  onClick={handleForgotPasswordConfirm}
-                  disabled={
-                    !forgotPasswordCode ||
-                    !newForgotPassword ||
-                    !confirmForgotPassword ||
-                    isForgotPasswordLoading
-                  }
-                  className="flex-1"
-                >
-                  {isForgotPasswordLoading ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Resetting...
-                    </>
-                  ) : (
-                    "Reset Password"
-                  )}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
-  )
+  );
 }
