@@ -58,7 +58,7 @@ def get_time_difference_seconds(dt1: datetime, dt2: datetime) -> float:
     return abs((dt1 - dt2).total_seconds())
 
 # === API URL Configuration ===
-API_URL = os.getenv("API_URL", "http://localhost:8080")
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 logger.info(f"API URL: {API_URL}")
 
 # === CORS Configuration ===
