@@ -1,4 +1,4 @@
-"use client"
+/* "use client"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
@@ -708,7 +708,7 @@ export default function LoginPage() {
       </Card>
 
       {/* Password Change */}
-      <Dialog open={showPasswordChange} onOpenChange={(o) => o && setShowPasswordChange(o)}>
+      /*<Dialog open={showPasswordChange} onOpenChange={(o) => o && setShowPasswordChange(o)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Change Password Required</DialogTitle>
@@ -773,7 +773,7 @@ export default function LoginPage() {
       </Dialog>
 
       {/* MFA Setup */}
-      <Dialog open={showMFASetup} onOpenChange={(o) => o && setShowMFASetup(o)}>
+      /*<Dialog open={showMFASetup} onOpenChange={(o) => o && setShowMFASetup(o)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
@@ -853,7 +853,7 @@ export default function LoginPage() {
       </Dialog>
 
       {/* MFA Verify */}
-      <Dialog open={showMFA} onOpenChange={(o) => o && setShowMFA(o)}>
+      /*<Dialog open={showMFA} onOpenChange={(o) => o && setShowMFA(o)}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Enter Authentication Code</DialogTitle>
@@ -907,7 +907,7 @@ export default function LoginPage() {
       </Dialog>
 
       {/* Forgot Password */}
-      <Dialog
+      /*<Dialog
         open={showForgotPassword}
         onOpenChange={(o) => {
           if (!o) setShowForgotPassword(false)

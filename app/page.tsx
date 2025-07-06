@@ -17,7 +17,7 @@ export default function Home() {
           router.push("/employee/dashboard")
         }
       } else {
-        router.push("/login")
+        router.push("/admin/dashboard")
       }
     }, 300) // wait 300ms for token to be saved before checking
 

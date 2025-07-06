@@ -68,13 +68,6 @@ export default function AssignmentsPage() {
   const [activeTab, setActiveTab] = useState("continue")
   const router = useRouter()
 
-  // Check if user is logged in
-   useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      router.push("/login")
-    } 
-
     // Load in-progress investigations
     const investigations = getInProgressInvestigations()
 

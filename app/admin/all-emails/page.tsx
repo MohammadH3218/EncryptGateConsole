@@ -12,14 +12,6 @@ export default function AdminAllEmailsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const employeeFilter = searchParams.get("employee")
 
-  // Check if user is logged in
-   useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      router.push("/login")
-    }
-  }, [router])
-
   return (
     <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={2}>
       <FadeInSection>
