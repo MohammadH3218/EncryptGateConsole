@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 logger.info(f"CORS Origins configured: {allowed_origins}")
 
 # Configure CORS with explicit settings
+# Remove the before_request and after_request handlers - let Flask-CORS handle everything
 CORS(app, 
      resources={
          r"/api/*": {
@@ -36,49 +37,10 @@ CORS(app,
              "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
              "allow_headers": ["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
              "supports_credentials": True,
-             "max_age": 3600
+             "max_age": 86400  # 24 hours
          }
      },
      supports_credentials=True)
-
-@app.before_request
-def handle_preflight():
-    """Handle CORS preflight requests"""
-    if request.method == "OPTIONS":
-        origin = request.headers.get("Origin", "")
-        logger.info(f"Handling OPTIONS preflight for origin: {origin}")
-        
-        response = make_response()
-        
-        # Set CORS headers
-        if origin in allowed_origins or "*" in allowed_origins:
-            response.headers["Access-Control-Allow-Origin"] = origin
-        else:
-            response.headers["Access-Control-Allow-Origin"] = "https://console-encryptgate.net"
-        
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Max-Age"] = "3600"
-        
-        return response
-
-@app.after_request
-def after_request(response):
-    """Add CORS headers to all responses"""
-    origin = request.headers.get("Origin", "")
-    
-    if origin:
-        if origin in allowed_origins or "*" in allowed_origins:
-            response.headers["Access-Control-Allow-Origin"] = origin
-        else:
-            response.headers["Access-Control-Allow-Origin"] = "https://console-encryptgate.net"
-        
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, Origin, X-Requested-With"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-    
-    return response
 
 # Configure logging
 logging.basicConfig(
