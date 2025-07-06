@@ -57,6 +57,13 @@ export default function PushedRequestsPage() {
   const [pushedDetections, setPushedDetections] = useState(mockPushedDetections)
   const router = useRouter()
 
+  // Check if user is logged in
+   useEffect(() => {
+    const token = localStorage.getItem("access_token")
+    if (!token) {
+      router.push("/login")
+    }
+  }, [router]) 
 
   return (
     <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={0}>

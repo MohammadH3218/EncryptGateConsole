@@ -80,7 +80,13 @@ export default function UserManagementPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
 
-
+  // Check if user is logged in
+  useEffect(() => {
+    const token = localStorage.getItem("access_token")
+    if (!token) {
+      router.push("/login")
+    }
+  }, [router]) 
 
   const filteredUsers = users.filter(
     (user) =>

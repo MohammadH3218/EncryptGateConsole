@@ -9,7 +9,14 @@ import { useRouter } from "next/navigation"
 export default function DetectionsPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const router = useRouter()
- 
+
+  // Check if user is logged in
+   useEffect(() => {
+    const token = localStorage.getItem("access_token")
+    if (!token) {
+      router.push("/login")
+    }
+  }, [router]) 
 
   const handleAssign = (id: number, assignedTo: string[], action: "assign" | "unassign") => {
     // In a real app, this would call an API to update the detection

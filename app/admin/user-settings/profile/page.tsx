@@ -38,7 +38,13 @@ export default function ProfilePage() {
     confirm: "",
   })
 
-
+  // Check if user is logged in
+   useEffect(() => {
+    const token = localStorage.getItem("access_token")
+    if (!token) {
+      router.push("/login")
+    }
+  }, [router]) 
 
   const handleSaveProfile = () => {
     setIsLoading(true)
