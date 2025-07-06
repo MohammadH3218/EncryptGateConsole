@@ -26,6 +26,10 @@ load_dotenv()
 # Initialize the Flask app (Global for Gunicorn)
 app = Flask(__name__)
 
+
+# Allow your frontend origin
+CORS(app, supports_credentials=True, origins=["https://console-encryptgate.net"])
+
 # Configure basic logging
 logging.basicConfig(
     level=logging.INFO,

@@ -8,6 +8,7 @@ from auth_services_routes import (
 import logging 
 import os
 import traceback
+from datetime import datetime
 
 # Initialize the blueprint and logger
 auth_routes = Blueprint('auth_routes', __name__)
@@ -15,6 +16,19 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Add a route for debugging to help diagnose issues
+@auth_routes.route("/test-mfa-code", methods=["POST", "OPTIONS"])
+def test_mfa_code():
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    data = request.json
+    # Simulate TOTP code validation or just echo back
+    return jsonify({
+        "server_time": datetime.utcnow().isoformat() + "Z",
+        "current_code": "123456",  # replace with real TOTP if needed
+        "validCodes": ["123456", "654321"]
+    })
+
 @auth_routes.route("/debug", methods=["GET"])
 def debug_info():
     try:
