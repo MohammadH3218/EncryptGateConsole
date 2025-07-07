@@ -11,4 +11,4 @@ from main import app as application
 
 # This is what Elastic Beanstalk looks for by default
 if __name__ == "__main__":
-    application.run(host='0.0.0.0', port=8080)
+    application.run(host='0.0.0.0', port=8000)
