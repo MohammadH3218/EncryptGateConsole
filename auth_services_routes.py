@@ -499,21 +499,10 @@ def verify_mfa(session, code, username):
         return {"detail": "Invalid session format"}, 400
     
     try:
-        # Try to get the user's TOTP secret and verify locally before making AWS API call
-        secret_code = None
-        valid_codes = []
-        
-        # Skip generating secrets for users who already have MFA set up
-        secret_code = None
-        valid_codes = []
-
         # Only log the verification attempt
         logger.info(f"Processing MFA verification with code: {code}")
         logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
 
-        # Skip secret generation completely for existing MFA users
-        # We'll rely on Cognito's verification directly
-        
         # Generate secret hash
         try:
             secret_hash = generate_client_secret_hash(username)
@@ -560,22 +549,6 @@ def verify_mfa(session, code, username):
         
     except cognito_client.exceptions.CodeMismatchException as code_error:
         logger.warning(f"MFA code mismatch: {code_error}")
-        
-        # If we have valid codes from local verification, include them in the response
-        if valid_codes and len(valid_codes) > 0:
-            # Get the current time position in the TOTP window
-            window_position = int(time.time()) % 30
-            
-            return {
-                "detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app.",
-                "serverGeneratedCode": valid_codes[5],  # Middle code (current time)
-                "validCodes": valid_codes[4:7],  # Return 3 codes around current time
-                "timeInfo": {
-                    "serverTime": datetime.now().isoformat(),
-                    "windowPosition": f"{window_position}/30 seconds"
-                }
-            }, 400
-        
         return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
         
     except cognito_client.exceptions.ExpiredCodeException as expired_error:
@@ -1237,69 +1210,12 @@ def verify_mfa_endpoint():
     if not code.isdigit() or len(code) != 6:
         return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
     
-    # For users with existing MFA, try to generate valid codes
-    secret_code = None
-    valid_codes = []
-    
-    try:
-        # Try to get the secret from the session to generate a code
-        # This will fail for users who already have MFA set up with "Invalid session for the user"
-        associate_response = cognito_client.associate_software_token(
-            Session=session
-        )
-        secret_code = associate_response.get("SecretCode")
-        
-        if secret_code:
-            totp = pyotp.TOTP(secret_code)
-            
-            # Generate codes for multiple time windows
-            for i in range(-5, 6):  # Check ±5 time windows (30 seconds each)
-                window_time = server_time + timedelta(seconds=30 * i)
-                valid_codes.append(totp.at(window_time))
-            
-            server_code = totp.now()
-            logger.info(f"Generated valid codes: {valid_codes}")
-            logger.info(f"Current server code: {server_code}")
-            
-            # If the user-provided code doesn't match any of our valid codes,
-            # log a warning but still proceed with verification
-            if code not in valid_codes:
-                logger.warning(f"User code {code} doesn't match any valid time window")
-            else:
-                logger.info(f"User code {code} matches a valid time window")
-            
-            # If adjusted time is provided, also check that code
-            if adjusted_time_str:
-                try:
-                    adjusted_time = datetime.fromisoformat(adjusted_time_str.replace('Z', '+00:00'))
-                    adjusted_code = totp.at(adjusted_time)
-                    logger.info(f"Code based on adjusted time: {adjusted_code}")
-                    
-                    if code == adjusted_code:
-                        logger.info("User code matches adjusted time code")
-                except Exception as adj_error:
-                    logger.warning(f"Error generating code from adjusted time: {adj_error}")
-    except Exception as e:
-        # This is expected for users who already have MFA set up
-        logger.info(f"Could not generate MFA code from session (normal for existing MFA users): {e}")
-
-    # Call the verify_mfa function with the user-provided code
+    # FIXED: Do NOT try to generate new secrets for existing MFA users
+    # Just call verify_mfa directly with the user's code
     auth_result = verify_mfa(session, code, username)
     
     # Check if it's an error response (tuple with status code)
     if isinstance(auth_result, tuple):
-        # For error responses, if we have valid codes, include them to help the user
-        if auth_result[1] == 400 and valid_codes and len(valid_codes) > 0:
-            error_data = auth_result[0]
-            error_data["serverGeneratedCode"] = valid_codes[5]  # Middle code (current time)
-            error_data["validCodes"] = valid_codes[4:7]  # Return 3 codes around current time
-            error_data["timeInfo"] = {
-                "serverTime": server_time.isoformat(),
-                "clientTime": client_time_str,
-                "adjustedTime": adjusted_time_str,
-                "windowPosition": f"{int(time.time()) % 30}/30 seconds"
-            }
-            return jsonify(error_data), 400
         return jsonify(auth_result[0]), auth_result[1]
     
     # Otherwise, it's a successful response
