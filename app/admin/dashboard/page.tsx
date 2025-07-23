@@ -64,13 +64,15 @@ export default function DashboardPage() {
   const [autoBlockedEmails, setAutoBlockedEmails] = useState(mockAutoBlockedEmails)
   const [searchQuery, setSearchQuery] = useState("")
 
-  // Check if user is logged in
-  /*useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      router.push("/login")
-    }
-  }, [router])*/ //remove comment when want to fix login page and redirect
+useEffect(() => {
+  // Replace this with your actual logic to retrieve the idToken, e.g., from localStorage or cookies
+  const idToken = typeof window !== "undefined" ? localStorage.getItem("idToken") : null;
+  if (!idToken) {
+    // Redirect to hosted login
+    window.location.href = `https://us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com/login?client_id=u7p7ddajvruk8rccoajj8o5h0&response_type=code&scope=email+openid+phone&redirect_uri=https%3A%2F%2Fconsole-encryptgate.net%2Fadmin%2Fdashboard`;
+  }
+}, []);
+
 
   const severityData = [
     { name: "Critical", value: stats.severityBreakdown.critical, color: "#ef4444" },
