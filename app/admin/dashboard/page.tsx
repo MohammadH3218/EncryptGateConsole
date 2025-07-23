@@ -1,76 +1,79 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { SeverityPieChart } from "@/components/dashboard/severity-pie-chart"
 import { CompletedDetections } from "@/components/dashboard/completed-detections"
 import { AutoBlockedEmails } from "@/components/dashboard/auto-blocked-emails"
 import { AssignmentsOverview } from "@/components/dashboard/assignments-overview"
-import { useRouter } from "next/navigation"
 import { AssignedDetections } from "@/components/dashboard/assigned-detections"
-import type { CompletedDetection } from "@/components/dashboard/completed-detections" 
-// test data
-const mockDashboardStats = {
-  totalIncomingEmails: 1245,
-  totalOutgoingEmails: 876,
-  totalDetections: 32,
-  assignedDetections: 8,
-  severityBreakdown: {
-    critical: 5,
-    high: 12,
-    medium: 10,
-    low: 5,
-  },
-}
+import type { CompletedDetection } from "@/components/dashboard/completed-detections"
+import { useAuthSession } from "@/hooks/use-auth-session" // ✅ add this line
 
-const mockCompletedDetections: CompletedDetection[] = [
-  {
-    id: "1",
-    name: "Phishing Attempt",
-    severity: "Critical",
-    resolvedBy: "John Doe",
-    completedAt: "2024-01-31T14:30:00Z"
-  },
-  {
-    id: "2",
-    name: "Suspicious Login",
-    severity: "High",
-    resolvedBy: "Jane Smith",
-    completedAt: "2024-01-31T12:15:00Z"
-  },
-  {
-    id: "3",
-    name: "Malware Detection",
-    severity: "Critical",
-    resolvedBy: "John Doe",
-    completedAt: "2024-01-31T10:45:00Z"
-  }
-]
-
-const mockAutoBlockedEmails = {
-  total: 24,
-  data: [
-    { sender: "malicious@phishing.com", reason: "Known phishing domain", timestamp: "2024-01-31T15:20:00Z" },
-    { sender: "suspicious@unknown.net", reason: "Suspicious attachment", timestamp: "2024-01-31T14:10:00Z" },
-    { sender: "spam@marketing.biz", reason: "Spam content detected", timestamp: "2024-01-31T12:30:00Z" },
-  ],
-}
-
+// ✅ run auth session logic
 export default function DashboardPage() {
-  const router = useRouter()
-  const [stats, setStats] = useState(mockDashboardStats)
-  const [completedDetections, setCompletedDetections] = useState(mockCompletedDetections)
-  const [autoBlockedEmails, setAutoBlockedEmails] = useState(mockAutoBlockedEmails)
-  const [searchQuery, setSearchQuery] = useState("")
+  useAuthSession()
 
-  // Check if user is logged in
-  /*useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      router.push("/login")
-    }
-  }, [router])*/ //remove comment when want to fix login page and redirect
+  const [stats, setStats] = useState({
+    totalIncomingEmails: 1245,
+    totalOutgoingEmails: 876,
+    totalDetections: 32,
+    assignedDetections: 8,
+    severityBreakdown: {
+      critical: 5,
+      high: 12,
+      medium: 10,
+      low: 5,
+    },
+  })
+
+  const [completedDetections, setCompletedDetections] = useState<CompletedDetection[]>([
+    {
+      id: "1",
+      name: "Phishing Attempt",
+      severity: "Critical",
+      resolvedBy: "John Doe",
+      completedAt: "2024-01-31T14:30:00Z",
+    },
+    {
+      id: "2",
+      name: "Suspicious Login",
+      severity: "High",
+      resolvedBy: "Jane Smith",
+      completedAt: "2024-01-31T12:15:00Z",
+    },
+    {
+      id: "3",
+      name: "Malware Detection",
+      severity: "Critical",
+      resolvedBy: "John Doe",
+      completedAt: "2024-01-31T10:45:00Z",
+    },
+  ])
+
+  const [autoBlockedEmails, setAutoBlockedEmails] = useState({
+    total: 24,
+    data: [
+      {
+        sender: "malicious@phishing.com",
+        reason: "Known phishing domain",
+        timestamp: "2024-01-31T15:20:00Z",
+      },
+      {
+        sender: "suspicious@unknown.net",
+        reason: "Suspicious attachment",
+        timestamp: "2024-01-31T14:10:00Z",
+      },
+      {
+        sender: "spam@marketing.biz",
+        reason: "Spam content detected",
+        timestamp: "2024-01-31T12:30:00Z",
+      },
+    ],
+  })
+
+  const [searchQuery, setSearchQuery] = useState("")
 
   const severityData = [
     { name: "Critical", value: stats.severityBreakdown.critical, color: "#ef4444" },
@@ -82,16 +85,8 @@ export default function DashboardPage() {
   return (
     <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={5}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
-        <StatCard
-          title="Incoming Emails"
-          value={stats.totalIncomingEmails}
-          description="Total emails sent to employees"
-        />
-        <StatCard
-          title="Outgoing Emails"
-          value={stats.totalOutgoingEmails}
-          description="Total emails sent by employees"
-        />
+        <StatCard title="Incoming Emails" value={stats.totalIncomingEmails} description="Total emails sent to employees" />
+        <StatCard title="Outgoing Emails" value={stats.totalOutgoingEmails} description="Total emails sent by employees" />
         <StatCard title="Total Detections" value={stats.totalDetections} description="Suspicious emails detected" />
 
         <div className="md:col-span-2">

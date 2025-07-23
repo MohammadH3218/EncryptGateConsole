@@ -1,23 +1,17 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { DetectionsList } from "@/components/detections-list"
 import { FadeInSection } from "@/components/fade-in-section"
 import { useRouter } from "next/navigation"
+import { useAuthSession } from "@/hooks/use-auth-session"
 
 export default function DetectionsPage() {
+  useAuthSession()
+
   const [searchQuery, setSearchQuery] = useState("")
   const router = useRouter()
-
-useEffect(() => {
-  // Replace this with your actual logic to retrieve the idToken, e.g., from localStorage or cookies
-  const idToken = typeof window !== "undefined" ? localStorage.getItem("idToken") : null;
-  if (!idToken) {
-    // Redirect to hosted login
-    window.location.href = `https://us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com/login?client_id=u7p7ddajvruk8rccoajj8o5h0&response_type=code&scope=email+openid+phone&redirect_uri=https%3A%2F%2Fconsole-encryptgate.net%2Fadmin%2Fdashboard`;
-  }
-}, []);
 
   const handleAssign = (id: number, assignedTo: string[], action: "assign" | "unassign") => {
     // In a real app, this would call an API to update the detection
