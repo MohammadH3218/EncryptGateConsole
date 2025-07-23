@@ -65,11 +65,53 @@ export default function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState("")
 
 useEffect(() => {
-  // Replace this with your actual logic to retrieve the idToken, e.g., from localStorage or cookies
-  const idToken = typeof window !== "undefined" ? localStorage.getItem("idToken") : null;
-  if (!idToken) {
-    // Redirect to hosted login
-    window.location.href = `https://us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com/login?client_id=u7p7ddajvruk8rccoajj8o5h0&response_type=code&scope=email+openid+phone&redirect_uri=https%3A%2F%2Fconsole-encryptgate.net%2Fadmin%2Fdashboard`;
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+
+  const clientId = "u7p7ddajvruk8rccoajj8o5h0";
+  const redirectUri = "https://console-encryptgate.net/admin/dashboard";
+  const domain = "us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com";
+
+  // Case 1: We have a code, so let's exchange it for tokens
+  if (code) {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code: code,
+    });
+
+    fetch(`https://${domain}/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: body.toString(),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.id_token) {
+          localStorage.setItem("idToken", data.id_token);
+          localStorage.setItem("access_token", data.access_token);
+          localStorage.setItem("refresh_token", data.refresh_token);
+
+          // Remove the ?code=... from URL
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else {
+          console.error("Failed to get tokens", data);
+          window.location.href = `https://${domain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${redirectUri}`;
+        }
+      })
+      .catch((err) => {
+        console.error("Token exchange error", err);
+        window.location.href = `https://${domain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${redirectUri}`;
+      });
+  }
+
+  // Case 2: No token and no code = redirect
+  const idToken = localStorage.getItem("idToken");
+  if (!idToken && !code) {
+    window.location.href = `https://${domain}/login?client_id=${clientId}&response_type=code&scope=email+openid+phone&redirect_uri=${redirectUri}`;
   }
 }, []);
 
