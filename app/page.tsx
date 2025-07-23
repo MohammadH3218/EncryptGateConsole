@@ -17,7 +17,7 @@ export default function Home() {
           router.push("/employee/dashboard")
         }
       } else {
-        router.push("https://us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com/login?client_id=u7p7ddajvruk8rccoajj8o5h0&response_type=code&scope=email+openid+phone&redirect_uri=https%3A%2F%2Fconsole-encryptgate.net%2Fadmin%2Fdashboard")
+        router.push("/login")
       }
     }, 300) // wait 300ms for token to be saved before checking
 
