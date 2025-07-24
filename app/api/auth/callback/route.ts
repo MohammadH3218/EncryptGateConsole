@@ -1,32 +1,32 @@
-// app/api/auth/callback/route.ts
-
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { Buffer } from 'buffer'
 
-export const runtime = 'nodejs'  // ensure we're on Node, not Edge
+export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
   try {
-    const url = new URL(req.url)
-    const code = url.searchParams.get('code')
+    const { searchParams } = new URL(req.url)
+    const code = searchParams.get('code')
 
+    // If no code, bounce back to our own /api/auth/login
     if (!code) {
-      console.warn('No code in callback, redirecting to login')
-      return NextResponse.redirect('/api/auth/login')
+      console.warn('Callback missing code, redirecting to login')
+      const loginUrl = new URL('/api/auth/login', req.url)
+      return NextResponse.redirect(loginUrl)
     }
 
-    // Load env-vars
-    const domain      = process.env.COGNITO_DOMAIN
-    const clientId    = process.env.COGNITO_CLIENT_ID
-    const clientSecret= process.env.COGNITO_CLIENT_SECRET
-    const redirectUri = process.env.COGNITO_REDIRECT_URI
+    // Load env vars
+    const domain       = process.env.COGNITO_DOMAIN
+    const clientId     = process.env.COGNITO_CLIENT_ID
+    const clientSecret = process.env.COGNITO_CLIENT_SECRET
+    const redirectUri  = process.env.COGNITO_REDIRECT_URI
 
     console.log('Callback env:', { domain, clientId, redirectUri })
-
     if (!domain || !clientId || !redirectUri) {
-      console.error('Missing one of COGNITO_DOMAIN, COGNITO_CLIENT_ID or COGNITO_REDIRECT_URI')
-      return NextResponse.redirect('/api/auth/login')
+      console.error('Missing Cognito env vars!')
+      const loginUrl = new URL('/api/auth/login', req.url)
+      return NextResponse.redirect(loginUrl)
     }
 
     // Exchange code for tokens
@@ -55,14 +55,15 @@ export async function GET(req: NextRequest) {
     if (!tokenRes.ok) {
       const text = await tokenRes.text()
       console.error('Token exchange failed:', tokenRes.status, text)
-      return NextResponse.redirect('/api/auth/login')
+      const loginUrl = new URL('/api/auth/login', req.url)
+      return NextResponse.redirect(loginUrl)
     }
 
     const { id_token, access_token, refresh_token } = await tokenRes.json()
-    console.log('Received tokens, setting cookies…')
+    console.log('Tokens received, setting cookies…')
 
-    // Build the redirect response to /admin/dashboard
-    const res = NextResponse.redirect('/admin/dashboard')
+    // Build response that sets cookies then redirects to /admin/dashboard
+    const res = NextResponse.redirect(new URL('/admin/dashboard', req.url))
     const cookieOpts = {
       httpOnly: true,
       secure:   process.env.NODE_ENV === 'production',
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
     if (refresh_token) {
       res.cookies.set('refresh_token', refresh_token, {
         ...cookieOpts,
-        maxAge: 30 * 24 * 60 * 60, // 30 days
+        maxAge: 30 * 24 * 60 * 60,
       })
     }
 
@@ -83,6 +84,7 @@ export async function GET(req: NextRequest) {
 
   } catch (err) {
     console.error('Unhandled error in auth callback:', err)
-    return NextResponse.redirect('/api/auth/login')
+    const loginUrl = new URL('/api/auth/login', req.url)
+    return NextResponse.redirect(loginUrl)
   }
 }

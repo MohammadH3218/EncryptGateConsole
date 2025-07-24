@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export async function GET(req: NextRequest) {
-  // 🔥 DEBUGGING LOG (remove once fixed)
+  //  DEBUGGING LOG (remove once fixed)
   console.log('>>> LOGIN ENV', {
     DOMAIN:      process.env.COGNITO_DOMAIN,
     CLIENT_ID:   process.env.COGNITO_CLIENT_ID,
