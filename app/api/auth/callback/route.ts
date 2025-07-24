@@ -14,10 +14,10 @@ export async function GET(req: NextRequest) {
     const code = searchParams.get('code')
     console.log('🔑 Authorization code received:', code ? 'YES' : 'NO')
 
-    // HARDCODED VALUES FOR TESTING
+    // HARDCODED VALUES - using the exact values provided
     const domain = 'us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com'
-    const clientId = 'u7p7ddajvruk8rccoajj8o5h0' 
-    const clientSecret = process.env.COGNITO_CLIENT_SECRET || '' // Keep trying to get this from env
+    const clientId = 'u7p7ddajvruk8rccoajj8o5h0'
+    const clientSecret = 'REDACTED_COGNITO_CLIENT_SECRET'
     const redirectUri = 'https://console-encryptgate.net/api/auth/callback'
     
     // Set absolute base URL for redirects
@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
     
     console.log('🔧 Using domain:', domain)
     console.log('🔧 Using clientId:', clientId)
-    console.log('🔧 Client secret present?', clientSecret ? 'YES' : 'NO')
+    console.log('🔧 Client secret length:', clientSecret.length)
     console.log('🌐 Using redirectUri:', redirectUri)
 
     if (!code) {
@@ -38,17 +38,17 @@ export async function GET(req: NextRequest) {
     console.log('🚀 Fetching tokens from URL:', tokenUrl)
 
     try {
+      // TRY METHOD 2: Include client_id and client_secret in the body
+      // Instead of using the Authorization header
       const tokenRes = await fetch(tokenUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          ...(clientSecret && {
-            Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
-          }),
         },
         body: new URLSearchParams({
           grant_type: 'authorization_code',
           client_id: clientId,
+          client_secret: clientSecret, // Include secret in the body
           redirect_uri: redirectUri,
           code,
         }).toString(),
