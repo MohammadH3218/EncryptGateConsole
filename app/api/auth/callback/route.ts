@@ -8,51 +8,61 @@ export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
   try {
+    console.log('↪️  Entering callback')
+
     const { searchParams } = new URL(req.url)
     const code = searchParams.get('code')
+    console.log('🔑 code=', code)
 
-    // derive your frontend origin from the REDIRECT_URI env
-    const frontendOrigin = new URL(process.env.COGNITO_REDIRECT_URI!).origin
+    // Derive our frontend origin from REDIRECT_URI
+    const redirectUri = process.env.COGNITO_REDIRECT_URI
+    console.log('🌐 COGNITO_REDIRECT_URI=', redirectUri)
 
-    // no code → send back to our login route
     if (!code) {
-      return NextResponse.redirect(`${frontendOrigin}/api/auth/login`)
+      console.warn('⚠️  No code; redirecting to login')
+      return NextResponse.redirect(`${new URL(redirectUri!).origin}/api/auth/login`)
     }
 
-    // pull in the same env-vars you already have
-    const domain       = process.env.COGNITO_DOMAIN!
-    const clientId     = process.env.COGNITO_CLIENT_ID!
+    const domain       = process.env.COGNITO_DOMAIN
+    const clientId     = process.env.COGNITO_CLIENT_ID
     const clientSecret = process.env.COGNITO_CLIENT_SECRET
-    const redirectUri  = process.env.COGNITO_REDIRECT_URI!
 
-    // exchange code for tokens
-    const tokenRes = await fetch(`https://${domain}/oauth2/token`, {
+    console.log('🔧 Using COGNITO_DOMAIN=', domain)
+    console.log('🔧 Using COGNITO_CLIENT_ID=', clientId)
+    console.log('🔧 Client secret present?', !!clientSecret)
+
+    // Exchange code for tokens
+    const tokenUrl = `https://${domain}/oauth2/token`
+    console.log('🚀 Fetching tokens from', tokenUrl)
+
+    const tokenRes = await fetch(tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         ...(clientSecret && {
-          Authorization: `Basic ${Buffer.from(
-            `${clientId}:${clientSecret}`
-          ).toString('base64')}`,
+          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
         }),
       },
       body: new URLSearchParams({
         grant_type:   'authorization_code',
-        client_id:    clientId,
-        redirect_uri: redirectUri,
+        client_id:    clientId!,
+        redirect_uri: redirectUri!,
         code,
       }),
     })
 
+    console.log('🎫 tokenRes.status=', tokenRes.status)
+
     if (!tokenRes.ok) {
-      // failed exchange → bounce back
-      return NextResponse.redirect(`${frontendOrigin}/api/auth/login`)
+      const text = await tokenRes.text()
+      console.error('❌ Token exchange failed:', text)
+      return NextResponse.redirect(`${new URL(redirectUri!).origin}/api/auth/login`)
     }
 
     const { id_token, access_token, refresh_token } = await tokenRes.json()
+    console.log('✅ Received tokens; setting cookies')
 
-    // set httpOnly cookies, then send them to /admin/dashboard
-    const res = NextResponse.redirect(`${frontendOrigin}/admin/dashboard`)
+    const res = NextResponse.redirect(`${new URL(redirectUri!).origin}/admin/dashboard`)
     const cookieOpts = {
       httpOnly: true,
       secure:   process.env.NODE_ENV === 'production',
@@ -65,14 +75,15 @@ export async function GET(req: NextRequest) {
     if (refresh_token) {
       res.cookies.set('refresh_token', refresh_token, {
         ...cookieOpts,
-        maxAge: 30 * 24 * 60 * 60, // 30 days
+        maxAge: 30 * 24 * 60 * 60,
       })
     }
 
+    console.log('🚩 Redirecting to /admin/dashboard')
     return res
 
-  } catch (err) {
-    // anything blows up → send back to login
+  } catch (err: any) {
+    console.error('💥 Unhandled error in callback:', err)
     const origin = new URL(process.env.COGNITO_REDIRECT_URI!).origin
     return NextResponse.redirect(`${origin}/api/auth/login`)
   }
