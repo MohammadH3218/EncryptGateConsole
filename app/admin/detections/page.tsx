@@ -1,21 +1,26 @@
-"use client"
+'use client'
 
 import { useState } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { DetectionsList } from "@/components/detections-list"
 import { FadeInSection } from "@/components/fade-in-section"
 import { useRouter } from "next/navigation"
-import { useAuthSession } from "@/hooks/use-auth-session"
 
 export default function DetectionsPage() {
-  useAuthSession()
-
   const [searchQuery, setSearchQuery] = useState("")
   const router = useRouter()
 
-  const handleAssign = (id: number, assignedTo: string[], action: "assign" | "unassign") => {
+  const handleAssign = (
+    id: number,
+    assignedTo: string[],
+    action: "assign" | "unassign"
+  ) => {
     // In a real app, this would call an API to update the detection
-    console.log(`Detection ${id} ${action === "assign" ? "assigned to" : "unassigned from"} ${assignedTo.join(", ")}`)
+    console.log(
+      `Detection ${id} ${
+        action === "assign" ? "assigned to" : "unassigned from"
+      } ${assignedTo.join(", ")}`
+    )
   }
 
   return (
