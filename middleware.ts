@@ -2,39 +2,34 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+// List of paths that don't require authentication
+const PUBLIC_PATHS = ['/login', '/api/auth/login', '/api/auth/callback', '/api/auth/logout']
+
 export function middleware(request: NextRequest) {
-  // Get the path
   const path = request.nextUrl.pathname
   
-  // Define public paths that don't require authentication
-  const isPublicPath = 
-    path === '/login' || 
-    path === '/api/auth/login' || 
-    path === '/api/auth/callback' || 
-    path === '/api/auth/logout'
+  // Check if current path is public
+  const isPublicPath = PUBLIC_PATHS.some(publicPath => 
+    path === publicPath || path.startsWith(publicPath + '/')
+  )
   
   // Check for authentication token
   const token = request.cookies.get('access_token')?.value
   
-  // Redirect logic
+  // If not a public path and no token, redirect to login
   if (!isPublicPath && !token) {
-    // If user is on a protected path but has no token, redirect to login
     return NextResponse.redirect(new URL('/login', request.url))
   }
   
   return NextResponse.next()
 }
 
-// Only run middleware on these paths
+// Improved matcher to ensure middleware runs on ALL app routes
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api/auth (API routes that handle authentication)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    '/((?!api/auth|_next/static|_next/image|favicon.ico).*)',
-  ],
+    // Include all routes except static files, images, api/auth, etc.
+    '/((?!_next/static|_next/image|favicon.ico|api/auth).*)',
+    // Include the root path
+    '/'
+  ]
 }
