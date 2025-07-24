@@ -78,23 +78,23 @@ export async function GET(req: NextRequest) {
         return NextResponse.redirect(`${baseUrl}/api/auth/login?error=missing_tokens`);
       }
 
-      const res = NextResponse.redirect(`${baseUrl}/admin/dashboard`);
-      const cookieOpts = {
+    const res = NextResponse.redirect(`${baseUrl}/admin/dashboard`);
+    const cookieOpts = {
         httpOnly: true,
-        secure: true,
-        sameSite: 'lax' as const,
-        path: '/',
-      };
+        secure: true, 
+        sameSite: 'lax' as const,  // 'lax' is important for redirects
+        path: '/',                 // Ensure cookies are available on all paths
+        maxAge: 3600,              // Set expiration time in seconds (1 hour)
+    };
 
-      res.cookies.set('id_token', id_token, cookieOpts);
-      res.cookies.set('access_token', access_token, cookieOpts);
-      
-      if (refresh_token) {
+    res.cookies.set('id_token', id_token, cookieOpts);
+    res.cookies.set('access_token', access_token, cookieOpts);
+    if (refresh_token) {
         res.cookies.set('refresh_token', refresh_token, {
-          ...cookieOpts,
-          maxAge: 30 * 24 * 60 * 60, // 30 days
+            ...cookieOpts,
+            maxAge: 30 * 24 * 60 * 60, // 30 days for refresh token
         });
-      }
+    }
 
       console.log('🚩 Successfully set cookies, redirecting to dashboard');
       return res;
