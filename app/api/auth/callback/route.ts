@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
     // HARDCODED VALUES FOR TESTING
     const domain = 'us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com'
-    const clientId = 'u7p7ddajrvuk8rccoajj8o5h0'
+    const clientId = 'u7p7ddajvruk8rccoajj8o5h0' 
     const clientSecret = process.env.COGNITO_CLIENT_SECRET || '' // Keep trying to get this from env
     const redirectUri = 'https://console-encryptgate.net/api/auth/callback'
     
