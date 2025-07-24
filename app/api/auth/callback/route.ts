@@ -77,14 +77,14 @@ export async function GET(req: NextRequest) {
         console.error('❌ Missing required tokens in response');
         return NextResponse.redirect(`${baseUrl}/api/auth/login?error=missing_tokens`);
       }
-    // In app/api/auth/callback/route.ts
+
     const res = NextResponse.redirect(`${baseUrl}/admin/dashboard`);
     const cookieOpts = {
         httpOnly: true,
         secure: true, 
-        sameSite: 'lax' as const,
-        path: '/',
-        maxAge: 7200, // 2 hours (increase as needed)
+        sameSite: 'lax' as const,  // 'lax' is important for redirects
+        path: '/',                 // Ensure cookies are available on all paths
+        maxAge: 3600,              // Set expiration time in seconds (1 hour)
     };
 
     res.cookies.set('id_token', id_token, cookieOpts);
@@ -92,9 +92,9 @@ export async function GET(req: NextRequest) {
     if (refresh_token) {
         res.cookies.set('refresh_token', refresh_token, {
             ...cookieOpts,
-            maxAge: 30 * 24 * 60 * 60, // 30 days
+            maxAge: 30 * 24 * 60 * 60, // 30 days for refresh token
         });
-    }              
+    }
 
       console.log('🚩 Successfully set cookies, redirecting to dashboard');
       return res;
