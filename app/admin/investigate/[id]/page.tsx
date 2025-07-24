@@ -164,14 +164,8 @@ export default function AdminInvestigatePage() {
   // Track which tabs have been visited to avoid duplicate progress updates
   const visitedTabsRef = useRef<Set<string>>(new Set(["overview"]))
 
-  // Check if user is logged in and load investigation state
-   useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      router.push("/login")
-      return 
-    }
-
+  // Load investigation state
+  useEffect(() => {
     // Load investigation state if it exists
     if (params.id) {
       const investigation = getInvestigation(params.id as string)
@@ -210,7 +204,7 @@ export default function AdminInvestigatePage() {
       // Set email data for the Security Copilot
       setCopilotEmailData(emailData)
     }
-  }, [params.id, router, emailData])
+  }, [params.id, emailData])
 
   // Auto-save investigation state when progress changes
   useEffect(() => {

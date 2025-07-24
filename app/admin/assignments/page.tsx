@@ -68,13 +68,7 @@ export default function AssignmentsPage() {
   const [activeTab, setActiveTab] = useState("continue")
   const router = useRouter()
 
-  // Check if user is logged in
-   useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      router.push("/login")
-    } 
-
+  useEffect(() => {
     // Load in-progress investigations
     const investigations = getInProgressInvestigations()
 
@@ -96,7 +90,7 @@ export default function AssignmentsPage() {
     })
 
     setInProgressInvestigations(sortedInvestigations)
-  }, [router])
+  }, [])
 
   const handleContinueInvestigation = (id: string) => {
     router.push(`/admin/investigate/${id}`)
