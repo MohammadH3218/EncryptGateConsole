@@ -133,13 +133,8 @@ export default function RolesPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
 
-  // Check if user is logged in
-   useEffect(() => {
-    const token = localStorage.getItem("access_token")
-    if (!token) {
-      router.push("/login")
-    } 
-
+  // Handle user selection from query params
+  useEffect(() => {
     // If userId is provided, find the user and open the edit dialog
     if (userId) {
       const user = mockUsers.find((u) => u.id === userId)
@@ -148,7 +143,7 @@ export default function RolesPage() {
         setIsEditUserRoleDialogOpen(true)
       }
     }
-  }, [router, userId])
+  }, [userId])
 
   const filteredRoles = roles.filter(
     (role) =>
