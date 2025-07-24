@@ -7,54 +7,35 @@ export const runtime = 'nodejs'
 
 export async function GET(req: NextRequest) {
   try {
-    console.log('↪️  Entering callback')
+    console.log('↪️  Entering callback handler')
     console.log('🔍 Raw Request URL:', req.url)
 
     const { searchParams } = new URL(req.url)
     const code = searchParams.get('code')
-    console.log('🔑 code=', code)
+    console.log('🔑 Authorization code received:', code ? 'YES' : 'NO')
 
-    // Get environment variables with validation
-    const domain = process.env.COGNITO_DOMAIN
-    const clientId = process.env.COGNITO_CLIENT_ID
-    const clientSecret = process.env.COGNITO_CLIENT_SECRET
-    const redirectUri = process.env.COGNITO_REDIRECT_URI
+    // HARDCODED VALUES FOR TESTING
+    const domain = 'us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com'
+    const clientId = 'u7p7ddajrvuk8rccoajj8o5h0'
+    const clientSecret = process.env.COGNITO_CLIENT_SECRET || '' // Keep trying to get this from env
+    const redirectUri = 'https://console-encryptgate.net/api/auth/callback'
     
     // Set absolute base URL for redirects
     const baseUrl = 'https://console-encryptgate.net'
     
-    // Detailed environment variable logging
-    console.log('🔍 Environment Variables:')
-    console.log('COGNITO_DOMAIN:', domain)
-    console.log('COGNITO_CLIENT_ID:', clientId)
-    console.log('COGNITO_CLIENT_SECRET present?:', !!clientSecret)
-    console.log('COGNITO_REDIRECT_URI:', redirectUri)
-    console.log('📍 Base URL:', baseUrl)
-
-    // Validate individual environment variables
-    if (!domain) {
-      console.error('❌ Missing COGNITO_DOMAIN environment variable')
-      return new NextResponse('Server configuration error: Missing COGNITO_DOMAIN', { status: 500 })
-    }
-    
-    if (!clientId) {
-      console.error('❌ Missing COGNITO_CLIENT_ID environment variable')
-      return new NextResponse('Server configuration error: Missing COGNITO_CLIENT_ID', { status: 500 })
-    }
-    
-    if (!redirectUri) {
-      console.error('❌ Missing COGNITO_REDIRECT_URI environment variable')
-      return new NextResponse('Server configuration error: Missing COGNITO_REDIRECT_URI', { status: 500 })
-    }
+    console.log('🔧 Using domain:', domain)
+    console.log('🔧 Using clientId:', clientId)
+    console.log('🔧 Client secret present?', clientSecret ? 'YES' : 'NO')
+    console.log('🌐 Using redirectUri:', redirectUri)
 
     if (!code) {
-      console.warn('⚠️  No code; redirecting to login')
+      console.warn('⚠️ No code parameter found; redirecting to login')
       return NextResponse.redirect(`${baseUrl}/api/auth/login`)
     }
 
     // Exchange code for tokens
     const tokenUrl = `https://${domain}/oauth2/token`
-    console.log('🚀 Full token URL:', tokenUrl)
+    console.log('🚀 Fetching tokens from URL:', tokenUrl)
 
     try {
       const tokenRes = await fetch(tokenUrl, {
@@ -70,56 +51,65 @@ export async function GET(req: NextRequest) {
           client_id: clientId,
           redirect_uri: redirectUri,
           code,
-        }),
+        }).toString(),
       })
 
-      console.log('🎫 tokenRes.status=', tokenRes.status)
-
+      console.log('🎫 Token response status:', tokenRes.status)
+      
       if (!tokenRes.ok) {
-        const text = await tokenRes.text()
-        console.error('❌ Token exchange failed:', text)
-        return NextResponse.redirect(`${baseUrl}/api/auth/login`)
+        let errorText = 'Unknown error';
+        try {
+          errorText = await tokenRes.text();
+          console.error('❌ Token exchange failed:', errorText);
+        } catch (textError) {
+          console.error('❌ Token exchange failed and could not read response');
+        }
+        
+        return NextResponse.redirect(`${baseUrl}/api/auth/login?error=token_exchange_failed&details=${encodeURIComponent(errorText)}`)
       }
 
-      const tokenData = await tokenRes.json()
-      console.log('✅ Received tokens:', Object.keys(tokenData).join(', '))
+      const tokenData = await tokenRes.json();
+      console.log('✅ Token types received:', Object.keys(tokenData).join(', '));
       
-      const { id_token, access_token, refresh_token } = tokenData
+      const { id_token, access_token, refresh_token } = tokenData;
       
       if (!id_token || !access_token) {
-        console.error('❌ Missing required tokens in response')
-        return NextResponse.redirect(`${baseUrl}/api/auth/login`)
+        console.error('❌ Missing required tokens in response');
+        return NextResponse.redirect(`${baseUrl}/api/auth/login?error=missing_tokens`);
       }
 
-      const res = NextResponse.redirect(`${baseUrl}/admin/dashboard`)
+      const res = NextResponse.redirect(`${baseUrl}/admin/dashboard`);
       const cookieOpts = {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: true,
         sameSite: 'lax' as const,
         path: '/',
-      }
+      };
 
-      res.cookies.set('id_token', id_token, cookieOpts)
-      res.cookies.set('access_token', access_token, cookieOpts)
+      res.cookies.set('id_token', id_token, cookieOpts);
+      res.cookies.set('access_token', access_token, cookieOpts);
+      
       if (refresh_token) {
         res.cookies.set('refresh_token', refresh_token, {
           ...cookieOpts,
-          maxAge: 30 * 24 * 60 * 60,
-        })
+          maxAge: 30 * 24 * 60 * 60, // 30 days
+        });
       }
 
-      console.log('🚩 Redirecting to /admin/dashboard')
-      return res
-    } catch (fetchError) {
-      console.error('💥 Error during token exchange:', fetchError)
-      return NextResponse.redirect(`${baseUrl}/api/auth/login`)
+      console.log('🚩 Successfully set cookies, redirecting to dashboard');
+      return res;
+    } catch (fetchError: any) {
+      console.error('💥 Error during token exchange:', fetchError.message || fetchError);
+      console.error('Error stack:', fetchError.stack);
+      
+      return NextResponse.redirect(`${baseUrl}/api/auth/login?error=fetch_error&details=${encodeURIComponent(fetchError.message || 'Unknown fetch error')}`);
     }
 
   } catch (err: any) {
-    console.error('💥 Unhandled error in callback:', err)
-    console.error('Error message:', err.message)
-    console.error('Error stack:', err.stack)
-    // Use a hardcoded URL to avoid any URL construction errors
-    return NextResponse.redirect('https://console-encryptgate.net/api/auth/login')
+    console.error('💥 Unhandled error in callback:', err.message || err);
+    console.error('Error stack:', err.stack);
+    
+    // Use a hardcoded URL with error details for debugging
+    return NextResponse.redirect('https://console-encryptgate.net/api/auth/login?error=unhandled_error');
   }
 }
