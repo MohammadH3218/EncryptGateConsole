@@ -4,7 +4,7 @@ import {
   DeleteItemCommand,
 } from "@aws-sdk/client-dynamodb"
 
-const REGION = process.env.AWS_REGION!
+const REGION = process.env.REGION!
 const ORG_ID = process.env.ORGANIZATION_ID!
 const TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees"
 
