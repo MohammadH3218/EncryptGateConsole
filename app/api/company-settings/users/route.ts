@@ -10,7 +10,7 @@ import {
   AdminAddUserToGroupCommand,
 } from "@aws-sdk/client-cognito-identity-provider"
 
-const REGION = process.env.AWS_REGION!
+const REGION = process.env.REGION!
 const ORG_ID = process.env.ORGANIZATION_ID!
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices"
 
