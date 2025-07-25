@@ -1,43 +1,25 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
-import { useRouter } from "next/navigation"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { CloudOff, AlertCircle, Check, RefreshCw } from "lucide-react"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { CloudOff, Check, RefreshCw } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-
-// Mock data for connected services
-const mockConnectedServices = [
-  {
-    id: "aws-cognito",
-    name: "AWS Cognito",
-    status: "connected",
-    lastSynced: "2024-01-31T15:20:00Z",
-    userCount: 24,
-  },
-]
+import { useCloudServices } from "@/hooks/useCloudServices"
 
 export default function CloudServicesPage() {
   const router = useRouter()
-  const [searchQuery, setSearchQuery] = useState("")
-  const [connectedServices, setConnectedServices] = useState(mockConnectedServices)
-  const [isConnecting, setIsConnecting] = useState(false)
+  const { toast } = useToast()
+  const { services, loading, error, addService, refresh } = useCloudServices()
+
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [connectionDetails, setConnectionDetails] = useState({
     serviceType: "aws-cognito",
@@ -45,67 +27,26 @@ export default function CloudServicesPage() {
     clientId: "",
     region: "",
   })
-  const { toast } = useToast()
 
-  const handleConnect = () => {
-    setIsConnecting(true)
-
-    // Simulate API call
-    setTimeout(() => {
-      setIsConnecting(false)
-      setIsDialogOpen(false)
-
-      // Add the new service to the list
-      const newService = {
-        id: `aws-cognito-${Date.now()}`,
-        name: "AWS Cognito",
-        status: "connected",
-        lastSynced: new Date().toISOString(),
-        userCount: 0,
-      }
-
-      setConnectedServices([...connectedServices, newService])
-
+  const handleConnectService = async () => {
+    try {
+      await addService(connectionDetails)
       toast({
         title: "Service Connected",
         description: "AWS Cognito has been successfully connected.",
       })
-    }, 2000)
-  }
-
-  const handleDisconnect = (serviceId: string) => {
-    // Filter out the service to disconnect
-    const updatedServices = connectedServices.filter((service) => service.id !== serviceId)
-    setConnectedServices(updatedServices)
-
-    toast({
-      title: "Service Disconnected",
-      description: "The service has been disconnected successfully.",
-    })
-  }
-
-  const handleSync = (serviceId: string) => {
-    // Update the lastSynced timestamp for the service
-    const updatedServices = connectedServices.map((service) => {
-      if (service.id === serviceId) {
-        return {
-          ...service,
-          lastSynced: new Date().toISOString(),
-        }
-      }
-      return service
-    })
-
-    setConnectedServices(updatedServices)
-
-    toast({
-      title: "Service Synced",
-      description: "The service has been synced successfully.",
-    })
+      setIsDialogOpen(false)
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "Connection Error",
+        description: (err as Error).message,
+      })
+    }
   }
 
   return (
-    <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={0}>
+    <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={0}>
       <FadeInSection>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold">Cloud Services</h2>
@@ -120,33 +61,19 @@ export default function CloudServicesPage() {
                   Connect your identity provider to manage users and authentication.
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="serviceType" className="text-right">
-                    Service Type
-                  </Label>
-                  <div className="col-span-3">
-                    <select
-                      id="serviceType"
-                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                      value={connectionDetails.serviceType}
-                      onChange={(e) => setConnectionDetails({ ...connectionDetails, serviceType: e.target.value })}
-                    >
-                      <option value="aws-cognito">AWS Cognito</option>
-                      <option value="azure-ad">Azure Active Directory</option>
-                      <option value="okta">Okta</option>
-                    </select>
-                  </div>
-                </div>
+
+              <div className="space-y-4">
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="userPoolId" className="text-right">
                     User Pool ID
                   </Label>
                   <Input
                     id="userPoolId"
-                    value={connectionDetails.userPoolId}
-                    onChange={(e) => setConnectionDetails({ ...connectionDetails, userPoolId: e.target.value })}
                     className="col-span-3"
+                    value={connectionDetails.userPoolId}
+                    onChange={(e) =>
+                      setConnectionDetails((p) => ({ ...p, userPoolId: e.target.value }))
+                    }
                   />
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
@@ -155,9 +82,11 @@ export default function CloudServicesPage() {
                   </Label>
                   <Input
                     id="clientId"
-                    value={connectionDetails.clientId}
-                    onChange={(e) => setConnectionDetails({ ...connectionDetails, clientId: e.target.value })}
                     className="col-span-3"
+                    value={connectionDetails.clientId}
+                    onChange={(e) =>
+                      setConnectionDetails((p) => ({ ...p, clientId: e.target.value }))
+                    }
                   />
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
@@ -166,167 +95,79 @@ export default function CloudServicesPage() {
                   </Label>
                   <Input
                     id="region"
-                    value={connectionDetails.region}
-                    onChange={(e) => setConnectionDetails({ ...connectionDetails, region: e.target.value })}
                     className="col-span-3"
+                    value={connectionDetails.region}
+                    onChange={(e) =>
+                      setConnectionDetails((p) => ({ ...p, region: e.target.value }))
+                    }
                   />
                 </div>
               </div>
+
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button onClick={handleConnect} disabled={isConnecting}>
-                  {isConnecting ? "Connecting..." : "Connect"}
+                <Button onClick={handleConnectService} disabled={loading}>
+                  {loading ? "Connecting..." : "Connect"}
                 </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
         </div>
 
-        {connectedServices.length === 0 ? (
+        {error && (
+          <Alert variant="destructive">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{error.message}</AlertDescription>
+          </Alert>
+        )}
+
+        {!services.length ? (
           <Card className="border-dashed border-2">
             <CardContent className="pt-6 flex flex-col items-center justify-center min-h-[300px] text-center">
               <CloudOff className="h-16 w-16 text-muted-foreground mb-4" />
               <h3 className="text-xl font-medium mb-2">No Cloud Services Connected</h3>
               <p className="text-muted-foreground mb-6 max-w-md">
-                Connect your identity provider to manage users and authentication for your organization.
+                Connect your identity provider to manage users and authentication for
+                your organization.
               </p>
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button>Connect Service</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Connect Cloud Service</DialogTitle>
-                    <DialogDescription>
-                      Connect your identity provider to manage users and authentication.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="grid gap-4 py-4">
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="serviceType" className="text-right">
-                        Service Type
-                      </Label>
-                      <div className="col-span-3">
-                        <select
-                          id="serviceType"
-                          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                          value={connectionDetails.serviceType}
-                          onChange={(e) => setConnectionDetails({ ...connectionDetails, serviceType: e.target.value })}
-                        >
-                          <option value="aws-cognito">AWS Cognito</option>
-                          <option value="azure-ad">Azure Active Directory</option>
-                          <option value="okta">Okta</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="userPoolId" className="text-right">
-                        User Pool ID
-                      </Label>
-                      <Input
-                        id="userPoolId"
-                        value={connectionDetails.userPoolId}
-                        onChange={(e) => setConnectionDetails({ ...connectionDetails, userPoolId: e.target.value })}
-                        className="col-span-3"
-                      />
-                    </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="clientId" className="text-right">
-                        Client ID
-                      </Label>
-                      <Input
-                        id="clientId"
-                        value={connectionDetails.clientId}
-                        onChange={(e) => setConnectionDetails({ ...connectionDetails, clientId: e.target.value })}
-                        className="col-span-3"
-                      />
-                    </div>
-                    <div className="grid grid-cols-4 items-center gap-4">
-                      <Label htmlFor="region" className="text-right">
-                        Region
-                      </Label>
-                      <Input
-                        id="region"
-                        value={connectionDetails.region}
-                        onChange={(e) => setConnectionDetails({ ...connectionDetails, region: e.target.value })}
-                        className="col-span-3"
-                      />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button onClick={handleConnect} disabled={isConnecting}>
-                      {isConnecting ? "Connecting..." : "Connect"}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+              <Button onClick={() => setIsDialogOpen(true)}>Connect Service</Button>
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-6">
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
-              <AlertTitle>Important</AlertTitle>
-              <AlertDescription>
-                Connected cloud services are used for user management and authentication. Disconnecting a service may
-                affect user access.
-              </AlertDescription>
-            </Alert>
-
-            <div className="grid gap-6">
-              {connectedServices.map((service) => (
-                <Card key={service.id}>
-                  <CardHeader>
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <CardTitle className="flex items-center gap-2">
-                          {service.name}
-                          <Badge variant="outline" className="ml-2 bg-green-500/10 text-green-500 border-green-500/20">
-                            <Check className="mr-1 h-3 w-3" /> Connected
-                          </Badge>
-                        </CardTitle>
-                        <CardDescription>Last synced: {new Date(service.lastSynced).toLocaleString()}</CardDescription>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => handleSync(service.id)}>
-                          <RefreshCw className="mr-2 h-4 w-4" />
-                          Sync
-                        </Button>
-                        <Button variant="outline" size="sm" onClick={() => handleDisconnect(service.id)}>
-                          Disconnect
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <h4 className="text-sm font-medium mb-1">Service Type</h4>
-                        <p className="text-sm text-muted-foreground">AWS Cognito</p>
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-medium mb-1">User Count</h4>
-                        <p className="text-sm text-muted-foreground">{service.userCount} users</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                  <CardFooter>
+          <div className="grid gap-6">
+            <Card>
+              <CardHeader>
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-medium">{services[0].name}</h3>
+                    <Badge className="bg-green-500/10 text-green-500">
+                      <Check className="mr-1 h-3 w-3" /> Connected
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={refresh}>
+                      <RefreshCw className="mr-1 h-4 w-4" />
+                      Sync
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => router.push("/admin/company-settings/user-management")}
+                      onClick={() =>
+                        router.push("/admin/company-settings/user-management")
+                      }
                     >
                       Manage Users
                     </Button>
-                  </CardFooter>
-                </Card>
-              ))}
-            </div>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p>Last synced: {new Date(services[0].lastSynced).toLocaleString()}</p>
+                <p>Users: {services[0].userCount}</p>
+              </CardContent>
+            </Card>
           </div>
         )}
       </FadeInSection>
