@@ -23,6 +23,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  HelpCircle,
+  Info
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useCloudServices } from "@/hooks/useCloudServices"
@@ -36,6 +38,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+
+// List of valid AWS regions for reference
+const VALID_AWS_REGIONS = [
+  'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+  'af-south-1', 'ap-east-1', 'ap-south-1', 'ap-northeast-1',
+  'ap-northeast-2', 'ap-northeast-3', 'ap-southeast-1',
+  'ap-southeast-2', 'ca-central-1', 'eu-central-1',
+  'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-south-1',
+  'eu-north-1', 'me-south-1', 'sa-east-1'
+];
 
 export default function CloudServicesPage() {
   const router = useRouter()
@@ -70,6 +83,21 @@ export default function CloudServicesPage() {
   const [debugInfo, setDebugInfo] = useState<any>(null)
   const [isDebugging, setIsDebugging] = useState(false)
   const [showDebugPanel, setShowDebugPanel] = useState(false)
+
+  // Detect region from User Pool ID
+  useEffect(() => {
+    const userPoolId = connectionDetails.userPoolId;
+    if (userPoolId && userPoolId.includes('_')) {
+      const regionFromPoolId = userPoolId.split('_')[0];
+      if (VALID_AWS_REGIONS.includes(regionFromPoolId) && regionFromPoolId !== connectionDetails.region) {
+        // Auto-update region field when a valid User Pool ID is entered
+        setConnectionDetails(prev => ({
+          ...prev,
+          region: regionFromPoolId
+        }));
+      }
+    }
+  }, [connectionDetails.userPoolId]);
   
   // Run diagnostics function
   const runDiagnostics = async () => {
@@ -167,9 +195,55 @@ export default function CloudServicesPage() {
     }
   }, [showDebugPanel])
 
+  // Local validation before sending to API
+  const validateInputsLocally = () => {
+    if (!connectionDetails.userPoolId || !connectionDetails.clientId || !connectionDetails.region) {
+      setValidationResult({ 
+        valid: false, 
+        message: "All fields are required" 
+      });
+      return false;
+    }
+    
+    // Check if region is in valid format
+    if (!VALID_AWS_REGIONS.includes(connectionDetails.region)) {
+      setValidationResult({ 
+        valid: false, 
+        message: `Invalid region format. Use a standard AWS region code like "us-east-1".` 
+      });
+      return false;
+    }
+    
+    // Validate User Pool ID format
+    if (!connectionDetails.userPoolId.includes('_')) {
+      setValidationResult({ 
+        valid: false, 
+        message: "User Pool ID should be in the format 'region_identifier'" 
+      });
+      return false;
+    }
+    
+    // Validate region matches User Pool ID
+    const regionFromPoolId = connectionDetails.userPoolId.split('_')[0];
+    if (regionFromPoolId !== connectionDetails.region) {
+      setValidationResult({ 
+        valid: false, 
+        message: `The region in your User Pool ID (${regionFromPoolId}) doesn't match the provided region (${connectionDetails.region})` 
+      });
+      return false;
+    }
+    
+    return true;
+  }
+
   const handleConnectService = async () => {
     try {
-      // First, validate the connection
+      // First, perform local validation
+      if (!validateInputsLocally()) {
+        return; // Don't proceed if local validation fails
+      }
+      
+      // Then validate with the API
       setIsValidating(true)
       try {
         const result = await validateConnection({
@@ -202,6 +276,12 @@ export default function CloudServicesPage() {
         description: "AWS Cognito has been successfully connected.",
       })
       setIsDialogOpen(false)
+      setConnectionDetails({
+        serviceType: "aws-cognito",
+        userPoolId: "",
+        clientId: "",
+        region: "",
+      })
       setValidationResult(null)
     } catch (err) {
       toast({
@@ -230,7 +310,12 @@ export default function CloudServicesPage() {
     if (!selectedService) return
 
     try {
-      // First, validate the connection
+      // First, perform local validation
+      if (!validateInputsLocally()) {
+        return; // Don't proceed if local validation fails
+      }
+      
+      // Then validate with the API
       setIsValidating(true)
       try {
         const result = await validateConnection({
@@ -305,6 +390,12 @@ export default function CloudServicesPage() {
   }
 
   const handleValidateCredentials = async () => {
+    // First, perform local validation
+    if (!validateInputsLocally()) {
+      return; // Don't proceed if local validation fails
+    }
+    
+    // Then validate with the API
     setIsValidating(true)
     setValidationResult(null)
     
@@ -328,6 +419,49 @@ export default function CloudServicesPage() {
       setIsValidating(false)
     }
   }
+
+  // Helper components for form inputs
+  const RegionHelperText = () => (
+    <div className="text-xs text-muted-foreground mt-1">
+      <p>Enter a valid AWS region code (e.g., us-east-1, eu-west-2). Must match the region in your User Pool ID.</p>
+    </div>
+  )
+
+  const UserPoolHelperText = () => (
+    <div className="text-xs text-muted-foreground mt-1">
+      <p>Format: region_identifier (e.g., us-east-1_abcdefghi)</p>
+    </div>
+  )
+
+  const RegionSelector = ({ value, onChange, id }: { value: string; onChange: (value: string) => void; id: string }) => (
+    <div className="flex flex-col space-y-1 col-span-3">
+      <div className="flex space-x-2">
+        <select 
+          id={id}
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="" disabled>Select a region</option>
+          {VALID_AWS_REGIONS.map(region => (
+            <option key={region} value={region}>{region}</option>
+          ))}
+        </select>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="icon" type="button">
+                <HelpCircle className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-xs">Region must match the region prefix in your User Pool ID (the part before the underscore).</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+    </div>
+  )
 
   return (
     <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={0}>
@@ -439,18 +573,30 @@ export default function CloudServicesPage() {
               </DialogHeader>
 
               <div className="space-y-4">
+                <Alert variant="default" className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                  <Info className="h-4 w-4" />
+                  <AlertTitle>AWS Cognito Configuration</AlertTitle>
+                  <AlertDescription className="text-sm">
+                    You'll need your User Pool ID, Client ID, and Region from the AWS Cognito Console.
+                    Make sure to use the correct region format (e.g., us-east-1) that matches your User Pool ID.
+                  </AlertDescription>
+                </Alert>
+                
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="userPoolId" className="text-right">
                     User Pool ID
                   </Label>
-                  <Input
-                    id="userPoolId"
-                    className="col-span-3"
-                    value={connectionDetails.userPoolId}
-                    onChange={(e) =>
-                      setConnectionDetails((p) => ({ ...p, userPoolId: e.target.value }))
-                    }
-                  />
+                  <div className="col-span-3 space-y-1">
+                    <Input
+                      id="userPoolId"
+                      value={connectionDetails.userPoolId}
+                      onChange={(e) =>
+                        setConnectionDetails((p) => ({ ...p, userPoolId: e.target.value }))
+                      }
+                      placeholder="e.g. us-east-1_abcdefghi"
+                    />
+                    <UserPoolHelperText />
+                  </div>
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="clientId" className="text-right">
@@ -463,19 +609,17 @@ export default function CloudServicesPage() {
                     onChange={(e) =>
                       setConnectionDetails((p) => ({ ...p, clientId: e.target.value }))
                     }
+                    placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j"
                   />
                 </div>
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="region" className="text-right">
                     Region
                   </Label>
-                  <Input
-                    id="region"
-                    className="col-span-3"
+                  <RegionSelector 
+                    id="region" 
                     value={connectionDetails.region}
-                    onChange={(e) =>
-                      setConnectionDetails((p) => ({ ...p, region: e.target.value }))
-                    }
+                    onChange={(value) => setConnectionDetails(p => ({ ...p, region: value }))}
                   />
                 </div>
                 
@@ -497,6 +641,12 @@ export default function CloudServicesPage() {
                   variant="outline" 
                   onClick={() => {
                     setIsDialogOpen(false)
+                    setConnectionDetails({
+                      serviceType: "aws-cognito",
+                      userPoolId: "",
+                      clientId: "",
+                      region: "",
+                    })
                     setValidationResult(null)
                   }}
                 >
@@ -647,18 +797,29 @@ export default function CloudServicesPage() {
             </DialogHeader>
 
             <div className="space-y-4">
+              <Alert variant="default" className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                <Info className="h-4 w-4" />
+                <AlertTitle>AWS Cognito Configuration</AlertTitle>
+                <AlertDescription className="text-sm">
+                  Make sure to use the correct region format (e.g., us-east-1) that matches your User Pool ID.
+                </AlertDescription>
+              </Alert>
+              
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="edit-userPoolId" className="text-right">
                   User Pool ID
                 </Label>
-                <Input
-                  id="edit-userPoolId"
-                  className="col-span-3"
-                  value={connectionDetails.userPoolId}
-                  onChange={(e) =>
-                    setConnectionDetails((p) => ({ ...p, userPoolId: e.target.value }))
-                  }
-                />
+                <div className="col-span-3 space-y-1">
+                  <Input
+                    id="edit-userPoolId"
+                    value={connectionDetails.userPoolId}
+                    onChange={(e) =>
+                      setConnectionDetails((p) => ({ ...p, userPoolId: e.target.value }))
+                    }
+                    placeholder="e.g. us-east-1_abcdefghi"
+                  />
+                  <UserPoolHelperText />
+                </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="edit-clientId" className="text-right">
@@ -671,19 +832,17 @@ export default function CloudServicesPage() {
                   onChange={(e) =>
                     setConnectionDetails((p) => ({ ...p, clientId: e.target.value }))
                   }
+                  placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j"
                 />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="edit-region" className="text-right">
                   Region
                 </Label>
-                <Input
-                  id="edit-region"
-                  className="col-span-3"
+                <RegionSelector 
+                  id="edit-region" 
                   value={connectionDetails.region}
-                  onChange={(e) =>
-                    setConnectionDetails((p) => ({ ...p, region: e.target.value }))
-                  }
+                  onChange={(value) => setConnectionDetails(p => ({ ...p, region: value }))}
                 />
               </div>
               
