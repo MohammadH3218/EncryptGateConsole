@@ -150,7 +150,6 @@ export async function GET(req: Request) {
         error: "Failed to fetch cloud services", 
         message: typeof error === "object" && error && "message" in error ? (error as any).message : String(error),
         details: String(error),
-        // Include stack trace and additional debug info
         debug: {
           stack: typeof error === "object" && error && "stack" in error ? (error as any).stack : undefined,
           errorType: typeof error === "object" && error && "name" in error ? (error as any).name : undefined
