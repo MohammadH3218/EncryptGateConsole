@@ -17,7 +17,7 @@ const REGION            = process.env.REGION                   || "us-east-1";
 const ORG_ID            = process.env.ORGANIZATION_ID          || "";
 const ACCESS_KEY_ID     = process.env.ACCESS_KEY_ID            || "";
 const SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY        || "";
-const TABLE             = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
+const TABLE = process.env.CLOUDSERVICES_TABLE || "CloudServices";
 
 // 3) Quick sanity-check at startup
 console.log("Cloud Services API – ENV VARS:", {
