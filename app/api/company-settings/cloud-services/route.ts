@@ -30,59 +30,103 @@ const ddb = new DynamoDBClient({
 })
 
 export async function GET() {
-  // return all cloud‐service configs for this org
-  const resp = await ddb.send(
-    new QueryCommand({
-      TableName: TABLE,
-      KeyConditionExpression: "orgId = :orgId",
-      ExpressionAttributeValues: {
-        ":orgId": { S: ORG_ID },
+  try {
+    console.log("GET /api/company-settings/cloud-services - Querying DynamoDB")
+    
+    // return all cloud‐service configs for this org
+    const resp = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE,
+        KeyConditionExpression: "orgId = :orgId",
+        ExpressionAttributeValues: {
+          ":orgId": { S: ORG_ID },
+        },
+      })
+    )
+
+    const services = (resp.Items || []).map((it) => ({
+      id: `${it.orgId.S}_${it.serviceType.S}`,
+      name:
+        it.serviceType.S === "aws-cognito" ? "AWS Cognito" : it.serviceType.S,
+      status:
+        (it.status?.S as "connected" | "disconnected") || "disconnected",
+      lastSynced: it.lastSynced?.S!,
+      userCount: it.userCount?.N ? parseInt(it.userCount.N) : 0,
+    }))
+
+    console.log("Returning services data, count:", services.length)
+    return NextResponse.json(services)
+  } catch (error) {
+    console.error("Error in GET /api/company-settings/cloud-services:", error)
+    
+    return NextResponse.json(
+      { 
+        error: "Failed to fetch cloud services", 
+        message: typeof error === "object" && error !== null && "message" in error ? (error as any).message : String(error),
+        details: typeof error === "object" && error !== null && "toString" in error
+          ? (error as { toString: () => string }).toString()
+          : String(error)
       },
-    })
-  )
-
-  const services = (resp.Items || []).map((it) => ({
-    id: `${it.orgId.S}_${it.serviceType.S}`,
-    name:
-      it.serviceType.S === "aws-cognito" ? "AWS Cognito" : it.serviceType.S,
-    status:
-      (it.status?.S as "connected" | "disconnected") || "disconnected",
-    lastSynced: it.lastSynced?.S!,
-    userCount: it.userCount?.N ? parseInt(it.userCount.N) : 0,
-  }))
-
-  return NextResponse.json(services)
+      { status: 500 }
+    )
+  }
 }
 
 export async function POST(req: Request) {
-  // save a new cloud-service config
-  const { serviceType, userPoolId, clientId, region } = await req.json()
-  const now = new Date().toISOString()
+  try {
+    console.log("POST /api/company-settings/cloud-services - Start")
+    
+    // save a new cloud-service config
+    const { serviceType, userPoolId, clientId, region } = await req.json()
+    const now = new Date().toISOString()
 
-  const item = {
-    orgId:        { S: ORG_ID },
-    serviceType:  { S: serviceType },
-    userPoolId:   { S: userPoolId },
-    clientId:     { S: clientId },
-    region:       { S: region },
-    status:       { S: "connected" },
-    lastSynced:   { S: now },
-    userCount:    { N: "0" },
-  }
+    if (!serviceType || !userPoolId || !clientId || !region) {
+      console.error("Missing required fields in request body")
+      return NextResponse.json(
+        { error: "Missing required fields in request" },
+        { status: 400 }
+      )
+    }
 
-  await ddb.send(
-    new PutItemCommand({
-      TableName: TABLE,
-      Item: item,
+    const item = {
+      orgId:        { S: ORG_ID },
+      serviceType:  { S: serviceType },
+      userPoolId:   { S: userPoolId },
+      clientId:     { S: clientId },
+      region:       { S: region },
+      status:       { S: "connected" },
+      lastSynced:   { S: now },
+      userCount:    { N: "0" },
+    }
+
+    await ddb.send(
+      new PutItemCommand({
+        TableName: TABLE,
+        Item: item,
+      })
+    )
+
+    console.log("Cloud service configuration saved successfully")
+    return NextResponse.json({
+      id:         `${ORG_ID}_${serviceType}`,
+      name:
+        serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
+      status:    "connected",
+      lastSynced: now,
+      userCount: 0,
     })
-  )
-
-  return NextResponse.json({
-    id:         `${ORG_ID}_${serviceType}`,
-    name:
-      serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
-    status:    "connected",
-    lastSynced: now,
-    userCount: 0,
-  })
+  } catch (error) {
+    console.error("Error in POST /api/company-settings/cloud-services:", error)
+    
+    return NextResponse.json(
+      { 
+        error: "Failed to save cloud service configuration", 
+        message: typeof error === "object" && error !== null && "message" in error ? (error as any).message : String(error),
+        details: typeof error === "object" && error !== null && "toString" in error
+          ? (error as { toString: () => string }).toString()
+          : String(error)
+      },
+      { status: 500 }
+    )
+  }
 }
