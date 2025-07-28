@@ -8,10 +8,10 @@ export interface CloudService {
   status: "connected" | "disconnected"
   lastSynced: string
   userCount: number
-  // Add these properties to store the configuration
   userPoolId?: string
   clientId?: string
   region?: string
+  hasClientSecret?: boolean // Add this to track if secret is stored
 }
 
 export function useCloudServices() {
@@ -26,6 +26,7 @@ export function useCloudServices() {
       if (!res.ok) throw new Error("Failed to load cloud services")
       const data: CloudService[] = await res.json()
       setServices(data)
+      setError(null)
     } catch (err) {
       setError(err as Error)
     } finally {
@@ -38,6 +39,7 @@ export function useCloudServices() {
       serviceType: string
       userPoolId: string
       clientId: string
+      clientSecret?: string // Make optional since some clients don't use secrets
       region: string
     }) => {
       setLoading(true)
@@ -53,6 +55,7 @@ export function useCloudServices() {
         }
         const newService: CloudService = await res.json()
         setServices((prev) => [...prev, newService])
+        setError(null)
         return newService
       } catch (err) {
         setError(err as Error)
@@ -64,11 +67,11 @@ export function useCloudServices() {
     []
   )
 
-  // Function to update a service
   const updateService = useCallback(
     async (id: string, details: {
       userPoolId: string
       clientId: string
+      clientSecret?: string // Add optional client secret
       region: string
     }) => {
       setLoading(true)
@@ -86,6 +89,7 @@ export function useCloudServices() {
         setServices((prev) => 
           prev.map((service) => service.id === id ? updatedService : service)
         )
+        setError(null)
         return updatedService
       } catch (err) {
         setError(err as Error)
@@ -97,7 +101,6 @@ export function useCloudServices() {
     []
   )
 
-  // Function to remove a service
   const removeService = useCallback(
     async (id: string) => {
       setLoading(true)
@@ -110,6 +113,7 @@ export function useCloudServices() {
           throw new Error(errorData.message || "Failed to remove service")
         }
         setServices((prev) => prev.filter((service) => service.id !== id))
+        setError(null)
       } catch (err) {
         setError(err as Error)
         throw err
@@ -120,11 +124,11 @@ export function useCloudServices() {
     []
   )
 
-  // Function to validate connection
   const validateConnection = useCallback(
     async (details: {
       userPoolId: string
       clientId: string
+      clientSecret?: string // Add optional client secret
       region: string
     }) => {
       try {
