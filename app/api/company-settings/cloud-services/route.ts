@@ -55,6 +55,10 @@ export async function GET(req: Request) {
         userCount:  item.userCount?.N
                      ? parseInt(item.userCount.N)
                      : 0,
+        // Include configuration fields for editing
+        userPoolId: item.userPoolId?.S,
+        clientId:   item.clientId?.S,
+        region:     item.region?.S,
       };
     }).filter(Boolean);
 
@@ -100,13 +104,16 @@ export async function POST(req: Request) {
     }));
     console.log("✅ PutItem succeeded for", serviceType);
 
-    // 5c) Return the new service
+    // 5c) Return the new service (including configuration fields)
     return NextResponse.json({
       id:         `${ORG_ID}_${serviceType}`,
       name:       serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
       status:     "connected",
       lastSynced: now,
       userCount:  0,
+      userPoolId, // Include config fields
+      clientId,
+      region,
     });
   } catch (err) {
     console.error("❌ POST /cloud-services error:", err);
