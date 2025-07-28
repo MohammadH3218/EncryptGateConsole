@@ -109,8 +109,7 @@ export async function GET(req: Request) {
           }
         : []);
     }
-    
-    // Map items to response format
+  
     const services = resp.Items.map((item) => {
       try {
         if (!item.orgId?.S || !item.serviceType?.S) {
