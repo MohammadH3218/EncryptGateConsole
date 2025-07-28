@@ -5,83 +5,83 @@ import {
   DynamoDBClient,
   QueryCommand,
   PutItemCommand,
-  ListTablesCommand
+  ListTablesCommand,
+  GetItemCommand
 } from "@aws-sdk/client-dynamodb"
 
-// Immediately log environment variables for debugging
-console.log("Cloud Services API - Environment Check:", {
-  REGION_EXISTS: !!process.env.REGION,
-  ORG_ID_EXISTS: !!process.env.ORGANIZATION_ID,
-  ACCESS_KEY_EXISTS: !!process.env.ACCESS_KEY_ID,
-  SECRET_KEY_EXISTS: !!process.env.SECRET_ACCESS_KEY,
-  TABLE_NAME: process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices",
-});
+// HARDCODED VALUES FOR TESTING
+// ⚠️ IMPORTANT: REMOVE THESE AFTER TESTING AND GO BACK TO ENVIRONMENT VARIABLES
+const REGION = "us-east-1"
+const ORG_ID = "company1"
+const ACCESS_KEY_ID = "AKIA6JKEYBBJHJRCS6WZ"
+const SECRET_ACCESS_KEY = "CMxa/4qQDIF6y9LssA2PwtmxG2Eds4Pa/crbSWMx"
+const TABLE = "CloudServices"
 
-// Read your custom-named env vars
-const REGION = process.env.REGION!
-const ORG_ID = process.env.ORGANIZATION_ID!
-const ACCESS_KEY_ID = process.env.ACCESS_KEY_ID!
-const SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY!
-const TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices"
+console.log("Using hardcoded configuration values for testing");
+console.log(`Region: ${REGION}, Table: ${TABLE}, OrgID: ${ORG_ID}`);
+console.log(`Access Key ID: ${ACCESS_KEY_ID.substring(0, 5)}...`);
 
-// Create DynamoDB client with proper error handling
+// Create DynamoDB client with explicit endpoint
 let ddb: DynamoDBClient;
 try {
-  if (!REGION || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
-    throw new Error(`Missing required AWS configuration. REGION: ${!!REGION}, ACCESS_KEY: ${!!ACCESS_KEY_ID}, SECRET_KEY: ${!!SECRET_ACCESS_KEY}`);
-  }
-  
-  // Explicitly configure with your custom-named environment variables
   ddb = new DynamoDBClient({
     region: REGION,
     credentials: {
       accessKeyId: ACCESS_KEY_ID,
       secretAccessKey: SECRET_ACCESS_KEY,
     },
+    endpoint: `https://dynamodb.${REGION}.amazonaws.com`, // Explicit endpoint
   });
   
   console.log("DynamoDB client initialized successfully");
 } catch (initError) {
   console.error("Failed to initialize DynamoDB client:", initError);
-  // We'll handle this in the route handlers
 }
 
 export async function GET(req: Request) {
-  // Check if we're in debug mode
   const isDebugMode = req.headers.get('Debug-Mode') === 'true';
   
   try {
-    // Verify DynamoDB client is initialized
     if (!ddb) {
-      throw new Error("DynamoDB client is not initialized. Check environment variables.");
+      throw new Error("DynamoDB client is not initialized");
     }
     
-    console.log("GET /api/company-settings/cloud-services - Querying DynamoDB");
+    console.log("Testing AWS connectivity...");
     
-    // Test AWS connectivity if in debug mode
-    if (isDebugMode) {
-      try {
-        console.log("Testing AWS connectivity with ListTables...");
-        const tablesListResult = await ddb.send(new ListTablesCommand({}));
-        console.log("ListTables successful, found tables:", tablesListResult.TableNames);
-      } catch (connError) {
-        console.error("ListTables test failed:", connError);
-        return NextResponse.json({
-          error: "AWS connectivity test failed",
-          message: typeof connError === "object" && connError && "message" in connError ? (connError as any).message : String(connError),
-          details: String(connError),
-          environment: {
-            REGION_EXISTS: !!REGION,
-            ORG_ID_EXISTS: !!ORG_ID,
-            ACCESS_KEY_EXISTS: !!ACCESS_KEY_ID,
-            SECRET_KEY_EXISTS: !!SECRET_ACCESS_KEY,
-            TABLE_NAME: TABLE,
-          }
-        }, { status: 500 });
+    // Step 1: Simple ListTables call to test basic connectivity
+    try {
+      console.log("Testing ListTables...");
+      const tablesResult = await ddb.send(new ListTablesCommand({}));
+      console.log("ListTables successful, found tables:", tablesResult.TableNames);
+      
+      // If our target table is in the list, that's a good sign
+      if (tablesResult.TableNames?.includes(TABLE)) {
+        console.log(`Table '${TABLE}' found in the list!`);
+      } else {
+        console.log(`Table '${TABLE}' NOT found in list:`, tablesResult.TableNames);
       }
+    } catch (listError) {
+      console.error("ListTables failed:", listError);
+      throw new Error(`ListTables failed: ${(listError as any).message || String(listError)}`);
     }
     
-    // Safely run the DynamoDB query with error handling
+    // Step 2: Try a GetItem first (simpler than Query)
+    try {
+      console.log("Testing GetItem with a test key...");
+      const getItemResult = await ddb.send(new GetItemCommand({
+        TableName: TABLE,
+        Key: {
+          "orgId": { S: ORG_ID },
+          "serviceType": { S: "aws-cognito" } // Assuming this is a common service type
+        }
+      }));
+      console.log("GetItem result:", getItemResult.Item ? "Item found" : "No item found");
+    } catch (getError) {
+      console.error("GetItem test failed:", getError);
+      // Continue to Query - don't throw here as GetItem might fail simply because the item doesn't exist
+    }
+    
+    // Step 3: Now try the actual Query
     console.log("Querying DynamoDB table:", TABLE, "with orgId:", ORG_ID);
     
     const resp = await ddb.send(
@@ -94,32 +94,25 @@ export async function GET(req: Request) {
       })
     );
     
+    console.log("Query response:", resp);
+    
     // Safely handle the response
-    if (!resp || !resp.Items) {
-      console.log("DynamoDB query returned no items or empty response");
-      return NextResponse.json(
-        isDebugMode
-          ? {
-              services: [],
-              debug: {
-                message: "DynamoDB query returned no items",
-                rawResponse: resp || "null/undefined response",
-                environment: {
-                  REGION_EXISTS: !!REGION,
-                  ORG_ID_EXISTS: !!ORG_ID,
-                  ACCESS_KEY_EXISTS: !!ACCESS_KEY_ID,
-                  SECRET_KEY_EXISTS: !!SECRET_ACCESS_KEY,
-                }
-              }
+    if (!resp || !resp.Items || resp.Items.length === 0) {
+      console.log("Query returned no items");
+      return NextResponse.json(isDebugMode 
+        ? {
+            services: [],
+            debug: {
+              message: "Query successful but returned no items",
+              tables: await ddb.send(new ListTablesCommand({})).then(r => r.TableNames)
             }
-          : []
-      );
+          }
+        : []);
     }
     
-    // Safely map items with better error handling
+    // Map items to response format
     const services = resp.Items.map((item) => {
       try {
-        // Check for required fields before accessing
         if (!item.orgId?.S || !item.serviceType?.S) {
           console.warn("Item missing required fields:", item);
           return null;
@@ -133,38 +126,22 @@ export async function GET(req: Request) {
           userCount: item.userCount?.N ? parseInt(item.userCount.N) : 0,
         };
       } catch (mapError) {
-        console.error("Error mapping DynamoDB item:", mapError, item);
+        console.error("Error mapping item:", mapError, item);
         return null;
       }
-    }).filter(Boolean); // Remove any null entries
+    }).filter(Boolean);
 
-    console.log("Returning services data, count:", services.length);
+    console.log("Mapped services:", services);
     
-    // Return appropriate response based on debug mode
-    if (isDebugMode) {
-      return NextResponse.json({
-        services: services,
-        debug: {
-          timestamp: new Date().toISOString(),
-          environment: {
-            REGION_EXISTS: !!REGION,
-            ORG_ID_EXISTS: !!ORG_ID,
-            ACCESS_KEY_EXISTS: !!ACCESS_KEY_ID,
-            SECRET_KEY_EXISTS: !!SECRET_ACCESS_KEY,
-            TABLE_NAME: TABLE,
-          },
-          query: {
-            tableName: TABLE,
-            keyCondition: "orgId = :orgId",
-            orgId: ORG_ID,
-            resultCount: resp.Count,
-            scannedCount: resp.ScannedCount
+    return NextResponse.json(isDebugMode 
+      ? {
+          services: services,
+          debug: {
+            rawItems: resp.Items.length,
+            tables: await ddb.send(new ListTablesCommand({})).then(r => r.TableNames)
           }
         }
-      });
-    }
-    
-    return NextResponse.json(services);
+      : services);
   } catch (error) {
     console.error("Error in GET /api/company-settings/cloud-services:", error);
     
@@ -173,16 +150,11 @@ export async function GET(req: Request) {
         error: "Failed to fetch cloud services", 
         message: typeof error === "object" && error && "message" in error ? (error as any).message : String(error),
         details: String(error),
-        debug: isDebugMode ? {
+        // Include stack trace and additional debug info
+        debug: {
           stack: typeof error === "object" && error && "stack" in error ? (error as any).stack : undefined,
-          environment: {
-            REGION_EXISTS: !!REGION,
-            ORG_ID_EXISTS: !!ORG_ID,
-            ACCESS_KEY_EXISTS: !!ACCESS_KEY_ID,
-            SECRET_KEY_EXISTS: !!SECRET_ACCESS_KEY,
-            TABLE_NAME: TABLE,
-          }
-        } : undefined
+          errorType: typeof error === "object" && error && "name" in error ? (error as any).name : undefined
+        }
       },
       { status: 500 }
     );
@@ -190,27 +162,11 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  // Check if we're in debug mode
   const isDebugMode = req.headers.get('Debug-Mode') === 'true';
   
   try {
-    // Log environment info when in debug mode
-    if (isDebugMode) {
-      console.log("POST to Cloud Services API - Debug Mode", {
-        timestamp: new Date().toISOString(),
-        env: {
-          REGION: REGION || 'not set',
-          ORGANIZATION_ID: ORG_ID || 'not set',
-          ACCESS_KEY_ID: ACCESS_KEY_ID ? `${ACCESS_KEY_ID.substring(0, 4)}...` : 'not set',
-          SECRET_ACCESS_KEY: SECRET_ACCESS_KEY ? 'set (not showing)' : 'not set',
-          TABLE: TABLE,
-        }
-      });
-    }
-    
-    // Verify DynamoDB client is initialized
     if (!ddb) {
-      throw new Error("DynamoDB client is not initialized. Check environment variables.");
+      throw new Error("DynamoDB client is not initialized");
     }
     
     console.log("POST /api/company-settings/cloud-services - Start");
@@ -245,35 +201,15 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-
-    // Test AWS connectivity if in debug mode
-    if (isDebugMode) {
-      try {
-        console.log("Testing AWS connectivity with ListTables...");
-        const testResult = await ddb.send(new ListTablesCommand({}));
-        console.log("ListTables successful, found tables:", testResult.TableNames);
-      } catch (connError) {
-        console.error("ListTables test failed:", connError);
-        return NextResponse.json({
-          error: "AWS connectivity test failed",
-          message: typeof connError === "object" && connError && "message" in connError 
-            ? (connError as any).message 
-            : String(connError),
-          details: String(connError),
-          debug: {
-            stack: typeof connError === "object" && connError && "stack" in connError 
-              ? (connError as any).stack 
-              : undefined,
-            environment: {
-              REGION_EXISTS: !!REGION,
-              ORG_ID_EXISTS: !!ORG_ID,
-              ACCESS_KEY_EXISTS: !!ACCESS_KEY_ID,
-              SECRET_KEY_EXISTS: !!SECRET_ACCESS_KEY,
-              TABLE_NAME: TABLE,
-            }
-          }
-        }, { status: 500 });
-      }
+    
+    // Test basic connectivity first
+    try {
+      console.log("Testing ListTables before performing write...");
+      const tablesResult = await ddb.send(new ListTablesCommand({}));
+      console.log("ListTables successful, found tables:", tablesResult.TableNames);
+    } catch (listError) {
+      console.error("ListTables failed:", listError);
+      throw new Error(`Cannot connect to DynamoDB: ${(listError as any).message || String(listError)}`);
     }
 
     const item = {
@@ -292,39 +228,22 @@ export async function POST(req: Request) {
       serviceType: serviceType
     });
     
-    await ddb.send(
-      new PutItemCommand({
-        TableName: TABLE,
-        Item: item,
-      })
-    );
+    try {
+      await ddb.send(
+        new PutItemCommand({
+          TableName: TABLE,
+          Item: item,
+        })
+      );
+      console.log("PutItem successful");
+    } catch (putError) {
+      console.error("PutItem failed:", putError);
+      throw new Error(`Failed to write to DynamoDB: ${(putError as any).message || String(putError)}`);
+    }
 
     console.log("Cloud service configuration saved successfully");
     
-    // If in debug mode, include additional info in response
-    if (isDebugMode) {
-      return NextResponse.json({
-        success: true,
-        service: {
-          id:         `${ORG_ID}_${serviceType}`,
-          name:       serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
-          status:     "connected",
-          lastSynced: now,
-          userCount:  0,
-        },
-        debug: {
-          timestamp: new Date().toISOString(),
-          operation: "PutItem",
-          table: TABLE,
-          keyFields: {
-            orgId: ORG_ID,
-            serviceType: serviceType
-          }
-        }
-      });
-    }
-    
-    // Normal response
+    // Return response
     return NextResponse.json({
       id:         `${ORG_ID}_${serviceType}`,
       name:       serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
@@ -346,13 +265,9 @@ export async function POST(req: Request) {
           stack: typeof error === "object" && error && "stack" in error 
             ? (error as any).stack 
             : undefined,
-          environment: {
-            REGION_EXISTS: !!REGION,
-            ORG_ID_EXISTS: !!ORG_ID,
-            ACCESS_KEY_EXISTS: !!ACCESS_KEY_ID,
-            SECRET_KEY_EXISTS: !!SECRET_ACCESS_KEY,
-            TABLE_NAME: TABLE,
-          }
+          errorType: typeof error === "object" && error && "name" in error 
+            ? (error as any).name 
+            : undefined
         } : undefined
       },
       { status: 500 }
