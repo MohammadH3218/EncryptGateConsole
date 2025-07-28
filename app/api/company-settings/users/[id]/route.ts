@@ -43,7 +43,7 @@ export async function PUT(
     }
     
     const body = await req.json();
-    const { userPoolId, clientId, region } = body;
+    const { userPoolId, clientId, clientSecret, region } = body;
     
     if (!userPoolId || !clientId || !region) {
       return NextResponse.json(
@@ -84,6 +84,22 @@ export async function PUT(
     
     // Update the item in DynamoDB
     const now = new Date().toISOString();
+    
+    // Build the update expression dynamically with proper typing
+    let updateExpression = "SET userPoolId = :userPoolId, clientId = :clientId, region = :region, lastSynced = :lastSynced";
+    const expressionAttributeValues: Record<string, any> = {
+      ":userPoolId": { S: userPoolId },
+      ":clientId": { S: clientId },
+      ":region": { S: region },
+      ":lastSynced": { S: now },
+    };
+    
+    // Only update client secret if provided (allows keeping existing secret)
+    if (clientSecret) {
+      updateExpression += ", clientSecret = :clientSecret";
+      expressionAttributeValues[":clientSecret"] = { S: clientSecret };
+    }
+    
     await ddb.send(
       new UpdateItemCommand({
         TableName: TABLE,
@@ -91,18 +107,13 @@ export async function PUT(
           orgId: { S: ORG_ID },
           serviceType: { S: serviceType },
         },
-        UpdateExpression: "SET userPoolId = :userPoolId, clientId = :clientId, region = :region, lastSynced = :lastSynced",
-        ExpressionAttributeValues: {
-          ":userPoolId": { S: userPoolId },
-          ":clientId": { S: clientId },
-          ":region": { S: region },
-          ":lastSynced": { S: now },
-        },
+        UpdateExpression: updateExpression,
+        ExpressionAttributeValues: expressionAttributeValues,
       })
     );
     console.log("✅ UpdateItem succeeded for", serviceType);
     
-    // Return the updated service
+    // Return the updated service (don't include the secret in response)
     return NextResponse.json({
       id: `${ORG_ID}_${serviceType}`,
       name: serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
@@ -112,6 +123,7 @@ export async function PUT(
       userPoolId,
       clientId,
       region,
+      hasClientSecret: !!clientSecret // Indicate if secret was updated
     });
   } catch (err) {
     console.error("❌ PUT /cloud-services/[id] error:", err);

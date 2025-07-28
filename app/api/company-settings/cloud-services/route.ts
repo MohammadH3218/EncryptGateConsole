@@ -1,6 +1,5 @@
 // app/api/company-settings/cloud-services/route.ts
 
-// 1) Force Node.js Lambda so `process.env` is available at runtime
 export const runtime = 'nodejs';
 
 import { NextResponse } from "next/server";
@@ -9,10 +8,9 @@ import {
   QueryCommand,
   PutItemCommand,
   ListTablesCommand,
-  GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
 
-// 2) Only two env-vars now: your org ID and table name
+// Only two env-vars now: your org ID and table name
 const ORG_ID = process.env.ORGANIZATION_ID!;
 const TABLE  =
   process.env.CLOUDSERVICES_TABLE_NAME ||
@@ -21,18 +19,18 @@ const TABLE  =
 
 console.log("🔧 Cloud Services API starting with:", { ORG_ID, TABLE });
 
-// 3) Instantiate DynamoDBClient with the default credential/provider chain.
-//    Amplify will inject AWS_REGION and your SSR IAM role at runtime.
+// Instantiate DynamoDBClient with the default credential/provider chain.
+// Amplify will inject AWS_REGION and your SSR IAM role at runtime.
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
-// 4) GET handler
+// GET handler
 export async function GET(req: Request) {
   try {
-    // 4a) Quick connectivity check
+    // Quick connectivity check
     const list = await ddb.send(new ListTablesCommand({}));
     console.log("✅ ListTables OK:", list.TableNames);
 
-    // 4b) Your actual query
+    // Your actual query
     const resp = await ddb.send(new QueryCommand({
       TableName: TABLE,
       KeyConditionExpression: "orgId = :orgId",
@@ -42,7 +40,7 @@ export async function GET(req: Request) {
     }));
     console.log(`✅ Query returned ${resp.Count} items`);
 
-    // 4c) Map to your UI shape
+    // Map to your UI shape
     const services = (resp.Items || []).map(item => {
       const orgId       = item.orgId?.S;
       const serviceType = item.serviceType?.S;
@@ -59,6 +57,8 @@ export async function GET(req: Request) {
         userPoolId: item.userPoolId?.S,
         clientId:   item.clientId?.S,
         region:     item.region?.S,
+        // Don't return the actual secret, just indicate if it exists
+        hasClientSecret: !!item.clientSecret?.S,
       };
     }).filter(Boolean);
 
@@ -72,11 +72,12 @@ export async function GET(req: Request) {
   }
 }
 
-// 5) POST handler
+// POST handler
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { serviceType, userPoolId, clientId, region } = body;
+    const { serviceType, userPoolId, clientId, clientSecret, region } = body;
+    
     if (!serviceType || !userPoolId || !clientId || !region) {
       return NextResponse.json(
         { error: "Missing required fields" },
@@ -84,9 +85,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5a) Build DynamoDB item
+    // Build DynamoDB item with proper typing
     const now = new Date().toISOString();
-    const item = {
+    const item: Record<string, any> = {
       orgId:       { S: ORG_ID },
       serviceType: { S: serviceType },
       userPoolId:  { S: userPoolId },
@@ -96,24 +97,30 @@ export async function POST(req: Request) {
       lastSynced:  { S: now },
       userCount:   { N: "0" },
     };
+    
+    // Only add client secret if provided (some clients don't use secrets)
+    if (clientSecret) {
+      item.clientSecret = { S: clientSecret };
+    }
 
-    // 5b) Write to DynamoDB
+    // Write to DynamoDB
     await ddb.send(new PutItemCommand({
       TableName: TABLE,
       Item:      item,
     }));
     console.log("✅ PutItem succeeded for", serviceType);
 
-    // 5c) Return the new service (including configuration fields)
+    // Return the new service (don't include the secret in the response for security)
     return NextResponse.json({
       id:         `${ORG_ID}_${serviceType}`,
       name:       serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
       status:     "connected",
       lastSynced: now,
       userCount:  0,
-      userPoolId, // Include config fields
+      userPoolId,
       clientId,
       region,
+      hasClientSecret: !!clientSecret // Just indicate if it has a secret
     });
   } catch (err) {
     console.error("❌ POST /cloud-services error:", err);

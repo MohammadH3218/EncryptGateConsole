@@ -72,6 +72,7 @@ export default function CloudServicesPage() {
     serviceType: "aws-cognito",
     userPoolId: "",
     clientId: "",
+    clientSecret: "", // Added client secret field
     region: "",
   })
   
@@ -90,7 +91,6 @@ export default function CloudServicesPage() {
     if (userPoolId && userPoolId.includes('_')) {
       const regionFromPoolId = userPoolId.split('_')[0];
       if (VALID_AWS_REGIONS.includes(regionFromPoolId) && regionFromPoolId !== connectionDetails.region) {
-        // Auto-update region field when a valid User Pool ID is entered
         setConnectionDetails(prev => ({
           ...prev,
           region: regionFromPoolId
@@ -107,7 +107,6 @@ export default function CloudServicesPage() {
     try {
       console.log("Running API diagnostics...")
       
-      // Direct fetch to the API endpoint with debug header
       const response = await fetch('/api/company-settings/cloud-services', {
         method: 'GET',
         headers: {
@@ -124,15 +123,12 @@ export default function CloudServicesPage() {
       
       console.log("API Response:", response.status, data)
       
-      // Store diagnostic info
       setDebugInfo({
         timestamp: new Date().toISOString(),
         status: response.status,
         statusText: response.statusText,
         ok: response.ok,
         data,
-        
-        // Test direct AWS connectivity
         awsTest: await testAwsConnectivity()
       })
     } catch (err) {
@@ -148,13 +144,11 @@ export default function CloudServicesPage() {
     }
   }
   
-  // Helper function to test AWS connectivity
   const testAwsConnectivity = async () => {
     try {
-      const response = await fetch('/api/direct-aws-test', {
+      const response = await fetch('/api/debug/aws-test', {
         method: 'GET'
       })
-      
       return await response.json()
     } catch (err) {
       return {
@@ -164,18 +158,14 @@ export default function CloudServicesPage() {
     }
   }
   
-  // Create a direct AWS test endpoint when debugging starts
   useEffect(() => {
-    // Add a temporary debug endpoint directly in the browser
     if (showDebugPanel && !window.hasOwnProperty('debugEndpointCreated')) {
       const script = document.createElement('script')
       script.innerHTML = `
         window.debugEndpointCreated = true;
-        // Create a temporary endpoint for testing
         const oldFetch = window.fetch;
         window.fetch = function(url, options) {
-          if (url === '/api/direct-aws-test') {
-            // This will only run in the browser
+          if (url === '/api/debug/aws-test') {
             return Promise.resolve({
               ok: true,
               status: 200,
@@ -200,12 +190,11 @@ export default function CloudServicesPage() {
     if (!connectionDetails.userPoolId || !connectionDetails.clientId || !connectionDetails.region) {
       setValidationResult({ 
         valid: false, 
-        message: "All fields are required" 
+        message: "User Pool ID, Client ID, and Region are required" 
       });
       return false;
     }
     
-    // Check if region is in valid format
     if (!VALID_AWS_REGIONS.includes(connectionDetails.region)) {
       setValidationResult({ 
         valid: false, 
@@ -214,7 +203,6 @@ export default function CloudServicesPage() {
       return false;
     }
     
-    // Validate User Pool ID format
     if (!connectionDetails.userPoolId.includes('_')) {
       setValidationResult({ 
         valid: false, 
@@ -223,7 +211,6 @@ export default function CloudServicesPage() {
       return false;
     }
     
-    // Validate region matches User Pool ID
     const regionFromPoolId = connectionDetails.userPoolId.split('_')[0];
     if (regionFromPoolId !== connectionDetails.region) {
       setValidationResult({ 
@@ -238,17 +225,16 @@ export default function CloudServicesPage() {
 
   const handleConnectService = async () => {
     try {
-      // First, perform local validation
       if (!validateInputsLocally()) {
-        return; // Don't proceed if local validation fails
+        return;
       }
       
-      // Then validate with the API
       setIsValidating(true)
       try {
         const result = await validateConnection({
           userPoolId: connectionDetails.userPoolId,
           clientId: connectionDetails.clientId,
+          clientSecret: connectionDetails.clientSecret,
           region: connectionDetails.region,
         })
         setValidationResult({ 
@@ -257,19 +243,18 @@ export default function CloudServicesPage() {
         })
         
         if (!result.valid) {
-          return // Don't proceed if validation fails
+          return
         }
       } catch (err) {
         setValidationResult({ 
           valid: false, 
           message: err instanceof Error ? err.message : "Validation failed" 
         })
-        return // Don't proceed with adding if validation fails
+        return
       } finally {
         setIsValidating(false)
       }
       
-      // If validation succeeds, add the service
       await addService(connectionDetails)
       toast({
         title: "Service Connected",
@@ -280,6 +265,7 @@ export default function CloudServicesPage() {
         serviceType: "aws-cognito",
         userPoolId: "",
         clientId: "",
+        clientSecret: "",
         region: "",
       })
       setValidationResult(null)
@@ -299,6 +285,7 @@ export default function CloudServicesPage() {
         serviceType: "aws-cognito",
         userPoolId: service.userPoolId || "",
         clientId: service.clientId || "",
+        clientSecret: "", // Don't populate the secret for security
         region: service.region || "",
       })
       setSelectedService(serviceId)
@@ -310,17 +297,16 @@ export default function CloudServicesPage() {
     if (!selectedService) return
 
     try {
-      // First, perform local validation
       if (!validateInputsLocally()) {
-        return; // Don't proceed if local validation fails
+        return;
       }
       
-      // Then validate with the API
       setIsValidating(true)
       try {
         const result = await validateConnection({
           userPoolId: connectionDetails.userPoolId,
           clientId: connectionDetails.clientId,
+          clientSecret: connectionDetails.clientSecret,
           region: connectionDetails.region,
         })
         setValidationResult({ 
@@ -329,22 +315,22 @@ export default function CloudServicesPage() {
         })
         
         if (!result.valid) {
-          return // Don't proceed if validation fails
+          return
         }
       } catch (err) {
         setValidationResult({ 
           valid: false, 
           message: err instanceof Error ? err.message : "Validation failed" 
         })
-        return // Don't proceed with updating if validation fails
+        return
       } finally {
         setIsValidating(false)
       }
       
-      // If validation succeeds, update the service
       await updateService(selectedService, {
         userPoolId: connectionDetails.userPoolId,
         clientId: connectionDetails.clientId,
+        clientSecret: connectionDetails.clientSecret,
         region: connectionDetails.region,
       })
       
@@ -390,12 +376,10 @@ export default function CloudServicesPage() {
   }
 
   const handleValidateCredentials = async () => {
-    // First, perform local validation
     if (!validateInputsLocally()) {
-      return; // Don't proceed if local validation fails
+      return;
     }
     
-    // Then validate with the API
     setIsValidating(true)
     setValidationResult(null)
     
@@ -403,6 +387,7 @@ export default function CloudServicesPage() {
       const result = await validateConnection({
         userPoolId: connectionDetails.userPoolId,
         clientId: connectionDetails.clientId,
+        clientSecret: connectionDetails.clientSecret,
         region: connectionDetails.region,
       })
       
@@ -430,6 +415,12 @@ export default function CloudServicesPage() {
   const UserPoolHelperText = () => (
     <div className="text-xs text-muted-foreground mt-1">
       <p>Format: region_identifier (e.g., us-east-1_abcdefghi)</p>
+    </div>
+  )
+
+  const ClientSecretHelperText = () => (
+    <div className="text-xs text-muted-foreground mt-1">
+      <p>Your Cognito app client secret. Required for this app client configuration.</p>
     </div>
   )
 
@@ -557,7 +548,7 @@ export default function CloudServicesPage() {
           )}
         </div>
         
-        {/* Original content */}
+        {/* Main Content */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold">Cloud Services</h2>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -577,7 +568,7 @@ export default function CloudServicesPage() {
                   <Info className="h-4 w-4" />
                   <AlertTitle>AWS Cognito Configuration</AlertTitle>
                   <AlertDescription className="text-sm">
-                    You'll need your User Pool ID, Client ID, and Region from the AWS Cognito Console.
+                    You'll need your User Pool ID, Client ID, Client Secret, and Region from the AWS Cognito Console.
                     Make sure to use the correct region format (e.g., us-east-1) that matches your User Pool ID.
                   </AlertDescription>
                 </Alert>
@@ -598,6 +589,7 @@ export default function CloudServicesPage() {
                     <UserPoolHelperText />
                   </div>
                 </div>
+
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="clientId" className="text-right">
                     Client ID
@@ -612,6 +604,25 @@ export default function CloudServicesPage() {
                     placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j"
                   />
                 </div>
+
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="clientSecret" className="text-right">
+                    Client Secret
+                  </Label>
+                  <div className="col-span-3 space-y-1">
+                    <Input
+                      id="clientSecret"
+                      type="password"
+                      value={connectionDetails.clientSecret}
+                      onChange={(e) =>
+                        setConnectionDetails((p) => ({ ...p, clientSecret: e.target.value }))
+                      }
+                      placeholder="Your Cognito app client secret"
+                    />
+                    <ClientSecretHelperText />
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="region" className="text-right">
                     Region
@@ -645,6 +656,7 @@ export default function CloudServicesPage() {
                       serviceType: "aws-cognito",
                       userPoolId: "",
                       clientId: "",
+                      clientSecret: "",
                       region: "",
                     })
                     setValidationResult(null)
@@ -765,7 +777,7 @@ export default function CloudServicesPage() {
                   <div className="space-y-2">
                     <p>Last synced: {new Date(service.lastSynced).toLocaleString()}</p>
                     <p>Users: {service.userCount}</p>
-                    <div className="mt-4 grid grid-cols-3 gap-4">
+                    <div className="mt-4 grid grid-cols-4 gap-4">
                       <div className="border rounded p-3 bg-muted/30">
                         <p className="text-sm font-medium mb-1">User Pool ID</p>
                         <p className="text-sm text-muted-foreground truncate">{service.userPoolId || "Not available"}</p>
@@ -777,6 +789,12 @@ export default function CloudServicesPage() {
                       <div className="border rounded p-3 bg-muted/30">
                         <p className="text-sm font-medium mb-1">Client ID</p>
                         <p className="text-sm text-muted-foreground truncate">{service.clientId || "Not available"}</p>
+                      </div>
+                      <div className="border rounded p-3 bg-muted/30">
+                        <p className="text-sm font-medium mb-1">Client Secret</p>
+                        <p className="text-sm text-muted-foreground">
+                          {service.hasClientSecret ? "••••••••" : "Not configured"}
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -792,7 +810,7 @@ export default function CloudServicesPage() {
             <DialogHeader>
               <DialogTitle>Edit AWS Cognito Configuration</DialogTitle>
               <DialogDescription>
-                Update your identity provider settings.
+                Update your identity provider settings. Leave client secret blank to keep existing value.
               </DialogDescription>
             </DialogHeader>
 
@@ -802,6 +820,7 @@ export default function CloudServicesPage() {
                 <AlertTitle>AWS Cognito Configuration</AlertTitle>
                 <AlertDescription className="text-sm">
                   Make sure to use the correct region format (e.g., us-east-1) that matches your User Pool ID.
+                  Client secret will only be updated if you provide a new value.
                 </AlertDescription>
               </Alert>
               
@@ -834,6 +853,23 @@ export default function CloudServicesPage() {
                   }
                   placeholder="e.g. 1a2b3c4d5e6f7g8h9i0j"
                 />
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="edit-clientSecret" className="text-right">
+                  Client Secret
+                </Label>
+                <div className="col-span-3 space-y-1">
+                  <Input
+                    id="edit-clientSecret"
+                    type="password"
+                    value={connectionDetails.clientSecret}
+                    onChange={(e) =>
+                      setConnectionDetails((p) => ({ ...p, clientSecret: e.target.value }))
+                    }
+                    placeholder="Leave blank to keep existing secret"
+                  />
+                  <ClientSecretHelperText />
+                </div>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="edit-region" className="text-right">
