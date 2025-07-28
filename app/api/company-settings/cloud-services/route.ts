@@ -171,7 +171,6 @@ export async function POST(req: Request) {
     
     console.log("POST /api/company-settings/cloud-services - Start");
     
-    // Parse request body
     let body;
     try {
       body = await req.json();
