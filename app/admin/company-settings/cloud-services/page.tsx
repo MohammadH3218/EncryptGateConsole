@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { CloudOff, Check, RefreshCw } from "lucide-react"
+import { CloudOff, Check, RefreshCw, Bug, ChevronDown, ChevronUp } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { useCloudServices } from "@/hooks/useCloudServices"
 
@@ -27,6 +27,107 @@ export default function CloudServicesPage() {
     clientId: "",
     region: "",
   })
+  
+  // Debugging state
+  const [debugInfo, setDebugInfo] = useState<any>(null)
+  const [isDebugging, setIsDebugging] = useState(false)
+  const [showDebugPanel, setShowDebugPanel] = useState(false)
+  
+  // Run diagnostics function
+  const runDiagnostics = async () => {
+    setIsDebugging(true)
+    setDebugInfo(null)
+    
+    try {
+      console.log("Running API diagnostics...")
+      
+      // Direct fetch to the API endpoint with debug header
+      const response = await fetch('/api/company-settings/cloud-services', {
+        method: 'GET',
+        headers: {
+          'Debug-Mode': 'true'
+        }
+      })
+      
+      let data
+      try {
+        data = await response.json()
+      } catch (parseError) {
+        data = { parseError: "Failed to parse response as JSON" }
+      }
+      
+      console.log("API Response:", response.status, data)
+      
+      // Store diagnostic info
+      setDebugInfo({
+        timestamp: new Date().toISOString(),
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+        data,
+        
+        // Test direct AWS connectivity
+        awsTest: await testAwsConnectivity()
+      })
+    } catch (err) {
+      console.error("Diagnostics error:", err)
+      setDebugInfo({
+        timestamp: new Date().toISOString(),
+        error: err instanceof Error ? err.message : String(err),
+        type: err instanceof Error ? err.name : typeof err,
+        stack: err instanceof Error ? err.stack : undefined
+      })
+    } finally {
+      setIsDebugging(false)
+    }
+  }
+  
+  // Helper function to test AWS connectivity
+  const testAwsConnectivity = async () => {
+    try {
+      const response = await fetch('/api/direct-aws-test', {
+        method: 'GET'
+      })
+      
+      return await response.json()
+    } catch (err) {
+      return {
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined
+      }
+    }
+  }
+  
+  // Create a direct AWS test endpoint when debugging starts
+  useEffect(() => {
+    // Add a temporary debug endpoint directly in the browser
+    if (showDebugPanel && !window.hasOwnProperty('debugEndpointCreated')) {
+      const script = document.createElement('script')
+      script.innerHTML = `
+        window.debugEndpointCreated = true;
+        // Create a temporary endpoint for testing
+        const oldFetch = window.fetch;
+        window.fetch = function(url, options) {
+          if (url === '/api/direct-aws-test') {
+            // This will only run in the browser
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve({
+                message: "Browser-only test. For real AWS testing, add a real endpoint.",
+                browserInfo: {
+                  userAgent: navigator.userAgent,
+                  url: window.location.href
+                }
+              })
+            });
+          }
+          return oldFetch(url, options);
+        };
+      `
+      document.head.appendChild(script)
+    }
+  }, [showDebugPanel])
 
   const handleConnectService = async () => {
     try {
@@ -48,6 +149,98 @@ export default function CloudServicesPage() {
   return (
     <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={0}>
       <FadeInSection>
+        {/* Debug Panel */}
+        <div className="mb-6">
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setShowDebugPanel(!showDebugPanel)}
+            className="mb-2 flex items-center"
+          >
+            <Bug className="mr-2 h-4 w-4" />
+            {showDebugPanel ? "Hide Debug Panel" : "Show Debug Panel"}
+            {showDebugPanel ? <ChevronUp className="ml-2 h-4 w-4" /> : <ChevronDown className="ml-2 h-4 w-4" />}
+          </Button>
+          
+          {showDebugPanel && (
+            <Card className="mb-4 border-dashed border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/20">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg flex items-center justify-between">
+                  <span>API Diagnostics</span>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={runDiagnostics} 
+                    disabled={isDebugging}
+                  >
+                    {isDebugging ? "Running..." : "Run Diagnostics"}
+                  </Button>
+                </CardTitle>
+                <CardDescription>
+                  Troubleshoot API connectivity issues and environment variables
+                </CardDescription>
+              </CardHeader>
+              
+              <CardContent>
+                {isDebugging ? (
+                  <div className="flex justify-center items-center py-4">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    <span className="ml-2">Running diagnostics...</span>
+                  </div>
+                ) : debugInfo ? (
+                  <div className="space-y-4">
+                    <div>
+                      <h4 className="font-medium mb-1">Status:</h4>
+                      <p className={debugInfo.status >= 400 ? "text-red-500" : "text-green-500"}>
+                        {debugInfo.status} {debugInfo.statusText}
+                      </p>
+                    </div>
+                    
+                    {debugInfo.error && (
+                      <div className="p-3 bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 rounded">
+                        <h4 className="font-medium mb-1">Error:</h4>
+                        <p>{debugInfo.error}</p>
+                        {debugInfo.stack && (
+                          <pre className="mt-2 text-xs overflow-auto max-h-[150px] p-2 bg-red-50 dark:bg-red-900/50 rounded">
+                            {debugInfo.stack}
+                          </pre>
+                        )}
+                      </div>
+                    )}
+                    
+                    {debugInfo.data && (
+                      <div>
+                        <h4 className="font-medium mb-1">API Response:</h4>
+                        <pre className="p-3 bg-gray-100 dark:bg-gray-800 rounded overflow-auto text-xs max-h-[200px]">
+                          {JSON.stringify(debugInfo.data, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    
+                    {debugInfo.awsTest && (
+                      <div>
+                        <h4 className="font-medium mb-1">AWS Connectivity Test:</h4>
+                        <pre className="p-3 bg-gray-100 dark:bg-gray-800 rounded overflow-auto text-xs max-h-[150px]">
+                          {JSON.stringify(debugInfo.awsTest, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="py-4 text-center text-muted-foreground">
+                    Click "Run Diagnostics" to test API connectivity
+                  </div>
+                )}
+              </CardContent>
+              
+              <CardFooter className="text-xs text-muted-foreground">
+                <p>Add <code>/api/debug/aws-test/route.ts</code> file to enable real AWS testing</p>
+              </CardFooter>
+            </Card>
+          )}
+        </div>
+        
+        {/* Original content */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold">Cloud Services</h2>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -117,9 +310,19 @@ export default function CloudServicesPage() {
         </div>
 
         {error && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" className="mb-4">
             <AlertTitle>Error</AlertTitle>
             <AlertDescription>{error.message}</AlertDescription>
+            {showDebugPanel && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-2" 
+                onClick={runDiagnostics}
+              >
+                Run Diagnostics
+              </Button>
+            )}
           </Alert>
         )}
 
