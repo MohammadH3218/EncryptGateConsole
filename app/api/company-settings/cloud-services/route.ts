@@ -31,6 +31,7 @@ try {
     throw new Error(`Missing required AWS configuration. REGION: ${!!REGION}, ACCESS_KEY: ${!!ACCESS_KEY_ID}, SECRET_KEY: ${!!SECRET_ACCESS_KEY}`);
   }
   
+  // Explicitly configure with your custom-named environment variables
   ddb = new DynamoDBClient({
     region: REGION,
     credentials: {
