@@ -1,6 +1,5 @@
 // app/api/company-settings/cloud-services/route.ts
 
-// 1) Force Node.js Lambda (not Edge) so process.env is available at runtime
 export const runtime = 'nodejs';
 
 import { NextResponse } from "next/server";
@@ -12,27 +11,27 @@ import {
   GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
 
-// 2) Load from env, falling back to sane defaults if a var is missing
-const REGION            = process.env.REGION                   || "us-east-1";
+// ─── load from process.env ─────────────────────────────────────────────────────
+const REGION            = process.env.REGION                   || "";
 const ORG_ID            = process.env.ORGANIZATION_ID          || "";
 const ACCESS_KEY_ID     = process.env.ACCESS_KEY_ID            || "";
 const SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY        || "";
-const TABLE = process.env.CLOUDSERVICES_TABLE || "CloudServices";
+const TABLE             = process.env.CLOUDSERVICES_TABLE_NAME || "";
 
-// 3) Quick sanity-check at startup
+// ─── startup sanity check ──────────────────────────────────────────────────────
 console.log("Cloud Services API – ENV VARS:", {
   REGION,
   ORG_ID,
-  ACCESS_KEY_ID: ACCESS_KEY_ID   ? ACCESS_KEY_ID.substring(0,5) + "…" : undefined,
+  ACCESS_KEY_ID:     ACCESS_KEY_ID     ? ACCESS_KEY_ID.substring(0,5) + "…" : undefined,
   SECRET_ACCESS_KEY: SECRET_ACCESS_KEY ? "*****" : undefined,
   TABLE,
 });
 
-// 4) Initialize DynamoDB client
+// ─── init DynamoDB ─────────────────────────────────────────────────────────────
 let ddb: DynamoDBClient;
 try {
-  if (!REGION || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY) {
-    throw new Error("Missing required AWS config (REGION, ACCESS_KEY_ID or SECRET_ACCESS_KEY)");
+  if (!REGION || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY || !TABLE) {
+    throw new Error("Missing required AWS config or table name");
   }
   ddb = new DynamoDBClient({
     region: REGION,
@@ -47,6 +46,7 @@ try {
   console.error("❌ DynamoDB init error:", err);
 }
 
+// ─── GET handler ───────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
   const isDebug = req.headers.get("Debug-Mode") === "true";
 
@@ -54,30 +54,24 @@ export async function GET(req: Request) {
     if (!ddb) throw new Error("DynamoDB client not initialized");
 
     // 1) Connectivity test
-    console.log("→ ListTables…");
     const tables = await ddb.send(new ListTablesCommand({}));
-    console.log("→ Tables:", tables.TableNames);
-
-    // 2) Optional GetItem sanity check
-    console.log("→ GetItem test…");
+    // 2) Optional GetItem
     await ddb.send(new GetItemCommand({
       TableName: TABLE,
       Key: {
         orgId:       { S: ORG_ID },
         serviceType: { S: "aws-cognito" },
       },
-    })).then(r => console.log("→ GetItem:", r.Item ? "found" : "none"));
+    })).catch(() => {/* ignore */});
 
-    // 3) Actual Query
-    console.log(`→ Querying ${TABLE} for orgId=${ORG_ID}`);
+    // 3) Actual query
     const resp = await ddb.send(new QueryCommand({
       TableName: TABLE,
       KeyConditionExpression: "orgId = :orgId",
       ExpressionAttributeValues: { ":orgId": { S: ORG_ID } },
     }));
-    console.log("→ Query returned:", resp.Count, "items");
 
-    // 4) Map items to your shape
+    // 4) Map items
     const services = (resp.Items || []).map(item => {
       if (!item.orgId?.S || !item.serviceType?.S) return null;
       return {
@@ -87,13 +81,23 @@ export async function GET(req: Request) {
         lastSynced: item.lastSynced?.S || new Date().toISOString(),
         userCount:  item.userCount?.N ? parseInt(item.userCount.N) : 0,
       };
-    }).filter(Boolean);
+    }).filter(Boolean) as any[];
 
-    return NextResponse.json(
-      isDebug
-        ? { services, debug: { rawCount: resp.Count, tables: tables.TableNames } }
-        : services
-    );
+    // ─── return JSON ───────────────────────────────────────────────
+    if (isDebug) {
+      return NextResponse.json({
+        services,
+        debug: {
+          environment: {
+            REGION, ORG_ID, ACCESS_KEY_ID, SECRET_ACCESS_KEY, TABLE
+          },
+          rawCount: resp.Count,
+          tables:   tables.TableNames
+        }
+      });
+    }
+    return NextResponse.json(services);
+
   } catch (error) {
     console.error("❌ GET error:", error);
     return NextResponse.json({
@@ -104,6 +108,7 @@ export async function GET(req: Request) {
   }
 }
 
+// ─── POST handler ──────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
   const isDebug = req.headers.get("Debug-Mode") === "true";
 
@@ -131,7 +136,6 @@ export async function POST(req: Request) {
       userCount:   { N: "0" },
     };
 
-    console.log("→ Putting item into", TABLE);
     await ddb.send(new PutItemCommand({ TableName: TABLE, Item: item }));
     console.log("→ PutItem succeeded for", serviceType);
 
@@ -142,6 +146,7 @@ export async function POST(req: Request) {
       lastSynced: now,
       userCount:  0,
     });
+
   } catch (error) {
     console.error("❌ POST error:", error);
     return NextResponse.json({
