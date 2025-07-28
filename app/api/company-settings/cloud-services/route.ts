@@ -1,5 +1,6 @@
 // app/api/company-settings/cloud-services/route.ts
 
+// 1) Force Node.js Lambda (not Edge) so process.env is available
 export const runtime = 'nodejs';
 
 import { NextResponse } from "next/server";
@@ -11,23 +12,25 @@ import {
   GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
 
-// ─── load from process.env ─────────────────────────────────────────────────────
+// 2) Read from whichever env-var exists today
 const REGION            = process.env.REGION                   || "";
 const ORG_ID            = process.env.ORGANIZATION_ID          || "";
 const ACCESS_KEY_ID     = process.env.ACCESS_KEY_ID            || "";
-const SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY        || "";
-const TABLE             = process.env.CLOUDSERVICES_TABLE_NAME || "";
+// fallback to your existing COGNITO_CLIENT_SECRET if you haven't added SECRET_ACCESS_KEY yet
+const SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY        || process.env.COGNITO_CLIENT_SECRET || "";
+// fallback to CLOUDSERVICES_TABLE if you haven't renamed to CLOUDSERVICES_TABLE_NAME
+const TABLE             = process.env.CLOUDSERVICES_TABLE_NAME || process.env.CLOUDSERVICES_TABLE    || "";
 
-// ─── startup sanity check ──────────────────────────────────────────────────────
+// 3) Log everything on startup so we can immediately spot what's missing
 console.log("Cloud Services API – ENV VARS:", {
   REGION,
   ORG_ID,
-  ACCESS_KEY_ID:     ACCESS_KEY_ID     ? ACCESS_KEY_ID.substring(0,5) + "…" : undefined,
-  SECRET_ACCESS_KEY: SECRET_ACCESS_KEY ? "*****" : undefined,
+  ACCESS_KEY_ID,
+  SECRET_ACCESS_KEY,
   TABLE,
 });
 
-// ─── init DynamoDB ─────────────────────────────────────────────────────────────
+// 4) Initialize DynamoDB client
 let ddb: DynamoDBClient;
 try {
   if (!REGION || !ACCESS_KEY_ID || !SECRET_ACCESS_KEY || !TABLE) {
@@ -46,32 +49,32 @@ try {
   console.error("❌ DynamoDB init error:", err);
 }
 
-// ─── GET handler ───────────────────────────────────────────────────────────────
+// 5) GET handler
 export async function GET(req: Request) {
   const isDebug = req.headers.get("Debug-Mode") === "true";
 
   try {
     if (!ddb) throw new Error("DynamoDB client not initialized");
 
-    // 1) Connectivity test
+    // connectivity test
     const tables = await ddb.send(new ListTablesCommand({}));
-    // 2) Optional GetItem
+    // sanity GetItem (ignore missing item)
     await ddb.send(new GetItemCommand({
       TableName: TABLE,
       Key: {
         orgId:       { S: ORG_ID },
         serviceType: { S: "aws-cognito" },
       },
-    })).catch(() => {/* ignore */});
+    })).catch(() => {});
 
-    // 3) Actual query
+    // actual query
     const resp = await ddb.send(new QueryCommand({
       TableName: TABLE,
       KeyConditionExpression: "orgId = :orgId",
       ExpressionAttributeValues: { ":orgId": { S: ORG_ID } },
     }));
 
-    // 4) Map items
+    // map to your shape
     const services = (resp.Items || []).map(item => {
       if (!item.orgId?.S || !item.serviceType?.S) return null;
       return {
@@ -83,14 +86,11 @@ export async function GET(req: Request) {
       };
     }).filter(Boolean) as any[];
 
-    // ─── return JSON ───────────────────────────────────────────────
     if (isDebug) {
       return NextResponse.json({
         services,
         debug: {
-          environment: {
-            REGION, ORG_ID, ACCESS_KEY_ID, SECRET_ACCESS_KEY, TABLE
-          },
+          environment: { REGION, ORG_ID, ACCESS_KEY_ID, TABLE, /* omit secret in UI */ },
           rawCount: resp.Count,
           tables:   tables.TableNames
         }
@@ -108,7 +108,7 @@ export async function GET(req: Request) {
   }
 }
 
-// ─── POST handler ──────────────────────────────────────────────────────────────
+// 6) POST handler
 export async function POST(req: Request) {
   const isDebug = req.headers.get("Debug-Mode") === "true";
 
