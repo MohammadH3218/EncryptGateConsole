@@ -1,174 +1,144 @@
-// app/api/company-settings/cloud-services/[id]/route.ts
-
+// app/api/company-settings/users/[id]/route.ts
 export const runtime = 'nodejs';
 
 import { NextResponse } from "next/server";
 import {
   DynamoDBClient,
-  UpdateItemCommand,
+  GetItemCommand,
   DeleteItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import {
   CognitoIdentityProviderClient,
-  DescribeUserPoolCommand,
+  AdminRemoveUserFromGroupCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 
-// Only use the org ID env var
+// Environment variables
 const ORG_ID = process.env.ORGANIZATION_ID!;
-const TABLE = 
-  process.env.CLOUDSERVICES_TABLE_NAME || 
-  process.env.CLOUDSERVICES_TABLE || 
-  "CloudServices";
+const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
+                 process.env.CLOUDSERVICES_TABLE || 
+                 "CloudServices";
+const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 
-console.log("🔧 Cloud Services [id] API starting with:", { ORG_ID, TABLE });
+if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
 
-// Use default credential provider chain
+console.log("🔧 Users [id] API starting with:", { ORG_ID, CS_TABLE, USERS_TABLE });
+
+// DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
-// Update an existing cloud service
-export async function PUT(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const id = params.id;
-    const [orgId, serviceType] = id.split('_');
-    
-    // Validate parameters
-    if (orgId !== ORG_ID || !serviceType) {
-      return NextResponse.json(
-        { error: "Invalid service ID format" },
-        { status: 400 }
-      );
-    }
-    
-    const body = await req.json();
-    const { userPoolId, clientId, clientSecret, region } = body;
-    
-    if (!userPoolId || !clientId || !region) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
-    }
-    
-    // Validate the Cognito credentials before updating
-    try {
-      const cognito = new CognitoIdentityProviderClient({
-        region,
-      });
-      
-      await cognito.send(
-        new DescribeUserPoolCommand({
-          UserPoolId: userPoolId,
-        })
-      );
-    } catch (err: any) {
-      console.error("❌ Cognito validation error:", err);
-      
-      let errorMessage = "Failed to validate AWS Cognito credentials";
-      
-      if (err.name === "UserPoolNotFoundException") {
-        errorMessage = "User Pool not found. Please check the User Pool ID.";
-      } else if (err.name === "InvalidParameterException") {
-        errorMessage = "Invalid parameters. Please check your inputs.";
-      } else if (err.name === "NotAuthorizedException") {
-        errorMessage = "Not authorized. Please check your AWS credentials and permissions.";
-      }
-      
-      return NextResponse.json(
-        { error: errorMessage, message: err.message },
-        { status: 400 }
-      );
-    }
-    
-    // Update the item in DynamoDB
-    const now = new Date().toISOString();
-    
-    // Build the update expression dynamically with proper typing
-    let updateExpression = "SET userPoolId = :userPoolId, clientId = :clientId, region = :region, lastSynced = :lastSynced";
-    const expressionAttributeValues: Record<string, any> = {
-      ":userPoolId": { S: userPoolId },
-      ":clientId": { S: clientId },
-      ":region": { S: region },
-      ":lastSynced": { S: now },
-    };
-    
-    // Only update client secret if provided (allows keeping existing secret)
-    if (clientSecret) {
-      updateExpression += ", clientSecret = :clientSecret";
-      expressionAttributeValues[":clientSecret"] = { S: clientSecret };
-    }
-    
-    await ddb.send(
-      new UpdateItemCommand({
-        TableName: TABLE,
-        Key: {
-          orgId: { S: ORG_ID },
-          serviceType: { S: serviceType },
-        },
-        UpdateExpression: updateExpression,
-        ExpressionAttributeValues: expressionAttributeValues,
-      })
-    );
-    console.log("✅ UpdateItem succeeded for", serviceType);
-    
-    // Return the updated service (don't include the secret in response)
-    return NextResponse.json({
-      id: `${ORG_ID}_${serviceType}`,
-      name: serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
-      status: "connected",
-      lastSynced: now,
-      userCount: 0,
-      userPoolId,
-      clientId,
-      region,
-      hasClientSecret: !!clientSecret // Indicate if secret was updated
-    });
-  } catch (err) {
-    console.error("❌ PUT /cloud-services/[id] error:", err);
-    return NextResponse.json(
-      { error: "Failed to update cloud service", message: String(err) },
-      { status: 500 }
-    );
+async function getCognitoConfig() {
+  console.log(`🔍 Fetching Cognito config for org ${ORG_ID} from table ${CS_TABLE}`);
+  
+  const resp = await ddb.send(
+    new GetItemCommand({
+      TableName: CS_TABLE,
+      Key: {
+        orgId:       { S: ORG_ID },
+        serviceType: { S: "aws-cognito" },
+      },
+    })
+  );
+  
+  if (!resp.Item) {
+    console.error("❌ No AWS Cognito configuration found in Dynamo");
+    throw new Error("No AWS Cognito configuration found. Please connect AWS Cognito first.");
   }
+  
+  const config = {
+    userPoolId: resp.Item.userPoolId?.S!,
+    region:     resp.Item.region?.S!,
+  };
+  
+  console.log(`✅ Found Cognito config: UserPoolId=${config.userPoolId}, Region=${config.region}`);
+  return config;
 }
 
-// Delete a cloud service
+// DELETE - remove a user from security team
 export async function DELETE(
   req: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    const id = params.id;
-    const [orgId, serviceType] = id.split('_');
+    const email = decodeURIComponent(params.id);
+    console.log(`🗑️ Removing user from security team: ${email}`);
     
-    // Validate parameters
-    if (orgId !== ORG_ID || !serviceType) {
+    // Get user info first to know their role
+    const userResp = await ddb.send(new GetItemCommand({
+      TableName: USERS_TABLE,
+      Key: {
+        orgId: { S: ORG_ID },
+        email: { S: email },
+      },
+    }));
+
+    if (!userResp.Item) {
+      console.warn(`⚠️ User not found in security team: ${email}`);
       return NextResponse.json(
-        { error: "Invalid service ID format" },
-        { status: 400 }
+        { error: "User not found in security team" },
+        { status: 404 }
       );
     }
+
+    const userRole = userResp.Item.role?.S;
+    console.log(`👤 Found user with role: ${userRole}`);
     
-    // Delete the item from DynamoDB
-    await ddb.send(
-      new DeleteItemCommand({
-        TableName: TABLE,
-        Key: {
-          orgId: { S: ORG_ID },
-          serviceType: { S: serviceType },
-        },
-      })
-    );
-    console.log("✅ DeleteItem succeeded for", serviceType);
-    
+    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
+
+    // Create Cognito client
+    const cognito = new CognitoIdentityProviderClient({
+      region: cognitoRegion,
+    });
+
+    // Remove user from their role group in Cognito
+    if (userRole) {
+      try {
+        await cognito.send(new AdminRemoveUserFromGroupCommand({
+          UserPoolId: userPoolId,
+          Username: email,
+          GroupName: userRole,
+        }));
+        console.log(`👥 Removed user from Cognito group: ${userRole}`);
+      } catch (cognitoError: any) {
+        console.warn(`⚠️ Could not remove user from Cognito group: ${cognitoError.message}`);
+        // Continue even if group removal fails
+      }
+    }
+
+    // Remove from our SecurityTeamUsers table
+    await ddb.send(new DeleteItemCommand({
+      TableName: USERS_TABLE,
+      Key: {
+        orgId: { S: ORG_ID },
+        email: { S: email },
+      },
+    }));
+
+    console.log(`✅ User removed from security team successfully: ${email}`);
     return NextResponse.json({ success: true });
-  } catch (err) {
-    console.error("❌ DELETE /cloud-services/[id] error:", err);
+  } catch (err: any) {
+    console.error("❌ [users:DELETE]", err);
+    
+    let statusCode = 500;
+    let errorMessage = "Failed to remove user from security team";
+    
+    if (err.name === "ResourceNotFoundException") {
+      statusCode = 404;
+      errorMessage = "User not found in security team";
+    } else if (err.message.includes("No AWS Cognito configuration found")) {
+      statusCode = 404;
+      errorMessage = "AWS Cognito not configured";
+    } else if (err.name === "NotAuthorizedException") {
+      statusCode = 403;
+      errorMessage = "Not authorized to access Cognito";
+    }
+    
     return NextResponse.json(
-      { error: "Failed to delete cloud service", message: String(err) },
-      { status: 500 }
+      { 
+        error: errorMessage, 
+        message: err.message,
+        code: err.code || err.name
+      },
+      { status: statusCode }
     );
   }
 }
