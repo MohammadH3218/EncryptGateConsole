@@ -1,146 +1,193 @@
 // app/api/company-settings/employees/route.ts
 export const runtime = 'nodejs';
 
-import { NextResponse } from "next/server";
+import { NextResponse } from 'next/server';
 import {
   DynamoDBClient,
   QueryCommand,
   PutItemCommand,
-} from "@aws-sdk/client-dynamodb";
+} from '@aws-sdk/client-dynamodb';
+import {
+  WorkMailClient,
+  ListUsersCommand,
+} from '@aws-sdk/client-workmail';
 
-// Environment variables
+// ───────────────────────────────────────────────────────────────────────────────
+// Environment and clients
+// ───────────────────────────────────────────────────────────────────────────────
+const DDB_REGION = process.env.AWS_REGION || process.env.REGION || 'us-east-1';
 const ORG_ID = process.env.ORGANIZATION_ID!;
-const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees";
+const EMPLOYEES_TABLE =
+  process.env.EMPLOYEES_TABLE_NAME || 'Employees';
 
-if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
+// for sync:
+const WORKMAIL_ORG = process.env.WORKMAIL_ORGANIZATION_ID;
 
-console.log("🔧 Employees API starting with:", { ORG_ID, EMPLOYEES_TABLE });
+if (!ORG_ID)
+  throw new Error('Missing ORGANIZATION_ID env var');
 
-// DynamoDB client with default credential provider chain
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+const ddb = new DynamoDBClient({ region: DDB_REGION });
+const wmc = new WorkMailClient({ region: DDB_REGION });
 
-// GET - list monitored employees (from DynamoDB, synced from WorkMail)
+// ───────────────────────────────────────────────────────────────────────────────
+// GET /api/company-settings/employees
+//   List your monitored employees (from DynamoDB).
+// ───────────────────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
-  console.log("🔍 GET /api/company-settings/employees - Getting monitored employees");
-  
   try {
-    // Query our Employees table
     const resp = await ddb.send(
       new QueryCommand({
         TableName: EMPLOYEES_TABLE,
-        KeyConditionExpression: "orgId = :orgId",
+        KeyConditionExpression: 'orgId = :orgId',
         ExpressionAttributeValues: {
-          ":orgId": { S: ORG_ID },
+          ':orgId': { S: ORG_ID },
         },
       })
     );
 
-    const employees = (resp.Items || []).map((item) => {
-      console.log(`Processing monitored employee: ${item.email?.S}`);
-      return {
-        id: item.email?.S!, // Use email as ID for consistency
-        name: item.name?.S || "",
-        email: item.email?.S || "",
-        department: item.department?.S || "",
-        jobTitle: item.jobTitle?.S || "",
-        status: item.status?.S || "active",
-        addedAt: item.addedAt?.S || null,
-        lastEmailProcessed: item.lastEmailProcessed?.S || null,
-        syncedFromWorkMail: item.syncedFromWorkMail?.S || null,
-        workMailUserId: item.workMailUserId?.S || null,
-      };
-    });
+    const employees = (resp.Items || []).map((item) => ({
+      id: item.email!.S!,
+      name: item.name!.S || '',
+      email: item.email!.S || '',
+      department: item.department!.S || '',
+      jobTitle: item.jobTitle!.S || '',
+      status: item.status!.S || 'active',
+      addedAt: item.addedAt!.S || null,
+      lastEmailProcessed: item.lastEmailProcessed!.S || null,
+      syncedFromWorkMail: item.syncedFromWorkMail?.S || null,
+      workMailUserId: item.workMailUserId?.S || null,
+    }));
 
-    console.log(`✅ Returning ${employees.length} monitored employees`);
     return NextResponse.json(employees);
   } catch (err: any) {
-    console.error("❌ [employees:GET] Error details:", {
-      message: err.message,
-      name: err.name,
-      code: err.code,
-      stack: err.stack,
-    });
-    
-    let statusCode = 500;
-    let errorMessage = "Failed to list monitored employees";
-    
+    console.error('[employees:GET] Error:', err);
     return NextResponse.json(
-      { 
-        error: errorMessage, 
+      {
+        error: 'Failed to list monitored employees',
         message: err.message,
         code: err.code || err.name,
       },
-      { status: statusCode }
+      { status: 500 }
     );
   }
 }
 
-// POST - manually add an employee to monitoring (for non-WorkMail users)
+// ───────────────────────────────────────────────────────────────────────────────
+// POST /api/company-settings/employees
+//   Manually add one employee to monitoring.
+// ───────────────────────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
-  let name: string | undefined;
-  let email: string | undefined;
-  let department: string | undefined;
-  let jobTitle: string | undefined;
-  
   try {
-    ({ name, email, department, jobTitle } = await req.json());
+    const { name, email, department, jobTitle } = await req.json();
     if (!name || !email) {
       return NextResponse.json(
-        { error: "Missing required fields", required: ["name", "email"] },
+        {
+          error: 'Missing required fields',
+          required: ['name', 'email'],
+        },
         { status: 400 }
       );
     }
 
-    console.log(`👤 Manually adding employee to monitoring: ${email}`);
+    await ddb.send(
+      new PutItemCommand({
+        TableName: EMPLOYEES_TABLE,
+        Item: {
+          orgId: { S: ORG_ID },
+          email: { S: email },
+          name: { S: name },
+          department: { S: department || '' },
+          jobTitle: { S: jobTitle || '' },
+          status: { S: 'active' },
+          addedAt: { S: new Date().toISOString() },
+          lastEmailProcessed: { S: new Date().toISOString() },
+        },
+      })
+    );
 
-    // Add employee to our Employees table
-    await ddb.send(new PutItemCommand({
-      TableName: EMPLOYEES_TABLE,
-      Item: {
-        orgId: { S: ORG_ID },
-        email: { S: email },
-        name: { S: name },
-        department: { S: department || "" },
-        jobTitle: { S: jobTitle || "" },
-        status: { S: "active" },
-        addedAt: { S: new Date().toISOString() },
-        lastEmailProcessed: { S: new Date().toISOString() },
-        // Don't set syncedFromWorkMail for manually added employees
-      },
-    }));
-
-    console.log(`✅ Employee manually added to monitoring successfully: ${email}`);
     return NextResponse.json({
       id: email,
       name,
       email,
-      department: department || "",
-      jobTitle: jobTitle || "",
-      status: "active",
+      department: department || '',
+      jobTitle: jobTitle || '',
+      status: 'active',
       addedAt: new Date().toISOString(),
       lastEmailProcessed: new Date().toISOString(),
     });
   } catch (err: any) {
-    console.error("❌ [employees:POST]", err);
-    
-    let statusCode = 500;
-    let errorMessage = "Failed to add employee to monitoring";
-    
-    if (err.name === "ConditionalCheckFailedException") {
-      statusCode = 409;
-      errorMessage = "Employee already being monitored";
-    } else if (err.name === "InvalidParameterException") {
-      statusCode = 400;
-      errorMessage = "Invalid parameters provided";
+    console.error('[employees:POST] Error:', err);
+    let status = 500;
+    let msg = 'Failed to add employee to monitoring';
+
+    if (err.name === 'ConditionalCheckFailedException') {
+      status = 409;
+      msg = 'Employee already being monitored';
+    } else if (err.name === 'InvalidParameterException') {
+      status = 400;
+      msg = 'Invalid parameters provided';
     }
-    
+
     return NextResponse.json(
-      { 
-        error: errorMessage, 
-        message: err.message,
-        code: err.code || err.name
+      { error: msg, message: err.message, code: err.code || err.name },
+      { status }
+    );
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// PUT /api/company-settings/employees
+//   Sync all AWS WorkMail users into your Employees table.
+// ───────────────────────────────────────────────────────────────────────────────
+export async function PUT(req: Request) {
+  if (!WORKMAIL_ORG) {
+    return NextResponse.json(
+      {
+        error:
+          'WorkMail not configured. Set WORKMAIL_ORGANIZATION_ID environment variable.',
       },
-      { status: statusCode }
+      { status: 400 }
+    );
+  }
+
+  try {
+    const resp = await wmc.send(
+      new ListUsersCommand({
+        OrganizationId: WORKMAIL_ORG,
+        MaxResults: 1000,
+      })
+    );
+
+    const users = resp.Users || [];
+    for (const u of users) {
+      await ddb.send(
+        new PutItemCommand({
+          TableName: EMPLOYEES_TABLE,
+          Item: {
+            orgId: { S: ORG_ID },
+            workMailUserId: { S: u.Id! },
+            email: { S: u.Email! },
+            name: { S: u.Name! },
+            status: { S: u.State! },
+            // optional extra fields:
+            syncedFromWorkMail: { S: new Date().toISOString() },
+            // if you have displayName or dept, you can map here:
+            department: { S: u.DisplayName || '' },
+            jobTitle: { S: '' },
+            addedAt: { S: new Date().toISOString() },
+          },
+        })
+      );
+    }
+
+    return NextResponse.json({
+      message: `Imported ${users.length} WorkMail users into monitoring.`,
+    });
+  } catch (err: any) {
+    console.error('[employees:PUT] WorkMail sync error:', err);
+    return NextResponse.json(
+      { error: 'Failed to sync WorkMail users', message: err.message },
+      { status: 500 }
     );
   }
 }
