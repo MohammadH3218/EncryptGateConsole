@@ -10,7 +10,7 @@ import {
 
 // Environment variables
 const ORG_ID = process.env.ORGANIZATION_ID!;
-const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "MonitoredEmployees";
+const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees";
 
 if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
 
@@ -47,8 +47,8 @@ export async function DELETE(
 
     console.log(`👤 Found monitored employee: ${email}`);
 
-    // Remove from our MonitoredEmployees table
-    // Note: We're NOT deleting from Cognito, just stopping monitoring
+    // Remove from our Employees table
+    // Note: We're NOT deleting from WorkMail, just stopping monitoring
     await ddb.send(new DeleteItemCommand({
       TableName: EMPLOYEES_TABLE,
       Key: {

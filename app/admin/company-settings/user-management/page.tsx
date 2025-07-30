@@ -34,7 +34,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
-import { UserPlus, MoreHorizontal, Cloud, ChevronDown, Check, Users, X } from "lucide-react"
+import { UserPlus, MoreHorizontal, Cloud, ChevronDown, Check, Users, X, RefreshCw, Loader2, Info } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -43,7 +43,6 @@ import { useCloudServices } from "@/hooks/useCloudServices"
 import { useUsers, User } from "@/hooks/useUsers"
 import { useEmployees, Employee } from "@/hooks/useEmployees"
 import { usePoolUsers, PoolUser } from "@/hooks/usePoolUsers"
-import { useEmployeePoolUsers, EmployeePoolUser } from "@/hooks/useEmployeePoolUsers"
 
 export default function UserManagementPage() {
   const router = useRouter()
@@ -65,6 +64,7 @@ export default function UserManagementPage() {
     error: empError,
     addEmployee,
     removeEmployee,
+    refresh: refreshEmployees,
   } = useEmployees()
 
   const {
@@ -73,13 +73,6 @@ export default function UserManagementPage() {
     error: poolError,
     refresh: refreshPoolUsers,
   } = usePoolUsers()
-
-  const {
-    employeePoolUsers,
-    loading: empPoolLoading,
-    error: empPoolError,
-    refresh: refreshEmployeePoolUsers,
-  } = useEmployeePoolUsers()
 
   const [searchUser, setSearchUser] = useState("")
   const [isAddUserOpen, setIsAddUserOpen] = useState(false)
@@ -92,10 +85,15 @@ export default function UserManagementPage() {
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false)
   const [userSearchQuery, setUserSearchQuery] = useState("")
 
-  // Employee selection states
-  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
-  const [isEmployeeDropdownOpen, setIsEmployeeDropdownOpen] = useState(false)
-  const [employeeSearchQuery, setEmployeeSearchQuery] = useState("")
+  // Employee management states
+  const [newEmpName, setNewEmpName] = useState("")
+  const [newEmpEmail, setNewEmpEmail] = useState("")
+  const [newEmpDepartment, setNewEmpDepartment] = useState("")
+  const [newEmpJobTitle, setNewEmpJobTitle] = useState("")
+
+  // WorkMail integration states
+  const [isWorkmailSyncing, setIsWorkmailSyncing] = useState(false)
+  const [workmailStatus, setWorkmailStatus] = useState<any>(null)
 
   // Available roles
   const availableRoles = ["Security Admin", "IT Specialist", "Security Analyst", "Team Lead"]
@@ -105,21 +103,10 @@ export default function UserManagementPage() {
     poolUser => !users.find(user => user.email === poolUser.email)
   )
 
-  // Filter available employee pool users (exclude already monitored employees)
-  const availableEmployeePoolUsers = employeePoolUsers.filter(
-    empUser => !employees.find(emp => emp.email === empUser.email)
-  )
-
   // Filter users based on search
   const filteredAvailableUsers = availablePoolUsers.filter(user =>
     user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
     user.email.toLowerCase().includes(userSearchQuery.toLowerCase())
-  )
-
-  // Filter employee pool users based on search
-  const filteredAvailableEmployees = availableEmployeePoolUsers.filter(empUser =>
-    empUser.name.toLowerCase().includes(employeeSearchQuery.toLowerCase()) ||
-    empUser.email.toLowerCase().includes(employeeSearchQuery.toLowerCase())
   )
 
   const filteredUsers = users.filter(
@@ -147,23 +134,6 @@ export default function UserManagementPage() {
       setSelectedUsers([])
     } else {
       setSelectedUsers(filteredAvailableUsers.map(u => u.username))
-    }
-  }
-
-  // Handle employee selection
-  const toggleEmployeeSelection = (username: string) => {
-    setSelectedEmployees(prev =>
-      prev.includes(username)
-        ? prev.filter(u => u !== username)
-        : [...prev, username]
-    )
-  }
-
-  const handleSelectAllEmployees = () => {
-    if (selectedEmployees.length === filteredAvailableEmployees.length && filteredAvailableEmployees.length > 0) {
-      setSelectedEmployees([])
-    } else {
-      setSelectedEmployees(filteredAvailableEmployees.map(u => u.username))
     }
   }
 
@@ -212,50 +182,6 @@ export default function UserManagementPage() {
     }
   }
 
-  const handleAddSelectedEmployees = async () => {
-    if (selectedEmployees.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "No employees selected",
-        description: "Please select at least one employee to add to monitoring.",
-      })
-      return
-    }
-
-    try {
-      // Add each selected employee
-      await Promise.all(
-        selectedEmployees.map((username) => {
-          const empUser = employeePoolUsers.find(u => u.username === username)!
-          return addEmployee({
-            name: empUser.name,
-            email: empUser.email,
-          })
-        })
-      )
-      
-      toast({
-        title: "Employees Added",
-        description: `Successfully added ${selectedEmployees.length} employee${selectedEmployees.length > 1 ? "s" : ""} to monitoring.`,
-      })
-      
-      // Reset selection and refresh
-      setSelectedEmployees([])
-      setIsAddEmpOpen(false)
-      setEmployeeSearchQuery("")
-      
-      // Refresh employee pool users to update available list
-      await refreshEmployeePoolUsers()
-    } catch (err) {
-      console.error("Error adding employees:", err)
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: (err as Error).message || "Failed to add employees",
-      })
-    }
-  }
-
   const handleDeleteUser = async (userId: string) => {
     try {
       await deleteUser(userId)
@@ -276,6 +202,88 @@ export default function UserManagementPage() {
     }
   }
 
+  const handleAddEmployee = async () => {
+    if (!newEmpName.trim() || !newEmpEmail.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Missing Information",
+        description: "Please provide both name and email.",
+      })
+      return
+    }
+
+    try {
+      await addEmployee({
+        name: newEmpName,
+        email: newEmpEmail,
+        department: newEmpDepartment,
+        jobTitle: newEmpJobTitle,
+      })
+      
+      toast({
+        title: "Employee Added",
+        description: `${newEmpName} has been added to monitoring.`,
+      })
+      
+      setIsAddEmpOpen(false)
+      setNewEmpName("")
+      setNewEmpEmail("")
+      setNewEmpDepartment("")
+      setNewEmpJobTitle("")
+    } catch (err) {
+      console.error("Error adding employee:", err)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: (err as Error).message || "Failed to add employee",
+      })
+    }
+  }
+
+  const checkWorkmailStatus = async () => {
+    try {
+      const res = await fetch("/api/company-settings/employees/sync-workmail")
+      const status = await res.json()
+      setWorkmailStatus(status)
+    } catch (err) {
+      console.error("Error checking WorkMail status:", err)
+    }
+  }
+
+  const handleSyncFromWorkMail = async () => {
+    setIsWorkmailSyncing(true)
+    try {
+      const res = await fetch("/api/company-settings/employees/sync-workmail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      })
+      
+      const result = await res.json()
+      
+      if (res.ok && result.success) {
+        toast({
+          title: "WorkMail Sync Complete",
+          description: `Successfully synced ${result.synced} employees from WorkMail.`,
+        })
+        
+        // Refresh employee list
+        await refreshEmployees()
+      } else {
+        throw new Error(result.error || "Sync failed")
+      }
+    } catch (err) {
+      console.error("WorkMail sync error:", err)
+      toast({
+        variant: "destructive",
+        title: "WorkMail Sync Failed",
+        description: (err as Error).message || "Failed to sync from WorkMail",
+      })
+    } finally {
+      setIsWorkmailSyncing(false)
+    }
+  }
+
   const resetDialogState = () => {
     setSelectedUsers([])
     setUserSearchQuery("")
@@ -283,22 +291,20 @@ export default function UserManagementPage() {
     setIsUserDropdownOpen(false)
   }
 
-  const resetEmployeeDialogState = () => {
-    setSelectedEmployees([])
-    setEmployeeSearchQuery("")
-    setIsEmployeeDropdownOpen(false)
-  }
-
-  // Auto-refresh data periodically
+  // Auto-refresh data periodically and check WorkMail status
   useEffect(() => {
     const interval = setInterval(() => {
       refreshUsers()
       refreshPoolUsers()
-      refreshEmployeePoolUsers()
     }, 30000) // Refresh every 30 seconds
 
     return () => clearInterval(interval)
-  }, [refreshUsers, refreshPoolUsers, refreshEmployeePoolUsers])
+  }, [refreshUsers, refreshPoolUsers])
+
+  // Check WorkMail status on component mount
+  useEffect(() => {
+    checkWorkmailStatus()
+  }, [])
 
   if (!services.length) {
     return (
@@ -332,7 +338,7 @@ export default function UserManagementPage() {
           <Alert>
             <AlertTitle>User Management</AlertTitle>
             <AlertDescription>
-              Manage security team users and organization employees. Users added here will be managed in {services[0].name}.
+              Manage security team users and organization employees. Security team users access this dashboard, while employees' emails are monitored for threats.
             </AlertDescription>
           </Alert>
 
@@ -631,166 +637,144 @@ export default function UserManagementPage() {
             </CardContent>
           </Card>
 
-          {/* Organization Employees Section */}
+          {/* Organization Employees Section - WITH WORKMAIL SYNC */}
           <Card>
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
                   <CardTitle>Organization Employees</CardTitle>
                   <CardDescription>
-                    Manage employees being monitored for email security. These employees' emails will be processed by the system.
+                    Manage employees whose emails will be monitored for security threats. Sync directly from AWS WorkMail.
                   </CardDescription>
                 </div>
-                <Dialog open={isAddEmpOpen} onOpenChange={(open) => {
-                  setIsAddEmpOpen(open)
-                  if (!open) resetEmployeeDialogState()
-                }}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline">
-                      <UserPlus className="mr-2 h-4 w-4" />
-                      Add Employees
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Add Employees to Monitoring</DialogTitle>
-                      <DialogDescription>
-                        Select employees from your Employee Cognito user pool to add to email monitoring.
-                      </DialogDescription>
-                    </DialogHeader>
-
-                    <div className="space-y-4">
-                      {/* Employee Selection Dropdown */}
-                      <div className="space-y-2">
-                        <Label>Select Employees</Label>
-                        <DropdownMenu open={isEmployeeDropdownOpen} onOpenChange={setIsEmployeeDropdownOpen}>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="w-full justify-between">
-                              {selectedEmployees.length === 0 
-                                ? "Select employees..." 
-                                : `${selectedEmployees.length} employee${selectedEmployees.length > 1 ? 's' : ''} selected`}
-                              <ChevronDown className="ml-2 h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent className="w-80 max-h-80 overflow-auto">
-                            {/* Search */}
-                            <div className="p-2">
-                              <Input
-                                placeholder="Search employees..."
-                                value={employeeSearchQuery}
-                                onChange={(e) => setEmployeeSearchQuery(e.target.value)}
-                                className="h-8"
-                              />
-                            </div>
-                            
-                            <DropdownMenuSeparator />
-                            
-                            {/* Select All */}
-                            <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                              <div className="flex items-center space-x-2 w-full">
-                                <Checkbox
-                                  checked={selectedEmployees.length === filteredAvailableEmployees.length && filteredAvailableEmployees.length > 0}
-                                  onCheckedChange={handleSelectAllEmployees}
-                                />
-                                <span className="font-medium">Select All</span>
-                              </div>
-                            </DropdownMenuItem>
-                            
-                            <DropdownMenuSeparator />
-
-                            {/* Loading State */}
-                            {empPoolLoading && (
-                              <DropdownMenuLabel className="text-muted-foreground">
-                                Loading employees...
-                              </DropdownMenuLabel>
-                            )}
-
-                            {/* Error State */}
-                            {empPoolError && (
-                              <DropdownMenuLabel className="text-destructive">
-                                Error loading employees: {empPoolError.message}
-                              </DropdownMenuLabel>
-                            )}
-
-                            {/* Employee List */}
-                            {!empPoolLoading && !empPoolError && filteredAvailableEmployees.length === 0 && (
-                              <DropdownMenuLabel className="text-muted-foreground">
-                                {availableEmployeePoolUsers.length === 0 
-                                  ? "All employees are already being monitored"
-                                  : "No employees match your search"}
-                              </DropdownMenuLabel>
-                            )}
-
-                            {filteredAvailableEmployees.map((empUser) => (
-                              <DropdownMenuItem key={empUser.username} onSelect={(e) => e.preventDefault()}>
-                                <div className="flex items-center space-x-2 w-full">
-                                  <Checkbox
-                                    checked={selectedEmployees.includes(empUser.username)}
-                                    onCheckedChange={() => toggleEmployeeSelection(empUser.username)}
-                                  />
-                                  <div className="flex-1">
-                                    <div className="font-medium">{empUser.name}</div>
-                                    <div className="text-sm text-muted-foreground">{empUser.email}</div>
-                                  </div>
-                                  {selectedEmployees.includes(empUser.username) && (
-                                    <Check className="h-4 w-4 text-primary" />
-                                  )}
-                                </div>
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </div>
-
-                      {/* Selected Employees Preview */}
-                      {selectedEmployees.length > 0 && (
-                        <div className="space-y-2">
-                          <Label>Selected Employees ({selectedEmployees.length})</Label>
-                          <div className="max-h-24 overflow-auto space-y-1 p-2 border rounded">
-                            {selectedEmployees.map((username) => {
-                              const empUser = employeePoolUsers.find(u => u.username === username)
-                              return (
-                                <div key={username} className="flex items-center justify-between text-sm">
-                                  <span className="truncate flex-1">{empUser?.name} ({empUser?.email})</span>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => toggleEmployeeSelection(username)}
-                                    className="h-6 w-6 p-0 ml-2"
-                                  >
-                                    <X className="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              )
-                            })}
-                          </div>
+                <div className="flex gap-2">
+                  <Dialog open={isAddEmpOpen} onOpenChange={setIsAddEmpOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline">
+                        <UserPlus className="mr-2 h-4 w-4" />
+                        Add Employee
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Add Employee</DialogTitle>
+                        <DialogDescription>
+                          Add an employee to email monitoring.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="empName" className="text-right">
+                            Name
+                          </Label>
+                          <Input
+                            id="empName"
+                            value={newEmpName}
+                            onChange={(e) => setNewEmpName(e.target.value)}
+                            className="col-span-3"
+                            placeholder="John Doe"
+                          />
                         </div>
-                      )}
-                    </div>
-
-                    <DialogFooter>
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setIsAddEmpOpen(false)
-                          resetEmployeeDialogState()
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleAddSelectedEmployees}
-                        disabled={empLoading || selectedEmployees.length === 0}
-                      >
-                        {empLoading ? "Adding..." : `Add ${selectedEmployees.length} Employee${selectedEmployees.length > 1 ? 's' : ''}`}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="empEmail" className="text-right">
+                            Email
+                          </Label>
+                          <Input
+                            id="empEmail"
+                            type="email"
+                            value={newEmpEmail}
+                            onChange={(e) => setNewEmpEmail(e.target.value)}
+                            className="col-span-3"
+                            placeholder="john.doe@company.com"
+                          />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="empDept" className="text-right">
+                            Department
+                          </Label>
+                          <Input
+                            id="empDept"
+                            value={newEmpDepartment}
+                            onChange={(e) => setNewEmpDepartment(e.target.value)}
+                            className="col-span-3"
+                            placeholder="Engineering (optional)"
+                          />
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label htmlFor="empJobTitle" className="text-right">
+                            Job Title
+                          </Label>
+                          <Input
+                            id="empJobTitle"
+                            value={newEmpJobTitle}
+                            onChange={(e) => setNewEmpJobTitle(e.target.value)}
+                            className="col-span-3"
+                            placeholder="Software Engineer (optional)"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setIsAddEmpOpen(false)
+                            setNewEmpName("")
+                            setNewEmpEmail("")
+                            setNewEmpDepartment("")
+                            setNewEmpJobTitle("")
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button 
+                          onClick={handleAddEmployee} 
+                          disabled={empLoading || !newEmpName.trim() || !newEmpEmail.trim()}
+                        >
+                          {empLoading ? "Adding..." : "Add Employee"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                  
+                  <Button 
+                    variant="default"
+                    onClick={handleSyncFromWorkMail}
+                    disabled={isWorkmailSyncing}
+                  >
+                    {isWorkmailSyncing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Sync from WorkMail
+                      </>
+                    )}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
+                {/* WorkMail Connection Status */}
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertTitle>AWS WorkMail Integration</AlertTitle>
+                  <AlertDescription>
+                    {workmailStatus?.connected ? (
+                      <>
+                        ✅ Connected to WorkMail Organization: <code>{workmailStatus.organizationAlias}</code>
+                      </>
+                    ) : (
+                      <>
+                        ❌ WorkMail not configured. Set WORKMAIL_ORGANIZATION_ID environment variable.
+                      </>
+                    )}
+                  </AlertDescription>
+                </Alert>
+
                 <div className="flex items-center justify-between">
                   <Input
                     placeholder="Search employees..."
@@ -798,16 +782,24 @@ export default function UserManagementPage() {
                     onChange={(e) => setSearchEmp(e.target.value)}
                     className="max-w-sm"
                   />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      refreshEmployeePoolUsers()
-                    }}
-                    disabled={empLoading || empPoolLoading}
-                  >
-                    Refresh
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={checkWorkmailStatus}
+                      disabled={empLoading}
+                    >
+                      Check WorkMail
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => refreshEmployees()}
+                      disabled={empLoading}
+                    >
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
 
                 {empError && (
@@ -822,9 +814,10 @@ export default function UserManagementPage() {
                     <TableRow>
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
+                      <TableHead>Department</TableHead>
+                      <TableHead>Job Title</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead>Added</TableHead>
-                      <TableHead>Last Email Processed</TableHead>
+                      <TableHead>Last Sync</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -834,6 +827,8 @@ export default function UserManagementPage() {
                         <TableRow key={employee.id}>
                           <TableCell className="font-medium">{employee.name || "Unknown User"}</TableCell>
                           <TableCell>{employee.email}</TableCell>
+                          <TableCell>{employee.department || "—"}</TableCell>
+                          <TableCell>{employee.jobTitle || "—"}</TableCell>
                           <TableCell>
                             <Badge
                               variant={employee.status === "active" ? "default" : "secondary"}
@@ -847,14 +842,18 @@ export default function UserManagementPage() {
                             </Badge>
                           </TableCell>
                           <TableCell>
-                            {employee.addedAt
-                              ? new Date(employee.addedAt).toLocaleDateString()
-                              : "Unknown"}
-                          </TableCell>
-                          <TableCell>
-                            {employee.lastEmailProcessed
-                              ? new Date(employee.lastEmailProcessed).toLocaleString()
-                              : "Never"}
+                            {employee.syncedFromWorkMail ? (
+                              <div className="flex items-center gap-1">
+                                <Badge variant="outline" className="text-xs">
+                                  WorkMail
+                                </Badge>
+                                <span className="text-xs text-muted-foreground">
+                                  {new Date(employee.syncedFromWorkMail).toLocaleDateString()}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Manual</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
@@ -870,8 +869,8 @@ export default function UserManagementPage() {
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
-                          {empLoading ? "Loading employees..." : "No employees being monitored."}
+                        <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+                          {empLoading ? "Loading employees..." : "No employees being monitored. Click 'Sync from WorkMail' to import your organization's users."}
                         </TableCell>
                       </TableRow>
                     )}
