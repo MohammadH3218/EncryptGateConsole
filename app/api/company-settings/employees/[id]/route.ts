@@ -1,49 +1,82 @@
 // app/api/company-settings/employees/[id]/route.ts
+export const runtime = 'nodejs';
 
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
 import {
   DynamoDBClient,
   DeleteItemCommand,
-} from "@aws-sdk/client-dynamodb"
+  GetItemCommand,
+} from "@aws-sdk/client-dynamodb";
 
-// Load your custom-named env vars
-const REGION            = process.env.REGION!
-const ORG_ID            = process.env.ORGANIZATION_ID!
-const ACCESS_KEY_ID     = process.env.ACCESS_KEY_ID!
-const SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY!
-const TABLE             = process.env.EMPLOYEES_TABLE_NAME || "Employees"
+// Environment variables
+const ORG_ID = process.env.ORGANIZATION_ID!;
+const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "MonitoredEmployees";
 
-// Sanity checks
-if (!REGION)            throw new Error("Missing REGION env var")
-if (!ORG_ID)            throw new Error("Missing ORGANIZATION_ID env var")
-if (!ACCESS_KEY_ID)     throw new Error("Missing ACCESS_KEY_ID env var")
-if (!SECRET_ACCESS_KEY) throw new Error("Missing SECRET_ACCESS_KEY env var")
+if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
 
-// Explicitly pass credentials to DynamoDBClient
-const ddb = new DynamoDBClient({
-  region: REGION,
-  credentials: {
-    accessKeyId: ACCESS_KEY_ID,
-    secretAccessKey: SECRET_ACCESS_KEY,
-  },
-})
+console.log("🔧 Employee [id] API starting with:", { ORG_ID, EMPLOYEES_TABLE });
 
+// DynamoDB client with default credential provider chain
+const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+
+// DELETE - remove an employee from monitoring
 export async function DELETE(
   req: Request,
   { params }: { params: { id: string } }
 ) {
-  // params.id is `${orgId}_${email}`
-  const [, email] = params.id.split("_")
-
-  await ddb.send(
-    new DeleteItemCommand({
-      TableName: TABLE,
+  try {
+    const email = decodeURIComponent(params.id);
+    console.log(`🗑️ Removing employee from monitoring: ${email}`);
+    
+    // Get employee info first to confirm they exist
+    const employeeResp = await ddb.send(new GetItemCommand({
+      TableName: EMPLOYEES_TABLE,
       Key: {
         orgId: { S: ORG_ID },
         email: { S: email },
       },
-    })
-  )
+    }));
 
-  return NextResponse.json({ message: "Removed" })
+    if (!employeeResp.Item) {
+      console.warn(`⚠️ Employee not found in monitoring: ${email}`);
+      return NextResponse.json(
+        { error: "Employee not found in monitoring" },
+        { status: 404 }
+      );
+    }
+
+    console.log(`👤 Found monitored employee: ${email}`);
+
+    // Remove from our MonitoredEmployees table
+    // Note: We're NOT deleting from Cognito, just stopping monitoring
+    await ddb.send(new DeleteItemCommand({
+      TableName: EMPLOYEES_TABLE,
+      Key: {
+        orgId: { S: ORG_ID },
+        email: { S: email },
+      },
+    }));
+
+    console.log(`✅ Employee removed from monitoring successfully: ${email}`);
+    return NextResponse.json({ success: true });
+  } catch (err: any) {
+    console.error("❌ [employees:DELETE]", err);
+    
+    let statusCode = 500;
+    let errorMessage = "Failed to remove employee from monitoring";
+    
+    if (err.name === "ResourceNotFoundException") {
+      statusCode = 404;
+      errorMessage = "Employee not found in monitoring";
+    }
+    
+    return NextResponse.json(
+      { 
+        error: errorMessage, 
+        message: err.message,
+        code: err.code || err.name
+      },
+      { status: statusCode }
+    );
+  }
 }
