@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
@@ -28,19 +28,16 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert"
 import { UserPlus, MoreHorizontal, Cloud } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-
 import { useCloudServices } from "@/hooks/useCloudServices"
 import { useUsers, User } from "@/hooks/useUsers"
 import { useEmployees, Employee } from "@/hooks/useEmployees"
-// NEW: hook to fetch *all* pool users from Cognito
-import { usePoolUsers, PoolUser } from "@/hooks/usePoolUsers"
 
 export default function UserManagementPage() {
   const router = useRouter()
   const { toast } = useToast()
 
+  // global org data & hooks
   const { services } = useCloudServices()
-
   const {
     users,
     loading: usersLoading,
@@ -48,7 +45,6 @@ export default function UserManagementPage() {
     addUser,
     deleteUser,
   } = useUsers()
-
   const {
     employees,
     loading: empLoading,
@@ -57,27 +53,20 @@ export default function UserManagementPage() {
     removeEmployee,
   } = useEmployees()
 
-  // NEW: pull in all Cognito users
-  const {
-    poolUsers,
-    loading: poolLoading,
-    error: poolError,
-  } = usePoolUsers()
-
+  // local state
   const [searchUser, setSearchUser] = useState("")
   const [isAddUserOpen, setIsAddUserOpen] = useState(false)
-
-  // NEW: track which usernames are selected
-  const [selected, setSelected] = useState<string[]>([])
-  const [selectAll, setSelectAll] = useState(false)
-
-  // NEW: shared role for all selected
-  const [selectedRole, setSelectedRole] = useState("Security Admin")
+  const [newUser, setNewUser] = useState({
+    name: "",
+    email: "",
+    role: "Security Admin",
+  })
 
   const [searchEmp, setSearchEmp] = useState("")
   const [isAddEmpOpen, setIsAddEmpOpen] = useState(false)
   const [newEmpEmail, setNewEmpEmail] = useState("")
 
+  // filters
   const filteredUsers = users.filter(
     (u) =>
       u.name.toLowerCase().includes(searchUser.toLowerCase()) ||
@@ -87,6 +76,7 @@ export default function UserManagementPage() {
     e.email.toLowerCase().includes(searchEmp.toLowerCase())
   )
 
+  // if no cloud service, prompt user
   if (!services.length) {
     return (
       <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={0}>
@@ -98,11 +88,7 @@ export default function UserManagementPage() {
               You need to connect a cloud service before managing users.
             </AlertDescription>
           </Alert>
-          <Button
-            onClick={() =>
-              router.push("/admin/company-settings/cloud-services")
-            }
-          >
+          <Button onClick={() => router.push("/admin/company-settings/cloud-services")}>
             Connect Service
           </Button>
         </FadeInSection>
@@ -110,47 +96,13 @@ export default function UserManagementPage() {
     )
   }
 
-  const toggleSelect = (username: string) => {
-    setSelected((prev) =>
-      prev.includes(username)
-        ? prev.filter((u) => u !== username)
-        : [...prev, username]
-    )
-  }
-
-  // keep “Select All” in sync
-  useEffect(() => {
-    if (!poolUsers || poolUsers.length === 0) return
-    if (selectAll) {
-      setSelected(poolUsers.map((u) => u.username))
-    } else if (selected.length === poolUsers.length) {
-      setSelectAll(true)
-    }
-  }, [selectAll, poolUsers, selected.length])
-
+  // handlers
   const handleAddUser = async () => {
     try {
-      // for each selected, lookup poolUsers for name/email then call addUser
-      await Promise.all(
-        selected.map((username) => {
-          const pu = poolUsers.find((u) => u.username === username)!
-          return addUser({
-            name: pu.name,
-            email: pu.email,
-            role: selectedRole,
-          })
-        })
-      )
-      toast({
-        title: "User(s) Added",
-        description: `Added ${selected.length} user${
-          selected.length > 1 ? "s" : ""
-        }.`,
-      })
+      await addUser(newUser)
+      toast({ title: "User Added", description: `${newUser.name} was added.` })
       setIsAddUserOpen(false)
-      setSelected([])
-      setSelectAll(false)
-      setSelectedRole("Security Admin")
+      setNewUser({ name: "", email: "", role: "Security Admin" })
     } catch (err) {
       toast({
         variant: "destructive",
@@ -163,10 +115,7 @@ export default function UserManagementPage() {
   const handleAddEmployee = async () => {
     try {
       await addEmployee(newEmpEmail)
-      toast({
-        title: "Employee Added",
-        description: `${newEmpEmail} was added.`,
-      })
+      toast({ title: "Employee Added", description: `${newEmpEmail} was added.` })
       setIsAddEmpOpen(false)
       setNewEmpEmail("")
     } catch (err) {
@@ -205,95 +154,64 @@ export default function UserManagementPage() {
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Add Existing Cognito User(s)</DialogTitle>
+                <DialogTitle>Add New User</DialogTitle>
                 <DialogDescription>
-                  Pick one or more users to invite.
+                  They will receive an email invitation.
                 </DialogDescription>
               </DialogHeader>
-
-              {/* show loading / error */}
-              {poolLoading && <p>Loading users…</p>}
-              {poolError && (
-                <Alert variant="destructive">
-                  <AlertTitle>Error loading pool users</AlertTitle>
-                  <AlertDescription>
-                    {poolError.message}
-                  </AlertDescription>
-                </Alert>
-              )}
-
-              {/* multi-select list */}
-              {poolUsers.length > 0 && (
-                <div className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      id="selectAll"
-                      type="checkbox"
-                      checked={selectAll}
-                      onChange={(e) => setSelectAll(e.target.checked)}
-                      className="h-4 w-4"
-                    />
-                    <Label htmlFor="selectAll" className="font-medium">
-                      Select All
-                    </Label>
-                  </div>
-                  <div className="h-40 overflow-auto border rounded p-2">
-                    {poolUsers.map((u: PoolUser) => (
-                      <div
-                        key={u.username}
-                        className="flex items-center py-1"
-                      >
-                        <input
-                          id={`user-${u.username}`}
-                          type="checkbox"
-                          checked={selected.includes(u.username)}
-                          onChange={() => toggleSelect(u.username)}
-                          className="h-4 w-4"
-                        />
-                        <label
-                          htmlFor={`user-${u.username}`}
-                          className="ml-2"
-                        >
-                          {u.name} ({u.email})
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* role picker */}
-                  <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="role" className="text-right">
-                      Role
-                    </Label>
-                    <select
-                      id="role"
-                      value={selectedRole}
-                      onChange={(e) =>
-                        setSelectedRole(e.target.value)
-                      }
-                      className="col-span-3 input"
-                    >
-                      <option>Security Admin</option>
-                      <option>IT Specialist</option>
-                      <option>Security Analyst</option>
-                      <option>Team Lead</option>
-                    </select>
-                  </div>
+              <div className="space-y-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="name" className="text-right">
+                    Full Name
+                  </Label>
+                  <Input
+                    id="name"
+                    value={newUser.name}
+                    onChange={(e) =>
+                      setNewUser((p) => ({ ...p, name: e.target.value }))
+                    }
+                    className="col-span-3"
+                  />
                 </div>
-              )}
-
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="email" className="text-right">
+                    Email
+                  </Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={newUser.email}
+                    onChange={(e) =>
+                      setNewUser((p) => ({ ...p, email: e.target.value }))
+                    }
+                    className="col-span-3"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="role" className="text-right">
+                    Role
+                  </Label>
+                  <select
+                    id="role"
+                    value={newUser.role}
+                    onChange={(e) =>
+                      setNewUser((p) => ({ ...p, role: e.target.value }))
+                    }
+                    className="col-span-3 input"
+                  >
+                    <option>Security Admin</option>
+                    <option>IT Specialist</option>
+                    <option>Security Analyst</option>
+                    <option>Team Lead</option>
+                  </select>
+                </div>
+              </div>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsAddUserOpen(false)}
-                >
+                <Button variant="outline" onClick={() => setIsAddUserOpen(false)}>
                   Cancel
                 </Button>
-                <Button
-                  onClick={handleAddUser}
-                  disabled={poolLoading || usersLoading || selected.length === 0}
-                >
-                  {usersLoading ? "Adding…" : "Add Selected"}
+                <Button onClick={handleAddUser} disabled={usersLoading}>
+                  {usersLoading ? "Adding..." : "Add User"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -377,7 +295,7 @@ export default function UserManagementPage() {
           </TableBody>
         </Table>
 
-        {/* --- Organization Employees (unchanged) --- */}
+        {/* --- Organization Employees --- */}
         <div className="flex justify-between items-center mt-8 mb-4">
           <Input
             placeholder="Search employees..."
@@ -412,14 +330,11 @@ export default function UserManagementPage() {
                 />
               </div>
               <DialogFooter>
-                <Button
-                  variant="outline"
-                  onClick={() => setIsAddEmpOpen(false)}
-                >
+                <Button variant="outline" onClick={() => setIsAddEmpOpen(false)}>
                   Cancel
                 </Button>
                 <Button onClick={handleAddEmployee} disabled={empLoading}>
-                  {empLoading ? "Adding…" : "Add Employee"}
+                  {empLoading ? "Adding..." : "Add Employee"}
                 </Button>
               </DialogFooter>
             </DialogContent>
