@@ -1,3 +1,5 @@
+"use client"
+
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppLayout } from '@/components/app-layout'
@@ -41,7 +43,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import { useCloudServices } from '@/hooks/useCloudServices'
-import {
+import type {
   CognitoDetails,
   WorkMailDetails,
   AddServiceDetails,
@@ -87,7 +89,7 @@ const VALID_AWS_REGIONS = [
   'eu-north-1',
   'me-south-1',
   'sa-east-1',
-]
+] as const
 
 export default function CloudServicesPage() {
   const router = useRouter()
@@ -109,26 +111,24 @@ export default function CloudServicesPage() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
 
-  // -- form state
-  const [cognitoDetails, setCognitoDetails] = useState({
-    serviceType: 'aws-cognito',
+  // -- form state - Fixed with proper literal types
+  const [cognitoDetails, setCognitoDetails] = useState<CognitoDetails>({
+    serviceType: 'aws-cognito' as const,
     userPoolId: '',
     clientId: '',
     clientSecret: '',
     region: '',
   })
-  const [workmailDetails, setWorkmailDetails] = useState({
-    serviceType: 'aws-workmail',
+  
+  const [workmailDetails, setWorkmailDetails] = useState<WorkMailDetails>({
+    serviceType: 'aws-workmail' as const,
     organizationId: '',
     region: '',
     alias: '',
   })
-  const [editingServiceId, setEditingServiceId] = useState<string | null>(
-    null
-  )
-  const [editingServiceType, setEditingServiceType] = useState<
-    'aws-cognito' | 'aws-workmail' | null
-  >(null)
+
+  const [editingServiceId, setEditingServiceId] = useState<string | null>(null)
+  const [editingServiceType, setEditingServiceType] = useState<'aws-cognito' | 'aws-workmail' | null>(null)
 
   const [isValidating, setIsValidating] = useState(false)
   const [validationResult, setValidationResult] = useState<{
@@ -150,13 +150,13 @@ export default function CloudServicesPage() {
     if (parts.length > 1) {
       const r = parts[0]
       if (
-        VALID_AWS_REGIONS.includes(r) &&
+        VALID_AWS_REGIONS.includes(r as any) &&
         r !== cognitoDetails.region
       ) {
         setCognitoDetails((p) => ({ ...p, region: r }))
       }
     }
-  }, [cognitoDetails.userPoolId])
+  }, [cognitoDetails.userPoolId, cognitoDetails.region])
 
   // validators
   const validateCognito = () => {
@@ -171,7 +171,7 @@ export default function CloudServicesPage() {
       })
       return false
     }
-    if (!VALID_AWS_REGIONS.includes(cognitoDetails.region)) {
+    if (!VALID_AWS_REGIONS.includes(cognitoDetails.region as any)) {
       setValidationResult({
         valid: false,
         message:
@@ -187,9 +187,7 @@ export default function CloudServicesPage() {
       })
       return false
     }
-    const regionFromPool = cognitoDetails.userPoolId.split(
-      '_'
-    )[0]
+    const regionFromPool = cognitoDetails.userPoolId.split('_')[0]
     if (regionFromPool !== cognitoDetails.region) {
       setValidationResult({
         valid: false,
@@ -199,6 +197,7 @@ export default function CloudServicesPage() {
     }
     return true
   }
+
   const validateWorkmail = () => {
     if (
       !workmailDetails.organizationId ||
@@ -210,7 +209,7 @@ export default function CloudServicesPage() {
       })
       return false
     }
-    if (!VALID_AWS_REGIONS.includes(workmailDetails.region)) {
+    if (!VALID_AWS_REGIONS.includes(workmailDetails.region as any)) {
       setValidationResult({
         valid: false,
         message:
@@ -229,189 +228,188 @@ export default function CloudServicesPage() {
     return true
   }
 
-  // handlers
- // ─── Connect Handlers ─────────────────────────────────────────────────────────
-const handleConnectCognito = async () => {
-  if (!validateCognito()) return
-  setIsValidating(true)
-  try {
-    const res: ValidationResult = await validateConnection(cognitoDetails)
-    setValidationResult(res)
-    if (!res.valid) return
-
-    await addService(cognitoDetails)
-    toast({
-      title: 'AWS Cognito Connected',
-      description: 'Security team authentication is now managed by Cognito.',
-    })
-
-    setIsCognitoDialogOpen(false)
-    setCognitoDetails({
-      serviceType: 'aws-cognito',
-      userPoolId: '',
-      clientId: '',
-      clientSecret: '',
-      region: '',
-    })
-    setValidationResult(null)
-  } catch (err: any) {
-    toast({
-      variant: 'destructive',
-      title: 'Connection Error',
-      description: err.message,
-    })
-  } finally {
-    setIsValidating(false)
-  }
-}
-
-const handleConnectWorkmail = async () => {
-  if (!validateWorkmail()) return
-  setIsValidating(true)
-  try {
-    const res: ValidationResult = await validateConnection(workmailDetails)
-    setValidationResult(res)
-    if (!res.valid) return
-
-    await addService(workmailDetails)
-    toast({
-      title: 'AWS WorkMail Connected',
-      description: 'Employee email monitoring is now enabled via WorkMail.',
-    })
-
-    setIsWorkmailDialogOpen(false)
-    setWorkmailDetails({
-      serviceType: 'aws-workmail',
-      organizationId: '',
-      region: '',
-      alias: '',
-    })
-    setValidationResult(null)
-  } catch (err: any) {
-    toast({
-      variant: 'destructive',
-      title: 'Connection Error',
-      description: err.message,
-    })
-  } finally {
-    setIsValidating(false)
-  }
-}
-
-// ─── Edit / Update / Delete ───────────────────────────────────────────────────
-const handleEdit = (svcId: string) => {
-  const svc = services.find(s => s.id === svcId)
-  if (!svc) return
-
-  setEditingServiceId(svcId)
-  if (svc.serviceType === 'aws-cognito') {
-    setEditingServiceType('aws-cognito')
-    setCognitoDetails({
-      serviceType: 'aws-cognito',
-      userPoolId: svc.userPoolId || '',
-      clientId: svc.clientId || '',
-      clientSecret: '',
-      region: svc.region || '',
-    })
-  } else {
-    setEditingServiceType('aws-workmail')
-    setWorkmailDetails({
-      serviceType: 'aws-workmail',
-      organizationId: svc.organizationId || '',
-      region: svc.region || '',
-      alias: svc.alias || '',
-    })
-  }
-  setIsEditDialogOpen(true)
-}
-
-const handleUpdate = async () => {
-  if (!editingServiceId || !editingServiceType) return
-  setIsValidating(true)
-  try {
-    if (editingServiceType === 'aws-cognito') {
-      if (!validateCognito()) return
+  // ─── Connect Handlers ─────────────────────────────────────────────────────────
+  const handleConnectCognito = async () => {
+    if (!validateCognito()) return
+    setIsValidating(true)
+    try {
       const res: ValidationResult = await validateConnection(cognitoDetails)
       setValidationResult(res)
       if (!res.valid) return
 
-      await updateService(editingServiceId, cognitoDetails)
-    } else {
-      if (!validateWorkmail()) return
+      await addService(cognitoDetails)
+      toast({
+        title: 'AWS Cognito Connected',
+        description: 'Security team authentication is now managed by Cognito.',
+      })
+
+      setIsCognitoDialogOpen(false)
+      setCognitoDetails({
+        serviceType: 'aws-cognito' as const,
+        userPoolId: '',
+        clientId: '',
+        clientSecret: '',
+        region: '',
+      })
+      setValidationResult(null)
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Connection Error',
+        description: err.message,
+      })
+    } finally {
+      setIsValidating(false)
+    }
+  }
+
+  const handleConnectWorkmail = async () => {
+    if (!validateWorkmail()) return
+    setIsValidating(true)
+    try {
       const res: ValidationResult = await validateConnection(workmailDetails)
       setValidationResult(res)
       if (!res.valid) return
 
-      await updateService(editingServiceId, workmailDetails)
+      await addService(workmailDetails)
+      toast({
+        title: 'AWS WorkMail Connected',
+        description: 'Employee email monitoring is now enabled via WorkMail.',
+      })
+
+      setIsWorkmailDialogOpen(false)
+      setWorkmailDetails({
+        serviceType: 'aws-workmail' as const,
+        organizationId: '',
+        region: '',
+        alias: '',
+      })
+      setValidationResult(null)
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Connection Error',
+        description: err.message,
+      })
+    } finally {
+      setIsValidating(false)
     }
+  }
 
-    toast({
-      title: 'Service Updated',
-      description: `${
-        editingServiceType === 'aws-cognito' ? 'Cognito' : 'WorkMail'
-      } configuration updated.`,
-    })
+  // ─── Edit / Update / Delete ───────────────────────────────────────────────────
+  const handleEdit = (svcId: string) => {
+    const svc = services.find(s => s.id === svcId)
+    if (!svc) return
 
-    setIsEditDialogOpen(false)
-    setEditingServiceId(null)
-    setEditingServiceType(null)
+    setEditingServiceId(svcId)
+    if (svc.serviceType === 'aws-cognito') {
+      setEditingServiceType('aws-cognito')
+      setCognitoDetails({
+        serviceType: 'aws-cognito' as const,
+        userPoolId: svc.userPoolId || '',
+        clientId: svc.clientId || '',
+        clientSecret: '',
+        region: svc.region || '',
+      })
+    } else {
+      setEditingServiceType('aws-workmail')
+      setWorkmailDetails({
+        serviceType: 'aws-workmail' as const,
+        organizationId: svc.organizationId || '',
+        region: svc.region || '',
+        alias: svc.alias || '',
+      })
+    }
+    setIsEditDialogOpen(true)
+  }
+
+  const handleUpdate = async () => {
+    if (!editingServiceId || !editingServiceType) return
+    setIsValidating(true)
+    try {
+      if (editingServiceType === 'aws-cognito') {
+        if (!validateCognito()) return
+        const res: ValidationResult = await validateConnection(cognitoDetails)
+        setValidationResult(res)
+        if (!res.valid) return
+
+        await updateService(editingServiceId, cognitoDetails)
+      } else {
+        if (!validateWorkmail()) return
+        const res: ValidationResult = await validateConnection(workmailDetails)
+        setValidationResult(res)
+        if (!res.valid) return
+
+        await updateService(editingServiceId, workmailDetails)
+      }
+
+      toast({
+        title: 'Service Updated',
+        description: `${
+          editingServiceType === 'aws-cognito' ? 'Cognito' : 'WorkMail'
+        } configuration updated.`,
+      })
+
+      setIsEditDialogOpen(false)
+      setEditingServiceId(null)
+      setEditingServiceType(null)
+      setValidationResult(null)
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Update Error',
+        description: err.message,
+      })
+    } finally {
+      setIsValidating(false)
+    }
+  }
+
+  const handleDelete = (svcId: string) => {
+    setEditingServiceId(svcId)
+    setIsDeleteDialogOpen(true)
+  }
+
+  const confirmDelete = async () => {
+    if (!editingServiceId) return
+    try {
+      await removeService(editingServiceId)
+      toast({
+        title: 'Service Removed',
+        description: 'Cloud service has been disconnected.',
+      })
+      setIsDeleteDialogOpen(false)
+      setEditingServiceId(null)
+    } catch (err: any) {
+      toast({
+        variant: 'destructive',
+        title: 'Removal Error',
+        description: err.message,
+      })
+    }
+  }
+
+  // ─── Validate Handler ─────────────────────────────────────────────────────────
+  const handleValidate = async () => {
     setValidationResult(null)
-  } catch (err: any) {
-    toast({
-      variant: 'destructive',
-      title: 'Update Error',
-      description: err.message,
-    })
-  } finally {
-    setIsValidating(false)
+    setIsValidating(true)
+    try {
+      const details: AddServiceDetails =
+        editingServiceType === 'aws-cognito' || isCognitoDialogOpen
+          ? cognitoDetails
+          : workmailDetails
+
+      const res: ValidationResult = await validateConnection(details)
+      setValidationResult(res)
+    } catch (err: any) {
+      setValidationResult({
+        valid: false,
+        message: err.message || 'Validation failed',
+      })
+    } finally {
+      setIsValidating(false)
+    }
   }
-}
-
-const handleDelete = (svcId: string) => {
-  setEditingServiceId(svcId)
-  setIsDeleteDialogOpen(true)
-}
-
-const confirmDelete = async () => {
-  if (!editingServiceId) return
-  try {
-    await removeService(editingServiceId)
-    toast({
-      title: 'Service Removed',
-      description: 'Cloud service has been disconnected.',
-    })
-    setIsDeleteDialogOpen(false)
-    setEditingServiceId(null)
-  } catch (err: any) {
-    toast({
-      variant: 'destructive',
-      title: 'Removal Error',
-      description: err.message,
-    })
-  }
-}
-
-// ─── Validate Handler ─────────────────────────────────────────────────────────
-const handleValidate = async () => {
-  setValidationResult(null)
-  setIsValidating(true)
-  try {
-    const details: AddServiceDetails =
-      editingServiceType === 'aws-cognito' || isCognitoDialogOpen
-        ? cognitoDetails
-        : workmailDetails
-
-    const res: ValidationResult = await validateConnection(details)
-    setValidationResult(res)
-  } catch (err: any) {
-    setValidationResult({
-      valid: false,
-      message: err.message || 'Validation failed',
-    })
-  } finally {
-    setIsValidating(false)
-  }
-}
 
   // Region dropdown + tooltip
   const RegionSelector = ({
@@ -480,7 +478,7 @@ const handleValidate = async () => {
                     Security Team Identity Provider
                   </CardTitle>
                   <CardDescription>
-                    AWS Cognito → manage your security team’s access.
+                    AWS Cognito → manage your security team's access.
                   </CardDescription>
                 </div>
                 {cognitoServices.length === 0 ? (
@@ -512,7 +510,7 @@ const handleValidate = async () => {
                             Cognito Configuration
                           </AlertTitle>
                           <AlertDescription className="text-sm">
-                            You’ll find these in the AWS Cognito Console.
+                            You'll find these in the AWS Cognito Console.
                           </AlertDescription>
                         </Alert>
 
@@ -626,7 +624,7 @@ const handleValidate = async () => {
                           onClick={() => {
                             setIsCognitoDialogOpen(false)
                             setCognitoDetails({
-                              serviceType: 'aws-cognito',
+                              serviceType: 'aws-cognito' as const,
                               userPoolId: '',
                               clientId: '',
                               clientSecret: '',
@@ -820,7 +818,7 @@ const handleValidate = async () => {
                               placeholder="m-xxxxxxxxxxxxxxxxx"
                             />
                             <p className="text-xs text-muted-foreground">
-                              must start with “m-”
+                              must start with "m-"
                             </p>
                           </div>
                         </div>
@@ -890,7 +888,7 @@ const handleValidate = async () => {
                           onClick={() => {
                             setIsWorkmailDialogOpen(false)
                             setWorkmailDetails({
-                              serviceType: 'aws-workmail',
+                              serviceType: 'aws-workmail' as const,
                               organizationId: '',
                               region: '',
                               alias: '',
@@ -1261,7 +1259,7 @@ const handleValidate = async () => {
                   Remove Cloud Service
                 </AlertDialogTitle>
                 <AlertDialogDescription>
-                  This will disconnect the service and you’ll lose
+                  This will disconnect the service and you'll lose
                   associated access until you reconnect.
                 </AlertDialogDescription>
               </AlertDialogHeader>
