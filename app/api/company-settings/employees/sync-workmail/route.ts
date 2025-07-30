@@ -2,41 +2,79 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from "next/server";
-import { DynamoDBClient, BatchWriteItemCommand } from "@aws-sdk/client-dynamodb";
+import { 
+  DynamoDBClient, 
+  BatchWriteItemCommand, 
+  GetItemCommand 
+} from "@aws-sdk/client-dynamodb";
 import { 
   WorkMailClient, 
   ListUsersCommand, 
   DescribeUserCommand,
-  ListOrganizationsCommand 
+  DescribeOrganizationCommand 
 } from "@aws-sdk/client-workmail";
 
 // Environment variables
 const ORG_ID = process.env.ORGANIZATION_ID!;
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees";
-const WORKMAIL_ORG_ID = process.env.WORKMAIL_ORGANIZATION_ID;
+const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
+                 process.env.CLOUDSERVICES_TABLE || 
+                 "CloudServices";
 
 if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
 
-console.log("🔧 WorkMail Sync API starting with:", { ORG_ID, EMPLOYEES_TABLE, WORKMAIL_ORG_ID });
+console.log("🔧 WorkMail Sync API starting with:", { ORG_ID, EMPLOYEES_TABLE, CS_TABLE });
 
-// DynamoDB and WorkMail clients with default credential provider chain
+// DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
-const workmail = new WorkMailClient({ region: process.env.AWS_REGION });
+
+// Helper function to get WorkMail configuration from DynamoDB
+async function getWorkMailConfig() {
+  console.log(`🔍 Fetching WorkMail config for org ${ORG_ID} from table ${CS_TABLE}`);
+  
+  try {
+    const resp = await ddb.send(
+      new GetItemCommand({
+        TableName: CS_TABLE,
+        Key: {
+          orgId:       { S: ORG_ID },
+          serviceType: { S: "aws-workmail" },
+        },
+      })
+    );
+    
+    if (!resp.Item) {
+      console.error("❌ No AWS WorkMail configuration found in DynamoDB");
+      throw new Error("No AWS WorkMail configuration found. Please connect AWS WorkMail first.");
+    }
+    
+    const config = {
+      organizationId: resp.Item.organizationId?.S!,
+      region:         resp.Item.region?.S!,
+      alias:          resp.Item.alias?.S || '',
+    };
+    
+    console.log(`✅ Found WorkMail config: OrganizationId=${config.organizationId}, Region=${config.region}`);
+    return config;
+  } catch (err) {
+    console.error("❌ Error fetching WorkMail config:", err);
+    throw err;
+  }
+}
 
 export async function POST(req: Request) {
   try {
     console.log("🔄 Syncing employees from AWS WorkMail...");
 
-    if (!WORKMAIL_ORG_ID) {
-      return NextResponse.json(
-        { error: "WorkMail Organization ID not configured", message: "Set WORKMAIL_ORGANIZATION_ID environment variable" },
-        { status: 400 }
-      );
-    }
+    // Get WorkMail configuration from DynamoDB
+    const { organizationId, region: workmailRegion, alias } = await getWorkMailConfig();
+    
+    // Create WorkMail client with the region from config
+    const workmail = new WorkMailClient({ region: workmailRegion });
 
     // List all users in WorkMail organization
     const listUsersResponse = await workmail.send(new ListUsersCommand({
-      OrganizationId: WORKMAIL_ORG_ID,
+      OrganizationId: organizationId,
       MaxResults: 100 // Adjust as needed
     }));
 
@@ -60,7 +98,7 @@ export async function POST(req: Request) {
         }
 
         const userDetails = await workmail.send(new DescribeUserCommand({
-          OrganizationId: WORKMAIL_ORG_ID,
+          OrganizationId: organizationId,
           UserId: user.Id
         }));
 
@@ -129,7 +167,8 @@ export async function POST(req: Request) {
         synced: successCount,
         total: employees.length,
         errors,
-        workmailOrgId: WORKMAIL_ORG_ID
+        organizationId,
+        organizationAlias: alias
       });
     }
 
@@ -146,8 +185,11 @@ export async function POST(req: Request) {
     let errorMessage = "Failed to sync from WorkMail";
     let statusCode = 500;
     
-    if (err.name === "ResourceNotFoundException") {
-      errorMessage = "WorkMail organization not found. Check your Organization ID.";
+    if (err.message.includes("No AWS WorkMail configuration found")) {
+      statusCode = 404;
+      errorMessage = "AWS WorkMail not configured. Please connect AWS WorkMail first.";
+    } else if (err.name === "OrganizationNotFoundException") {
+      errorMessage = "WorkMail organization not found. Check your WorkMail configuration.";
       statusCode = 404;
     } else if (err.name === "UnauthorizedOperation" || err.name === "AccessDeniedException") {
       errorMessage = "Not authorized to access WorkMail. Check IAM permissions.";
@@ -168,41 +210,43 @@ export async function POST(req: Request) {
 // GET - Check WorkMail connection status
 export async function GET(req: Request) {
   try {
-    if (!WORKMAIL_ORG_ID) {
-      return NextResponse.json({
-        connected: false,
-        error: "WorkMail Organization ID not configured",
-        message: "Set WORKMAIL_ORGANIZATION_ID environment variable"
-      });
-    }
-
-    // Test connection by listing organizations
-    const orgsResponse = await workmail.send(new ListOrganizationsCommand({}));
+    // Get WorkMail configuration from DynamoDB
+    const { organizationId, region: workmailRegion, alias } = await getWorkMailConfig();
     
-    const myOrg = orgsResponse.OrganizationSummaries?.find(
-      org => org.OrganizationId === WORKMAIL_ORG_ID
-    );
+    // Create WorkMail client with the region from config
+    const workmail = new WorkMailClient({ region: workmailRegion });
 
-    if (!myOrg) {
-      return NextResponse.json({
-        connected: false,
-        error: "WorkMail organization not found",
-        organizationId: WORKMAIL_ORG_ID
-      });
-    }
+    // Test connection by describing the organization
+    const orgResponse = await workmail.send(new DescribeOrganizationCommand({
+      OrganizationId: organizationId
+    }));
 
     return NextResponse.json({
       connected: true,
-      organizationId: WORKMAIL_ORG_ID,
-      organizationAlias: myOrg.Alias,
-      organizationState: myOrg.State
+      organizationId: organizationId,
+      organizationAlias: orgResponse.Alias || alias,
+      organizationState: orgResponse.State
     });
 
   } catch (err: any) {
     console.error("❌ WorkMail connection test error:", err);
+    
+    let errorMessage = "WorkMail connection failed";
+    let connected = false;
+    
+    if (err.message.includes("No AWS WorkMail configuration found")) {
+      errorMessage = "WorkMail not configured. Set up WorkMail connection first.";
+    } else if (err.name === "OrganizationNotFoundException") {
+      errorMessage = "WorkMail organization not found";
+    } else if (err.name === "UnauthorizedOperation" || err.name === "AccessDeniedException") {
+      errorMessage = "Not authorized to access WorkMail";
+    } else {
+      errorMessage = err.message;
+    }
+    
     return NextResponse.json({
-      connected: false,
-      error: err.message,
+      connected,
+      error: errorMessage,
       code: err.name
     });
   }

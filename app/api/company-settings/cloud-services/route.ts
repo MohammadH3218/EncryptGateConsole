@@ -45,21 +45,38 @@ export async function GET(req: Request) {
       const orgId       = item.orgId?.S;
       const serviceType = item.serviceType?.S;
       if (!orgId || !serviceType) return null;
-      return {
+      
+      const baseService = {
         id:         `${orgId}_${serviceType}`,
-        name:       serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
+        name:       serviceType === "aws-cognito" ? "AWS Cognito" : 
+                   serviceType === "aws-workmail" ? "AWS WorkMail" : serviceType,
+        serviceType: serviceType as 'aws-cognito' | 'aws-workmail',
         status:     (item.status?.S as any)       || "disconnected",
         lastSynced: item.lastSynced?.S            || new Date().toISOString(),
         userCount:  item.userCount?.N
                      ? parseInt(item.userCount.N)
                      : 0,
-        // Include configuration fields for editing
-        userPoolId: item.userPoolId?.S,
-        clientId:   item.clientId?.S,
         region:     item.region?.S,
-        // Don't return the actual secret, just indicate if it exists
-        hasClientSecret: !!item.clientSecret?.S,
       };
+
+      // Add service-specific fields
+      if (serviceType === 'aws-cognito') {
+        return {
+          ...baseService,
+          userPoolId: item.userPoolId?.S,
+          clientId:   item.clientId?.S,
+          // Don't return the actual secret, just indicate if it exists
+          hasClientSecret: !!item.clientSecret?.S,
+        };
+      } else if (serviceType === 'aws-workmail') {
+        return {
+          ...baseService,
+          organizationId: item.organizationId?.S,
+          alias: item.alias?.S,
+        };
+      }
+      
+      return baseService;
     }).filter(Boolean);
 
     return NextResponse.json(services);
@@ -76,52 +93,25 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { serviceType, userPoolId, clientId, clientSecret, region } = body;
+    const { serviceType } = body;
     
-    if (!serviceType || !userPoolId || !clientId || !region) {
+    if (!serviceType) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Missing serviceType field" },
         { status: 400 }
       );
     }
 
-    // Build DynamoDB item with proper typing
-    const now = new Date().toISOString();
-    const item: Record<string, any> = {
-      orgId:       { S: ORG_ID },
-      serviceType: { S: serviceType },
-      userPoolId:  { S: userPoolId },
-      clientId:    { S: clientId },
-      region:      { S: region },
-      status:      { S: "connected" },
-      lastSynced:  { S: now },
-      userCount:   { N: "0" },
-    };
-    
-    // Only add client secret if provided (some clients don't use secrets)
-    if (clientSecret) {
-      item.clientSecret = { S: clientSecret };
+    if (serviceType === 'aws-cognito') {
+      return await handleCognitoPost(body);
+    } else if (serviceType === 'aws-workmail') {
+      return await handleWorkMailPost(body);
+    } else {
+      return NextResponse.json(
+        { error: "Invalid serviceType. Must be 'aws-cognito' or 'aws-workmail'" },
+        { status: 400 }
+      );
     }
-
-    // Write to DynamoDB
-    await ddb.send(new PutItemCommand({
-      TableName: TABLE,
-      Item:      item,
-    }));
-    console.log("✅ PutItem succeeded for", serviceType);
-
-    // Return the new service (don't include the secret in the response for security)
-    return NextResponse.json({
-      id:         `${ORG_ID}_${serviceType}`,
-      name:       serviceType === "aws-cognito" ? "AWS Cognito" : serviceType,
-      status:     "connected",
-      lastSynced: now,
-      userCount:  0,
-      userPoolId,
-      clientId,
-      region,
-      hasClientSecret: !!clientSecret // Just indicate if it has a secret
-    });
   } catch (err) {
     console.error("❌ POST /cloud-services error:", err);
     return NextResponse.json(
@@ -129,4 +119,102 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+}
+
+async function handleCognitoPost(body: any) {
+  const { serviceType, userPoolId, clientId, clientSecret, region } = body;
+  
+  if (!userPoolId || !clientId || !region) {
+    return NextResponse.json(
+      { error: "Missing required Cognito fields: userPoolId, clientId, region" },
+      { status: 400 }
+    );
+  }
+
+  // Build DynamoDB item with proper typing
+  const now = new Date().toISOString();
+  const item: Record<string, any> = {
+    orgId:       { S: ORG_ID },
+    serviceType: { S: serviceType },
+    userPoolId:  { S: userPoolId },
+    clientId:    { S: clientId },
+    region:      { S: region },
+    status:      { S: "connected" },
+    lastSynced:  { S: now },
+    userCount:   { N: "0" },
+  };
+  
+  // Only add client secret if provided (some clients don't use secrets)
+  if (clientSecret) {
+    item.clientSecret = { S: clientSecret };
+  }
+
+  // Write to DynamoDB
+  await ddb.send(new PutItemCommand({
+    TableName: TABLE,
+    Item:      item,
+  }));
+  console.log("✅ PutItem succeeded for", serviceType);
+
+  // Return the new service (don't include the secret in the response for security)
+  return NextResponse.json({
+    id:         `${ORG_ID}_${serviceType}`,
+    name:       "AWS Cognito",
+    serviceType: serviceType,
+    status:     "connected",
+    lastSynced: now,
+    userCount:  0,
+    userPoolId,
+    clientId,
+    region,
+    hasClientSecret: !!clientSecret // Just indicate if it has a secret
+  });
+}
+
+async function handleWorkMailPost(body: any) {
+  const { serviceType, organizationId, alias, region } = body;
+  
+  if (!organizationId || !region) {
+    return NextResponse.json(
+      { error: "Missing required WorkMail fields: organizationId, region" },
+      { status: 400 }
+    );
+  }
+
+  // Build DynamoDB item with proper typing
+  const now = new Date().toISOString();
+  const item: Record<string, any> = {
+    orgId:          { S: ORG_ID },
+    serviceType:    { S: serviceType },
+    organizationId: { S: organizationId },
+    region:         { S: region },
+    status:         { S: "connected" },
+    lastSynced:     { S: now },
+    userCount:      { N: "0" },
+  };
+  
+  // Add alias if provided
+  if (alias) {
+    item.alias = { S: alias };
+  }
+
+  // Write to DynamoDB
+  await ddb.send(new PutItemCommand({
+    TableName: TABLE,
+    Item:      item,
+  }));
+  console.log("✅ PutItem succeeded for", serviceType);
+
+  // Return the new service
+  return NextResponse.json({
+    id:             `${ORG_ID}_${serviceType}`,
+    name:           "AWS WorkMail",
+    serviceType:    serviceType,
+    status:         "connected",
+    lastSynced:     now,
+    userCount:      0,
+    organizationId,
+    alias:          alias || "",
+    region,
+  });
 }
