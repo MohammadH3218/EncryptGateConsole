@@ -43,6 +43,7 @@ import { useCloudServices } from "@/hooks/useCloudServices"
 import { useUsers, User } from "@/hooks/useUsers"
 import { useEmployees, Employee } from "@/hooks/useEmployees"
 import { usePoolUsers, PoolUser } from "@/hooks/usePoolUsers"
+import { useWorkMailUsers, WorkMailUser } from "@/hooks/useWorkMailUsers"
 
 export default function UserManagementPage() {
   const router = useRouter()
@@ -74,6 +75,13 @@ export default function UserManagementPage() {
     refresh: refreshPoolUsers,
   } = usePoolUsers()
 
+  const {
+    workMailUsers,
+    loading: workMailLoading,
+    error: workMailError,
+    refresh: refreshWorkMailUsers,
+  } = useWorkMailUsers()
+
   const [searchUser, setSearchUser] = useState("")
   const [isAddUserOpen, setIsAddUserOpen] = useState(false)
   const [searchEmp, setSearchEmp] = useState("")
@@ -85,11 +93,10 @@ export default function UserManagementPage() {
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false)
   const [userSearchQuery, setUserSearchQuery] = useState("")
 
-  // Employee management states
-  const [newEmpName, setNewEmpName] = useState("")
-  const [newEmpEmail, setNewEmpEmail] = useState("")
-  const [newEmpDepartment, setNewEmpDepartment] = useState("")
-  const [newEmpJobTitle, setNewEmpJobTitle] = useState("")
+  // Employee selection states (NEW)
+  const [selectedEmployees, setSelectedEmployees] = useState<string[]>([])
+  const [isEmpDropdownOpen, setIsEmpDropdownOpen] = useState(false)
+  const [empSearchQuery, setEmpSearchQuery] = useState("")
 
   // WorkMail integration states
   const [isWorkmailSyncing, setIsWorkmailSyncing] = useState(false)
@@ -107,6 +114,18 @@ export default function UserManagementPage() {
   const filteredAvailableUsers = availablePoolUsers.filter(user =>
     user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
     user.email.toLowerCase().includes(userSearchQuery.toLowerCase())
+  )
+
+  // Filter available WorkMail users (exclude already added employees)
+  const availableWorkMailUsers = workMailUsers.filter(
+    workMailUser => !employees.find(employee => employee.email === workMailUser.email)
+  )
+
+  // Filter WorkMail users based on search
+  const filteredAvailableWorkMailUsers = availableWorkMailUsers.filter(user =>
+    user.name.toLowerCase().includes(empSearchQuery.toLowerCase()) ||
+    user.email.toLowerCase().includes(empSearchQuery.toLowerCase()) ||
+    (user.department && user.department.toLowerCase().includes(empSearchQuery.toLowerCase()))
   )
 
   const filteredUsers = users.filter(
@@ -129,11 +148,28 @@ export default function UserManagementPage() {
     )
   }
 
-  const handleSelectAll = () => {
+  const handleSelectAllUsers = () => {
     if (selectedUsers.length === filteredAvailableUsers.length && filteredAvailableUsers.length > 0) {
       setSelectedUsers([])
     } else {
       setSelectedUsers(filteredAvailableUsers.map(u => u.username))
+    }
+  }
+
+  // Handle employee selection (NEW)
+  const toggleEmployeeSelection = (userId: string) => {
+    setSelectedEmployees(prev =>
+      prev.includes(userId)
+        ? prev.filter(u => u !== userId)
+        : [...prev, userId]
+    )
+  }
+
+  const handleSelectAllEmployees = () => {
+    if (selectedEmployees.length === filteredAvailableWorkMailUsers.length && filteredAvailableWorkMailUsers.length > 0) {
+      setSelectedEmployees([])
+    } else {
+      setSelectedEmployees(filteredAvailableWorkMailUsers.map(u => u.id))
     }
   }
 
@@ -182,6 +218,53 @@ export default function UserManagementPage() {
     }
   }
 
+  // Handle adding selected employees (NEW)
+  const handleAddSelectedEmployees = async () => {
+    if (selectedEmployees.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "No employees selected",
+        description: "Please select at least one employee to add.",
+      })
+      return
+    }
+
+    try {
+      // Add each selected employee
+      await Promise.all(
+        selectedEmployees.map((userId) => {
+          const workMailUser = workMailUsers.find(u => u.id === userId)!
+          return addEmployee({
+            name: workMailUser.name,
+            email: workMailUser.email,
+            department: workMailUser.department || '',
+            jobTitle: workMailUser.jobTitle || '',
+          })
+        })
+      )
+      
+      toast({
+        title: "Employees Added",
+        description: `Successfully added ${selectedEmployees.length} employee${selectedEmployees.length > 1 ? "s" : ""} to monitoring.`,
+      })
+      
+      // Reset selection and refresh
+      setSelectedEmployees([])
+      setIsAddEmpOpen(false)
+      setEmpSearchQuery("")
+      
+      // Refresh WorkMail users to update available list
+      await refreshWorkMailUsers()
+    } catch (err) {
+      console.error("Error adding employees:", err)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: (err as Error).message || "Failed to add employees",
+      })
+    }
+  }
+
   const handleDeleteUser = async (userId: string) => {
     try {
       await deleteUser(userId)
@@ -202,54 +285,6 @@ export default function UserManagementPage() {
     }
   }
 
-  const handleAddEmployee = async () => {
-    if (!newEmpName.trim() || !newEmpEmail.trim()) {
-      toast({
-        variant: "destructive",
-        title: "Missing Information",
-        description: "Please provide both name and email.",
-      })
-      return
-    }
-
-    try {
-      await addEmployee({
-        name: newEmpName,
-        email: newEmpEmail,
-        department: newEmpDepartment,
-        jobTitle: newEmpJobTitle,
-      })
-      
-      toast({
-        title: "Employee Added",
-        description: `${newEmpName} has been added to monitoring.`,
-      })
-      
-      setIsAddEmpOpen(false)
-      setNewEmpName("")
-      setNewEmpEmail("")
-      setNewEmpDepartment("")
-      setNewEmpJobTitle("")
-    } catch (err) {
-      console.error("Error adding employee:", err)
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: (err as Error).message || "Failed to add employee",
-      })
-    }
-  }
-
-  const checkWorkmailStatus = async () => {
-    try {
-      const res = await fetch("/api/company-settings/employees/sync-workmail")
-      const status = await res.json()
-      setWorkmailStatus(status)
-    } catch (err) {
-      console.error("Error checking WorkMail status:", err)
-    }
-  }
-
   const handleSyncFromWorkMail = async () => {
     setIsWorkmailSyncing(true)
     try {
@@ -267,8 +302,9 @@ export default function UserManagementPage() {
           description: `Successfully synced ${result.synced} employees from WorkMail.`,
         })
         
-        // Refresh employee list
+        // Refresh employee list and available WorkMail users
         await refreshEmployees()
+        await refreshWorkMailUsers()
       } else {
         throw new Error(result.error || "Sync failed")
       }
@@ -284,11 +320,27 @@ export default function UserManagementPage() {
     }
   }
 
-  const resetDialogState = () => {
+  const checkWorkmailStatus = async () => {
+    try {
+      const res = await fetch("/api/company-settings/employees/sync-workmail")
+      const status = await res.json()
+      setWorkmailStatus(status)
+    } catch (err) {
+      console.error("Error checking WorkMail status:", err)
+    }
+  }
+
+  const resetUserDialogState = () => {
     setSelectedUsers([])
     setUserSearchQuery("")
     setSelectedRole("Security Admin")
     setIsUserDropdownOpen(false)
+  }
+
+  const resetEmpDialogState = () => {
+    setSelectedEmployees([])
+    setEmpSearchQuery("")
+    setIsEmpDropdownOpen(false)
   }
 
   // Auto-refresh data periodically and check WorkMail status
@@ -296,10 +348,11 @@ export default function UserManagementPage() {
     const interval = setInterval(() => {
       refreshUsers()
       refreshPoolUsers()
+      refreshWorkMailUsers()
     }, 30000) // Refresh every 30 seconds
 
     return () => clearInterval(interval)
-  }, [refreshUsers, refreshPoolUsers])
+  }, [refreshUsers, refreshPoolUsers, refreshWorkMailUsers])
 
   // Check WorkMail status on component mount
   useEffect(() => {
@@ -357,7 +410,7 @@ export default function UserManagementPage() {
                 </div>
                 <Dialog open={isAddUserOpen} onOpenChange={(open) => {
                   setIsAddUserOpen(open)
-                  if (!open) resetDialogState()
+                  if (!open) resetUserDialogState()
                 }}>
                   <DialogTrigger asChild>
                     <Button>
@@ -427,7 +480,7 @@ export default function UserManagementPage() {
                               <div className="flex items-center space-x-2 w-full">
                                 <Checkbox
                                   checked={selectedUsers.length === filteredAvailableUsers.length && filteredAvailableUsers.length > 0}
-                                  onCheckedChange={handleSelectAll}
+                                  onCheckedChange={handleSelectAllUsers}
                                 />
                                 <span className="font-medium">Select All</span>
                               </div>
@@ -510,7 +563,7 @@ export default function UserManagementPage() {
                         variant="outline"
                         onClick={() => {
                           setIsAddUserOpen(false)
-                          resetDialogState()
+                          resetUserDialogState()
                         }}
                       >
                         Cancel
@@ -637,100 +690,162 @@ export default function UserManagementPage() {
             </CardContent>
           </Card>
 
-          {/* Organization Employees Section - WITH WORKMAIL SYNC */}
+          {/* Organization Employees Section - UPDATED WITH DROPDOWN */}
           <Card>
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
                   <CardTitle>Organization Employees</CardTitle>
                   <CardDescription>
-                    Manage employees whose emails will be monitored for security threats. Sync directly from AWS WorkMail.
+                    Manage employees whose emails will be monitored for security threats. Select directly from AWS WorkMail.
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
-                  <Dialog open={isAddEmpOpen} onOpenChange={setIsAddEmpOpen}>
+                  <Dialog open={isAddEmpOpen} onOpenChange={(open) => {
+                    setIsAddEmpOpen(open)
+                    if (!open) resetEmpDialogState()
+                  }}>
                     <DialogTrigger asChild>
                       <Button variant="outline">
                         <UserPlus className="mr-2 h-4 w-4" />
                         Add Employee
                       </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="max-w-md">
                       <DialogHeader>
-                        <DialogTitle>Add Employee</DialogTitle>
+                        <DialogTitle>Add Employees to Monitoring</DialogTitle>
                         <DialogDescription>
-                          Add an employee to email monitoring.
+                          Select employees from your WorkMail organization to add to email monitoring.
                         </DialogDescription>
                       </DialogHeader>
+
                       <div className="space-y-4">
-                        <div className="grid grid-cols-4 items-center gap-4">
-                          <Label htmlFor="empName" className="text-right">
-                            Name
-                          </Label>
-                          <Input
-                            id="empName"
-                            value={newEmpName}
-                            onChange={(e) => setNewEmpName(e.target.value)}
-                            className="col-span-3"
-                            placeholder="John Doe"
-                          />
+                        {/* Employee Selection Dropdown */}
+                        <div className="space-y-2">
+                          <Label>Select Employees</Label>
+                          <DropdownMenu open={isEmpDropdownOpen} onOpenChange={setIsEmpDropdownOpen}>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="outline" className="w-full justify-between">
+                                {selectedEmployees.length === 0 
+                                  ? "Select employees..." 
+                                  : `${selectedEmployees.length} employee${selectedEmployees.length > 1 ? 's' : ''} selected`}
+                                <ChevronDown className="ml-2 h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent className="w-80 max-h-80 overflow-auto">
+                              {/* Search */}
+                              <div className="p-2">
+                                <Input
+                                  placeholder="Search employees..."
+                                  value={empSearchQuery}
+                                  onChange={(e) => setEmpSearchQuery(e.target.value)}
+                                  className="h-8"
+                                />
+                              </div>
+                              
+                              <DropdownMenuSeparator />
+                              
+                              {/* Select All */}
+                              <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                                <div className="flex items-center space-x-2 w-full">
+                                  <Checkbox
+                                    checked={selectedEmployees.length === filteredAvailableWorkMailUsers.length && filteredAvailableWorkMailUsers.length > 0}
+                                    onCheckedChange={handleSelectAllEmployees}
+                                  />
+                                  <span className="font-medium">Select All</span>
+                                </div>
+                              </DropdownMenuItem>
+                              
+                              <DropdownMenuSeparator />
+
+                              {/* Loading State */}
+                              {workMailLoading && (
+                                <DropdownMenuLabel className="text-muted-foreground">
+                                  Loading employees...
+                                </DropdownMenuLabel>
+                              )}
+
+                              {/* Error State */}
+                              {workMailError && (
+                                <DropdownMenuLabel className="text-destructive">
+                                  Error loading employees: {workMailError.message}
+                                </DropdownMenuLabel>
+                              )}
+
+                              {/* Employee List */}
+                              {!workMailLoading && !workMailError && filteredAvailableWorkMailUsers.length === 0 && (
+                                <DropdownMenuLabel className="text-muted-foreground">
+                                  {availableWorkMailUsers.length === 0 
+                                    ? "All employees have been added to monitoring"
+                                    : "No employees match your search"}
+                                </DropdownMenuLabel>
+                              )}
+
+                              {filteredAvailableWorkMailUsers.map((user) => (
+                                <DropdownMenuItem key={user.id} onSelect={(e) => e.preventDefault()}>
+                                  <div className="flex items-center space-x-2 w-full">
+                                    <Checkbox
+                                      checked={selectedEmployees.includes(user.id)}
+                                      onCheckedChange={() => toggleEmployeeSelection(user.id)}
+                                    />
+                                    <div className="flex-1">
+                                      <div className="font-medium">{user.name}</div>
+                                      <div className="text-sm text-muted-foreground">{user.email}</div>
+                                      {user.department && (
+                                        <div className="text-xs text-muted-foreground">{user.department}</div>
+                                      )}
+                                    </div>
+                                    {selectedEmployees.includes(user.id) && (
+                                      <Check className="h-4 w-4 text-primary" />
+                                    )}
+                                  </div>
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                          <Label htmlFor="empEmail" className="text-right">
-                            Email
-                          </Label>
-                          <Input
-                            id="empEmail"
-                            type="email"
-                            value={newEmpEmail}
-                            onChange={(e) => setNewEmpEmail(e.target.value)}
-                            className="col-span-3"
-                            placeholder="john.doe@company.com"
-                          />
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                          <Label htmlFor="empDept" className="text-right">
-                            Department
-                          </Label>
-                          <Input
-                            id="empDept"
-                            value={newEmpDepartment}
-                            onChange={(e) => setNewEmpDepartment(e.target.value)}
-                            className="col-span-3"
-                            placeholder="Engineering (optional)"
-                          />
-                        </div>
-                        <div className="grid grid-cols-4 items-center gap-4">
-                          <Label htmlFor="empJobTitle" className="text-right">
-                            Job Title
-                          </Label>
-                          <Input
-                            id="empJobTitle"
-                            value={newEmpJobTitle}
-                            onChange={(e) => setNewEmpJobTitle(e.target.value)}
-                            className="col-span-3"
-                            placeholder="Software Engineer (optional)"
-                          />
-                        </div>
+
+                        {/* Selected Employees Preview */}
+                        {selectedEmployees.length > 0 && (
+                          <div className="space-y-2">
+                            <Label>Selected Employees ({selectedEmployees.length})</Label>
+                            <div className="max-h-24 overflow-auto space-y-1 p-2 border rounded">
+                              {selectedEmployees.map((userId) => {
+                                const user = workMailUsers.find(u => u.id === userId)
+                                return (
+                                  <div key={userId} className="flex items-center justify-between text-sm">
+                                    <span className="truncate flex-1">{user?.name} ({user?.email})</span>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => toggleEmployeeSelection(userId)}
+                                      className="h-6 w-6 p-0 ml-2"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
+
                       <DialogFooter>
                         <Button
                           variant="outline"
                           onClick={() => {
                             setIsAddEmpOpen(false)
-                            setNewEmpName("")
-                            setNewEmpEmail("")
-                            setNewEmpDepartment("")
-                            setNewEmpJobTitle("")
+                            resetEmpDialogState()
                           }}
                         >
                           Cancel
                         </Button>
-                        <Button 
-                          onClick={handleAddEmployee} 
-                          disabled={empLoading || !newEmpName.trim() || !newEmpEmail.trim()}
+                        <Button
+                          onClick={handleAddSelectedEmployees}
+                          disabled={empLoading || selectedEmployees.length === 0}
                         >
-                          {empLoading ? "Adding..." : "Add Employee"}
+                          {empLoading ? "Adding..." : `Add ${selectedEmployees.length} Employee${selectedEmployees.length > 1 ? 's' : ''}`}
                         </Button>
                       </DialogFooter>
                     </DialogContent>
@@ -765,11 +880,11 @@ export default function UserManagementPage() {
                   <AlertDescription>
                     {workmailStatus?.connected ? (
                       <>
-                        ✅ Connected to WorkMail Organization: <code>{workmailStatus.organizationAlias}</code>
+                        ✅ Connected to WorkMail Organization: <code>{workmailStatus.organizationAlias || workmailStatus.organizationId}</code>
                       </>
                     ) : (
                       <>
-                        ❌ WorkMail not configured. Set WORKMAIL_ORGANIZATION_ID environment variable.
+                        ❌ WorkMail not configured. Please connect AWS WorkMail in Cloud Services.
                       </>
                     )}
                   </AlertDescription>
@@ -786,16 +901,11 @@ export default function UserManagementPage() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={checkWorkmailStatus}
-                      disabled={empLoading}
-                    >
-                      Check WorkMail
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => refreshEmployees()}
-                      disabled={empLoading}
+                      onClick={() => {
+                        refreshEmployees()
+                        refreshWorkMailUsers()
+                      }}
+                      disabled={empLoading || workMailLoading}
                     >
                       Refresh
                     </Button>
@@ -870,7 +980,7 @@ export default function UserManagementPage() {
                     ) : (
                       <TableRow>
                         <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
-                          {empLoading ? "Loading employees..." : "No employees being monitored. Click 'Sync from WorkMail' to import your organization's users."}
+                          {empLoading ? "Loading employees..." : "No employees being monitored. Use 'Add Employee' to select from WorkMail or 'Sync from WorkMail' to import all."}
                         </TableCell>
                       </TableRow>
                     )}
