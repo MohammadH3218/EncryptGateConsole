@@ -7,9 +7,13 @@ export interface Employee {
   id: string
   name: string
   email: string
+  department?: string
+  jobTitle?: string
   status: string
   addedAt: string | null
   lastEmailProcessed: string | null
+  syncedFromWorkMail?: string | null // When synced from WorkMail
+  workMailUserId?: string // WorkMail internal user ID
 }
 
 export function useEmployees() {
@@ -39,7 +43,7 @@ export function useEmployees() {
   }, [])
 
   const addEmployee = useCallback(
-    async (employee: { name: string; email: string }) => {
+    async (employee: { name: string; email: string; department?: string; jobTitle?: string }) => {
       setLoading(true)
       setError(null)
       try {
