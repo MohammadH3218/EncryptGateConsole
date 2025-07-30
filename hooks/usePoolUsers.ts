@@ -1,4 +1,3 @@
-// hooks/usePoolUsers.ts
 "use client"
 
 import useSWR from "swr"
