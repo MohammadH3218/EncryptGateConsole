@@ -18,12 +18,17 @@ export function useUsers() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const res = await fetch("/api/company-settings/users")
-      if (!res.ok) throw new Error("Failed to load users")
+      if (!res.ok) {
+        const errorData = await res.json()
+        throw new Error(errorData.message || "Failed to load users")
+      }
       const data: User[] = await res.json()
       setUsers(data)
     } catch (err) {
+      console.error("Error fetching users:", err)
       setError(err as Error)
     } finally {
       setLoading(false)
@@ -33,16 +38,24 @@ export function useUsers() {
   const addUser = useCallback(
     async (user: { name: string; email: string; role: string }) => {
       setLoading(true)
+      setError(null)
       try {
         const res = await fetch("/api/company-settings/users", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(user),
         })
-        if (!res.ok) throw new Error("Failed to add user")
+        if (!res.ok) {
+          const errorData = await res.json()
+          throw new Error(errorData.message || "Failed to add user")
+        }
         const newUser: User = await res.json()
         setUsers((prev) => [...prev, newUser])
         return newUser
+      } catch (err) {
+        console.error("Error adding user:", err)
+        setError(err as Error)
+        throw err
       } finally {
         setLoading(false)
       }
@@ -53,13 +66,21 @@ export function useUsers() {
   const deleteUser = useCallback(
     async (id: string) => {
       setLoading(true)
+      setError(null)
       try {
         const res = await fetch(
           `/api/company-settings/users/${encodeURIComponent(id)}`,
           { method: "DELETE" }
         )
-        if (!res.ok) throw new Error("Failed to delete user")
+        if (!res.ok) {
+          const errorData = await res.json()
+          throw new Error(errorData.message || "Failed to delete user")
+        }
         setUsers((prev) => prev.filter((u) => u.id !== id))
+      } catch (err) {
+        console.error("Error deleting user:", err)
+        setError(err as Error)
+        throw err
       } finally {
         setLoading(false)
       }
@@ -71,5 +92,12 @@ export function useUsers() {
     fetchUsers()
   }, [fetchUsers])
 
-  return { users, loading, error, addUser, deleteUser, refresh: fetchUsers }
+  return { 
+    users, 
+    loading, 
+    error, 
+    addUser, 
+    deleteUser, 
+    refresh: fetchUsers 
+  }
 }
