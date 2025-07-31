@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Bot, Send, Loader2, AlertTriangle, CheckCircle, Info } from "lucide-react"
+import { Bot, Send, Loader2, AlertTriangle, CheckCircle, Info, Zap } from "lucide-react"
 
 interface Message {
   id: string
@@ -19,6 +19,7 @@ interface Message {
     query?: string
     results?: any[]
     confidence?: number
+    error?: string
   }
 }
 
@@ -39,6 +40,7 @@ export function SecurityCopilotEnhanced({
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [context, setContext] = useState<any>(null)
+  const [isConnected, setIsConnected] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Initialize with welcome message and context
@@ -47,12 +49,13 @@ export function SecurityCopilotEnhanced({
       id: 'welcome',
       type: 'system',
       content: messageId 
-        ? `Hello! I'm your Security Copilot. I can help you investigate this email by querying our knowledge graph and providing insights. What would you like to know?`
-        : `Hello! I'm your Security Copilot. I can analyze security data and answer questions about emails, threats, and investigations. How can I help?`,
+        ? `Hello! I'm your Security Copilot powered by Neo4j and advanced AI. I can analyze the email graph, find patterns, and help with your investigation. What would you like to know about this email?`
+        : `Hello! I'm your Security Copilot. I can analyze email relationships, detect patterns, and provide security insights using our knowledge graph. How can I assist you?`,
       timestamp: new Date(),
     }
     
     setMessages([welcomeMessage])
+    setIsConnected(true)
     
     // Load context if messageId is provided
     if (messageId) {
@@ -67,6 +70,7 @@ export function SecurityCopilotEnhanced({
 
   const loadEmailContext = async (msgId: string) => {
     try {
+      console.log('🔍 Loading email context for:', msgId)
       const response = await fetch('/api/graph', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -79,6 +83,7 @@ export function SecurityCopilotEnhanced({
       if (response.ok) {
         const result = await response.json()
         setContext(result.context)
+        console.log('✅ Email context loaded:', result.context)
       }
     } catch (error) {
       console.error('Failed to load email context:', error)
@@ -99,7 +104,7 @@ export function SecurityCopilotEnhanced({
     const loadingMessage: Message = {
       id: (Date.now() + 1).toString(),
       type: 'assistant',
-      content: 'Analyzing your question...',
+      content: 'Analyzing your question using the knowledge graph...',
       timestamp: new Date(),
       isLoading: true,
     }
@@ -109,6 +114,8 @@ export function SecurityCopilotEnhanced({
     setIsLoading(true)
 
     try {
+      console.log('🤖 Sending query to copilot:', userMessage.content)
+      
       // Query the Neo4j copilot
       const response = await fetch('/api/graph', {
         method: 'POST',
@@ -125,15 +132,17 @@ export function SecurityCopilotEnhanced({
       })
 
       const result = await response.json()
+      console.log('🤖 Copilot response:', result)
 
       if (response.ok) {
         const assistantMessage: Message = {
           id: (Date.now() + 2).toString(),
           type: 'assistant',
-          content: result.response || 'I was able to process your question, but no specific response was generated.',
+          content: result.response || 'I processed your question but couldn\'t generate a specific response. Could you try rephrasing?',
           timestamp: new Date(),
           metadata: {
-            confidence: 85, // Could come from API
+            confidence: result.confidence || 85,
+            error: result.error,
           }
         }
 
@@ -149,8 +158,11 @@ export function SecurityCopilotEnhanced({
       const errorMessage: Message = {
         id: (Date.now() + 3).toString(),
         type: 'assistant',
-        content: 'I encountered an error processing your question. Please try again or rephrase your query.',
+        content: 'I encountered an error processing your question. The knowledge graph might be initializing or there could be a connection issue. Please try again in a moment.',
         timestamp: new Date(),
+        metadata: {
+          error: error instanceof Error ? error.message : 'Unknown error'
+        }
       }
 
       setMessages(prev => 
@@ -166,19 +178,20 @@ export function SecurityCopilotEnhanced({
   }
 
   const suggestedQuestions = messageId ? [
-    "What makes this email suspicious?",
     "Who else has received similar emails?",
-    "Analyze the sender's reputation",
+    "What makes this email suspicious?",
+    "Analyze the sender's email history",
     "What actions should I take?",
-    "Show me the email's connections",
-    "Explain the risk level",
-    "Find similar past incidents",
+    "Show me related email patterns",
+    "Find emails with similar URLs",
+    "Who sent the most emails to this recipient?",
   ] : [
-    "Show me recent high-risk emails",
+    "Show me recent phishing attempts",
     "Who are the most targeted users?",
-    "What are the latest threat trends?",
-    "Analyze suspicious domains",
-    "Show me phishing patterns",
+    "Find emails with suspicious URLs",
+    "What are the latest threat patterns?",
+    "Show me unusual email volumes",
+    "Find emails from new domains",
   ]
 
   return (
@@ -187,9 +200,19 @@ export function SecurityCopilotEnhanced({
         <CardTitle className="flex items-center gap-2 text-lg">
           <Bot className="h-5 w-5 text-primary" />
           Security Copilot
-          <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20 text-xs">
-            Neo4j Enhanced
-          </Badge>
+          <div className="flex gap-1">
+            <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20 text-xs">
+              <Zap className="h-3 w-3 mr-1" />
+              Neo4j
+            </Badge>
+            <Badge variant="outline" className={`text-xs ${
+              isConnected 
+                ? 'bg-green-500/10 text-green-500 border-green-500/20' 
+                : 'bg-red-500/10 text-red-500 border-red-500/20'
+            }`}>
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </Badge>
+          </div>
         </CardTitle>
       </CardHeader>
       
@@ -211,12 +234,26 @@ export function SecurityCopilotEnhanced({
                     )}
                     <div className="flex-1">
                       <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                      {message.metadata?.confidence && (
-                        <div className="flex items-center gap-1 mt-2">
-                          <CheckCircle className="h-3 w-3 text-green-500" />
-                          <span className="text-xs text-muted-foreground">
-                            Confidence: {message.metadata.confidence}%
-                          </span>
+                      
+                      {/* Show metadata */}
+                      {message.metadata && (
+                        <div className="mt-2 space-y-1">
+                          {message.metadata.confidence && (
+                            <div className="flex items-center gap-1">
+                              <CheckCircle className="h-3 w-3 text-green-500" />
+                              <span className="text-xs text-muted-foreground">
+                                Confidence: {message.metadata.confidence}%
+                              </span>
+                            </div>
+                          )}
+                          {message.metadata.error && (
+                            <div className="flex items-center gap-1">
+                              <AlertTriangle className="h-3 w-3 text-yellow-500" />
+                              <span className="text-xs text-muted-foreground">
+                                Note: {message.metadata.error}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -243,6 +280,7 @@ export function SecurityCopilotEnhanced({
                   size="sm"
                   className="justify-start h-auto py-2 px-2 text-xs"
                   onClick={() => handleSuggestedQuestion(question)}
+                  disabled={isLoading}
                 >
                   {question}
                 </Button>
@@ -256,10 +294,12 @@ export function SecurityCopilotEnhanced({
           <div className="px-4 py-2 border-t">
             <div className="flex items-center gap-1 mb-1">
               <Info className="h-3 w-3 text-blue-500" />
-              <span className="text-xs text-muted-foreground">Email Context Loaded</span>
+              <span className="text-xs font-medium text-muted-foreground">Email Context Loaded</span>
             </div>
-            <div className="text-xs text-muted-foreground">
-              From: {context.sender} • {context.recipients?.length || 0} recipient(s)
+            <div className="text-xs text-muted-foreground space-y-0.5">
+              <div>From: {context.sender}</div>
+              <div>To: {context.recipients?.join(', ') || 'N/A'}</div>
+              <div>Subject: {context.subject}</div>
             </div>
           </div>
         )}
@@ -270,7 +310,7 @@ export function SecurityCopilotEnhanced({
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about this investigation..."
+              placeholder={messageId ? "Ask about this email..." : "Ask about email security..."}
               disabled={isLoading}
               className="flex-1"
             />
@@ -282,6 +322,9 @@ export function SecurityCopilotEnhanced({
               <Send className="h-4 w-4" />
             </Button>
           </form>
+          <p className="text-xs text-muted-foreground mt-1">
+            Powered by Neo4j graph database and AI analysis
+          </p>
         </div>
       </CardContent>
     </Card>
