@@ -1,7 +1,7 @@
 // app/admin/detections/page.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
 import { Button } from "@/components/ui/button"
@@ -23,10 +23,7 @@ import {
   TrendingUp,
   CheckCircle,
   XCircle,
-  AlertCircle,
-  ChevronRight,
-  Plus,
-  Download
+  AlertCircle
 } from "lucide-react"
 
 interface Detection {
@@ -65,6 +62,7 @@ export default function AdminDetectionsPage() {
   const [detections, setDetections] = useState<Detection[]>([])
   const [filteredDetections, setFilteredDetections] = useState<Detection[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DetectionsStats>({
     total: 0, new: 0, inProgress: 0, resolved: 0, falsePositives: 0,
@@ -76,9 +74,14 @@ export default function AdminDetectionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [assignmentFilter, setAssignmentFilter] = useState<string>("all")
 
+  // Pagination
+  const [lastKey, setLastKey] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(true)
+  const itemsPerPage = 25
+
   // Load detections on component mount
   useEffect(() => {
-    loadDetections()
+    loadDetections(true)
   }, [])
 
   // Apply filters whenever search query or filter values change
@@ -87,13 +90,25 @@ export default function AdminDetectionsPage() {
     calculateStats()
   }, [searchQuery, detections, severityFilter, statusFilter, assignmentFilter])
 
-  const loadDetections = async () => {
-    setLoading(true)
+  const loadDetections = async (reset = false) => {
+    if (reset) {
+      setLoading(true)
+    } else {
+      setLoadingMore(true)
+    }
     setError(null)
     
     try {
+      const params = new URLSearchParams({
+        limit: itemsPerPage.toString(),
+      })
+      
+      if (!reset && lastKey) {
+        params.append('lastKey', lastKey)
+      }
+
       console.log('🚨 Loading detections...')
-      const response = await fetch('/api/detections')
+      const response = await fetch(`/api/detections?${params}`)
       
       if (!response.ok) {
         const errorData = await response.json()
@@ -103,14 +118,28 @@ export default function AdminDetectionsPage() {
       const data: Detection[] = await response.json()
       console.log(`✅ Loaded ${data.length} detections`)
       
-      setDetections(data)
+      if (reset) {
+        setDetections(data)
+      } else {
+        setDetections(prev => [...prev, ...data])
+      }
+      
+      // For mock data, we don't have pagination info
+      setHasMore(data.length === itemsPerPage)
     } catch (err) {
       console.error('❌ Error loading detections:', err)
       setError(err instanceof Error ? err.message : 'Failed to load detections')
     } finally {
       setLoading(false)
+      setLoadingMore(false)
     }
   }
+
+  const loadMoreDetections = useCallback(() => {
+    if (hasMore && !loading && !loadingMore) {
+      loadDetections(false)
+    }
+  }, [hasMore, loading, loadingMore])
 
   const applyFilters = () => {
     let filtered = detections
@@ -214,55 +243,22 @@ export default function AdminDetectionsPage() {
     router.push(`/admin/investigate/${detection.emailMessageId}`)
   }
 
-  const updateDetectionStatus = async (detectionId: string, newStatus: string) => {
-    try {
-      const response = await fetch(`/api/detections/${detectionId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
-      })
-
-      if (response.ok) {
-        // Update local state
-        setDetections(prev => 
-          prev.map(d => 
-            d.detectionId === detectionId 
-              ? { ...d, status: newStatus as Detection['status'] }
-              : d
-          )
-        )
-      }
-    } catch (error) {
-      console.error('Failed to update detection status:', error)
-    }
-  }
-
   const refreshDetections = () => {
-    loadDetections()
+    loadDetections(true)
   }
 
-  const exportDetections = () => {
-    const csvContent = [
-      ['Detection ID', 'Name', 'Severity', 'Status', 'Sender', 'Threat Score', 'Created'],
-      ...filteredDetections.map(d => [
-        d.detectionId,
-        d.name,
-        d.severity,
-        d.status,
-        d.sentBy,
-        d.threatScore.toString(),
-        new Date(d.createdAt).toLocaleDateString()
-      ])
-    ].map(row => row.join(',')).join('\n')
+  // Infinite scroll handler
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerHeight + document.documentElement.scrollTop 
+          >= document.documentElement.offsetHeight - 1000) {
+        loadMoreDetections()
+      }
+    }
 
-    const blob = new Blob([csvContent], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `detections-${new Date().toISOString().split('T')[0]}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [loadMoreDetections])
 
   if (error) {
     return (
@@ -304,15 +300,6 @@ export default function AdminDetectionsPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={exportDetections}
-                disabled={filteredDetections.length === 0}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -496,88 +483,105 @@ export default function AdminDetectionsPage() {
                   )}
                 </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Detection</TableHead>
-                      <TableHead>Sender</TableHead>
-                      <TableHead>Severity</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Threat Score</TableHead>
-                      <TableHead>Created</TableHead>
-                      <TableHead>Assigned</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredDetections.map((detection) => (
-                      <TableRow key={detection.id} className="hover:bg-muted/50">
-                        <TableCell className="font-medium">
-                          <div>
-                            <div className="font-medium">{detection.name}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {detection.detectionId}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>{detection.sentBy}</TableCell>
-                        <TableCell>
-                          {getSeverityBadge(detection.severity)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            {getStatusIcon(detection.status)}
-                            {getStatusBadge(detection.status)}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div className="w-16 h-2 bg-gray-200 rounded-full">
-                              <div 
-                                className={`h-2 rounded-full ${
-                                  detection.threatScore >= 80 ? 'bg-red-500' :
-                                  detection.threatScore >= 60 ? 'bg-orange-500' :
-                                  detection.threatScore >= 40 ? 'bg-yellow-500' :
-                                  'bg-green-500'
-                                }`}
-                                style={{ width: `${detection.threatScore}%` }}
-                              />
-                            </div>
-                            <span className="text-sm">{detection.threatScore}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {new Date(detection.createdAt).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          {detection.assignedTo.length > 0 ? (
-                            <div className="flex items-center gap-1">
-                              <Users className="h-4 w-4" />
-                              <span className="text-sm">
-                                {detection.assignedTo.slice(0, 2).join(', ')}
-                                {detection.assignedTo.length > 2 && ` +${detection.assignedTo.length - 2}`}
-                              </span>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">Unassigned</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleInvestigate(detection)}
-                              title="Investigate"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Detection</TableHead>
+                        <TableHead>Sender</TableHead>
+                        <TableHead>Severity</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Threat Score</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Assigned</TableHead>
+                        <TableHead>Actions</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredDetections.map((detection) => (
+                        <TableRow key={detection.id} className="hover:bg-muted/50">
+                          <TableCell className="font-medium">
+                            <div>
+                              <div className="font-medium">{detection.name}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {detection.detectionId}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>{detection.sentBy}</TableCell>
+                          <TableCell>
+                            {getSeverityBadge(detection.severity)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {getStatusIcon(detection.status)}
+                              {getStatusBadge(detection.status)}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <div className="w-16 h-2 bg-gray-200 rounded-full">
+                                <div 
+                                  className={`h-2 rounded-full ${
+                                    detection.threatScore >= 80 ? 'bg-red-500' :
+                                    detection.threatScore >= 60 ? 'bg-orange-500' :
+                                    detection.threatScore >= 40 ? 'bg-yellow-500' :
+                                    'bg-green-500'
+                                  }`}
+                                  style={{ width: `${detection.threatScore}%` }}
+                                />
+                              </div>
+                              <span className="text-sm">{detection.threatScore}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {new Date(detection.createdAt).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            {detection.assignedTo.length > 0 ? (
+                              <div className="flex items-center gap-1">
+                                <Users className="h-4 w-4" />
+                                <span className="text-sm">
+                                  {detection.assignedTo.slice(0, 2).join(', ')}
+                                  {detection.assignedTo.length > 2 && ` +${detection.assignedTo.length - 2}`}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-muted-foreground">Unassigned</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleInvestigate(detection)}
+                                title="Investigate"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  {/* Loading More Indicator */}
+                  {loadingMore && (
+                    <div className="flex justify-center mt-4 py-4">
+                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      Loading more detections...
+                    </div>
+                  )}
+
+                  {/* End of results indicator */}
+                  {!hasMore && detections.length > 0 && (
+                    <div className="text-center mt-4 py-4 text-muted-foreground">
+                      All detections loaded
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>

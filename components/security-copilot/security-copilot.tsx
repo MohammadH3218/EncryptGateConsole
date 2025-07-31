@@ -1,4 +1,4 @@
-// components/security-copilot/security-copilot-enhanced.tsx
+// components/security-copilot/security-copilot.tsx
 "use client"
 
 import { useState, useRef, useEffect } from "react"
@@ -182,20 +182,20 @@ export function SecurityCopilotEnhanced({
     "What makes this email suspicious?",
     "Analyze the sender's email history",
     "What actions should I take?",
-    "Show me related email patterns",
-    "Find emails with similar URLs",
-    "Who sent the most emails to this recipient?",
   ] : [
     "Show me recent phishing attempts",
     "Who are the most targeted users?",
     "Find emails with suspicious URLs",
     "What are the latest threat patterns?",
-    "Show me unusual email volumes",
-    "Find emails from new domains",
   ]
 
+  // Remove border styling from Card when border-0 class is present
+  const cardClassName = className.includes('border-0') 
+    ? `flex flex-col h-full ${className.replace('border-0', '')} border-0 shadow-none`
+    : `flex flex-col h-full ${className}`
+
   return (
-    <Card className={`flex flex-col h-full ${className}`}>
+    <Card className={cardClassName}>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-lg">
           <Bot className="h-5 w-5 text-primary" />
@@ -273,7 +273,7 @@ export function SecurityCopilotEnhanced({
           <div className="px-4 py-2 border-t">
             <p className="text-xs text-muted-foreground mb-2">Suggested questions:</p>
             <div className="flex flex-col gap-1">
-              {suggestedQuestions.slice(0, 4).map((question, index) => (
+              {suggestedQuestions.slice(0, 3).map((question, index) => (
                 <Button
                   key={index}
                   variant="ghost"
