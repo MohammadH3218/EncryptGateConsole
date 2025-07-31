@@ -3,7 +3,11 @@ export const runtime = 'nodejs'
 
 import { NextResponse } from 'next/server'
 import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb'
-import { WorkMailClient, GetRawMessageContentCommand } from '@aws-sdk/client-workmail'
+import { WorkMailClient } from '@aws-sdk/client-workmail'
+import {
+  WorkMailMessageFlowClient,
+  GetRawMessageContentCommand,
+} from '@aws-sdk/client-workmailmessageflow'
 import { z } from 'zod'
 
 // Environment variables
@@ -67,7 +71,7 @@ async function isMonitoredEmployee(email: string): Promise<boolean> {
         },
       })
     )
-    return resp.Items && resp.Items.length > 0
+    return Boolean(resp.Items && resp.Items.length)
   } catch (error) {
     console.error('Error checking monitored employee:', error)
     return false
@@ -80,54 +84,7 @@ function extractUrls(content: string): string[] {
   return content.match(urlRegex) || []
 }
 
-// Parse email headers and body from raw message
-async function parseRawMessage(workmail: WorkMailClient, orgId: string, messageId: string) {
-  try {
-    const response = await workmail.send(
-      new GetRawMessageContentCommand({
-        OrganizationId: orgId,
-        MessageId: messageId,
-      })
-    )
-
-    if (!response.MessageContent) {
-      throw new Error('No message content received')
-    }
-
-    // Convert stream to string
-    const messageContent = await streamToString(response.MessageContent)
-    
-    // Basic email parsing (in production, use a proper email parser like 'mailparser')
-    const lines = messageContent.split('\n')
-    let headersParsed = false
-    let body = ''
-    const headers: Record<string, string> = {}
-
-    for (const line of lines) {
-      if (!headersParsed) {
-        if (line.trim() === '') {
-          headersParsed = true
-          continue
-        }
-        
-        const colonIndex = line.indexOf(':')
-        if (colonIndex > 0) {
-          const key = line.substring(0, colonIndex).toLowerCase()
-          const value = line.substring(colonIndex + 1).trim()
-          headers[key] = value
-        }
-      } else {
-        body += line + '\n'
-      }
-    }
-
-    return { headers, body: body.trim() }
-  } catch (error) {
-    console.error('Error parsing raw message:', error)
-    return { headers: {}, body: '' }
-  }
-}
-
+// Convert stream to string helper - MOVED BEFORE parseRawMessage
 async function streamToString(stream: any): Promise<string> {
   const chunks: Buffer[] = []
   for await (const chunk of stream) {
@@ -136,17 +93,75 @@ async function streamToString(stream: any): Promise<string> {
   return Buffer.concat(chunks).toString('utf-8')
 }
 
+// Parse raw message using the MessageFlow client
+async function parseRawMessage(
+  mailClient: WorkMailMessageFlowClient,
+  orgId: string,
+  messageId: string
+) {
+  try {
+    const response = await mailClient.send(
+      new GetRawMessageContentCommand({
+        messageId: messageId,
+      })
+    )
+
+    // FIXED: Use lowercase 'messageContent' instead of 'MessageContent'
+    if (!response.messageContent) {
+      throw new Error('No message content received')
+    }
+
+    const messageContent = await streamToString(response.messageContent)
+
+    // Simple parsing; for prod use a proper parser
+    const lines = messageContent.split('\n')
+    let headersParsed = false
+    let messageBody = ''
+    const headers: Record<string, string> = {}
+
+    for (const line of lines) {
+      if (!headersParsed) {
+        if (line.trim() === '') {
+          headersParsed = true
+          continue
+        }
+        const idx = line.indexOf(':')
+        if (idx > 0) {
+          const key = line.substring(0, idx).toLowerCase()
+          const val = line.substring(idx + 1).trim()
+          headers[key] = val
+        }
+      } else {
+        messageBody += line + '\n'
+      }
+    }
+
+    return { headers, messageBody: messageBody.trim() }
+  } catch (error) {
+    console.error('Error parsing raw message:', error)
+    return { headers: {}, messageBody: '' }
+  }
+}
+
+// Simple suspicious keyword detection
+function containsSuspiciousKeywords(body: string): boolean {
+  const suspiciousKeywords = [
+    'urgent', 'immediate action', 'verify account', 'suspended',
+    'click here', 'update payment', 'confirm identity', 'tax refund',
+    'prize', 'winner', 'congratulations', 'limited time',
+  ]
+  const lower = body.toLowerCase()
+  return suspiciousKeywords.some(k => lower.includes(k))
+}
+
 // Main webhook handler
 export async function POST(req: Request) {
   try {
     console.log('📧 WorkMail webhook received')
-    
-    const body = await req.json()
-    const webhook = WorkMailWebhookSchema.parse(body)
-    
-    console.log('📧 Processing WorkMail notification:', webhook.notificationType)
+    const requestBody = await req.json()
+    const webhook = WorkMailWebhookSchema.parse(requestBody)
 
-    // Only process mail delivery notifications
+    console.log('📧 Processing WorkMail notification:', webhook.notificationType)
     if (webhook.notificationType !== 'Delivery') {
       console.log('ℹ️ Ignoring non-delivery notification')
       return NextResponse.json({ status: 'ignored' })
@@ -156,30 +171,25 @@ export async function POST(req: Request) {
     const sender = mail.commonHeaders.from[0] || mail.source
     const recipients = mail.commonHeaders.to || mail.destination
 
-    console.log(`📧 Email from ${sender} to ${recipients.join(', ')}`)
-
-    // Check if any participant is monitored
     const senderMonitored = await isMonitoredEmployee(sender)
     const recipientsMonitored = await Promise.all(
       recipients.map(email => isMonitoredEmployee(email))
     )
-
     if (!senderMonitored && !recipientsMonitored.some(Boolean)) {
       console.log('ℹ️ No monitored employees involved, skipping email')
       return NextResponse.json({ status: 'skipped' })
     }
 
-    // Get WorkMail configuration
     const { organizationId, region } = await getWorkMailConfig()
-    const workmail = new WorkMailClient({ region })
+    const mailClient = new WorkMailMessageFlowClient({ region })
 
-    // Parse the raw message for full content
-    const { headers, body } = await parseRawMessage(workmail, organizationId, mail.messageId)
-    
-    // Extract URLs from body
-    const urls = extractUrls(body)
-    
-    // Create email payload for processing
+    const { headers, messageBody } = await parseRawMessage(
+      mailClient,
+      organizationId,
+      mail.messageId
+    )
+
+    const urls = extractUrls(messageBody)
     const emailPayload = {
       type: 'raw_email' as const,
       messageId: mail.messageId,
@@ -187,33 +197,28 @@ export async function POST(req: Request) {
       sender,
       recipients,
       timestamp: mail.timestamp,
-      body,
-      bodyHtml: body, // In a real implementation, you'd parse HTML separately
-      attachments: [], // Would need to parse attachments from raw message
+      body: messageBody,
+      bodyHtml: messageBody,
+      attachments: [],
       headers,
-      direction: senderMonitored ? 'outbound' : 'inbound' as const,
-      size: body.length,
-      urls, // Add URLs for graph database
+      direction: senderMonitored ? 'outbound' as const : 'inbound' as const,
+      size: messageBody.length,
+      urls,
     }
 
     console.log('📧 Forwarding email for processing...')
-
-    // Forward to email processor for storage and analysis
-    const processorResponse = await fetch(`${BASE_URL}/api/email-processor`, {
+    const procResp = await fetch(`${BASE_URL}/api/email-processor`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(emailPayload),
     })
-
-    if (!processorResponse.ok) {
-      console.error('❌ Email processor failed:', await processorResponse.text())
+    if (!procResp.ok) {
+      console.error('❌ Email processor failed:', await procResp.text())
       throw new Error('Email processing failed')
     }
 
-    // If email contains URLs or looks suspicious, trigger threat analysis
-    if (urls.length > 0 || containsSuspiciousKeywords(body)) {
+    if (urls.length > 0 || containsSuspiciousKeywords(messageBody)) {
       console.log('🚨 Triggering threat analysis...')
-      
       try {
         await fetch(`${BASE_URL}/api/threat-detection`, {
           method: 'POST',
@@ -223,18 +228,16 @@ export async function POST(req: Request) {
             sender,
             recipients,
             subject: emailPayload.subject,
-            body,
+            body: messageBody,
             timestamp: mail.timestamp,
             urls,
           }),
         })
-      } catch (threatError) {
-        console.error('❌ Threat analysis failed:', threatError)
-        // Don't fail the webhook for threat analysis errors
+      } catch (err) {
+        console.error('❌ Threat analysis failed:', err)
       }
     }
 
-    // Add to graph database
     try {
       await fetch(`${BASE_URL}/api/graph`, {
         method: 'POST',
@@ -246,24 +249,22 @@ export async function POST(req: Request) {
             sender,
             recipients,
             subject: emailPayload.subject,
-            body,
+            body: messageBody,
             timestamp: mail.timestamp,
             urls,
           },
         }),
       })
-    } catch (graphError) {
-      console.error('❌ Graph database update failed:', graphError)
-      // Don't fail the webhook for graph database errors
+    } catch (err) {
+      console.error('❌ Graph database update failed:', err)
     }
 
     console.log('✅ Email processed successfully')
-    return NextResponse.json({ 
+    return NextResponse.json({
       status: 'processed',
       messageId: mail.messageId,
-      threatsTriggered: urls.length > 0 || containsSuspiciousKeywords(body)
+      threatsTriggered: urls.length > 0 || containsSuspiciousKeywords(messageBody),
     })
-
   } catch (error: any) {
     console.error('❌ WorkMail webhook error:', error)
     return NextResponse.json(
@@ -273,20 +274,7 @@ export async function POST(req: Request) {
   }
 }
 
-// Simple suspicious keyword detection
-function containsSuspiciousKeywords(body: string): boolean {
-  const suspiciousKeywords = [
-    'urgent', 'immediate action', 'verify account', 'suspended',
-    'click here', 'update payment', 'confirm identity', 'tax refund',
-    'prize', 'winner', 'congratulations', 'limited time',
-  ]
-  
-  const lowerBody = body.toLowerCase()
-  return suspiciousKeywords.some(keyword => lowerBody.includes(keyword))
-}
-
 // GET endpoint for webhook verification (if needed)
 export async function GET(req: Request) {
-  // Handle subscription confirmation if using SNS
   return NextResponse.json({ status: 'webhook_ready' })
 }
