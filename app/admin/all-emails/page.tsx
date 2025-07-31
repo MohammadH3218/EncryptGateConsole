@@ -1,7 +1,7 @@
 // app/admin/all-emails/page.tsx
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
 import { Button } from "@/components/ui/button"
@@ -10,7 +10,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useRouter, useSearchParams } from "next/navigation"
 import { 
   Mail, 
@@ -20,13 +19,9 @@ import {
   Filter, 
   RefreshCw, 
   Eye,
-  Bot,
-  ChevronLeft,
   ChevronRight,
-  Database,
   Activity
 } from "lucide-react"
-import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot"
 
 interface Email {
   id: string
@@ -60,9 +55,8 @@ export default function AdminAllEmailsPage() {
   const [emails, setEmails] = useState<Email[]>([])
   const [filteredEmails, setFilteredEmails] = useState<Email[]>([])
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
-  const [showCopilot, setShowCopilot] = useState(false)
   
   // Filters
   const [directionFilter, setDirectionFilter] = useState<string>("all")
@@ -72,8 +66,7 @@ export default function AdminAllEmailsPage() {
   // Pagination
   const [lastKey, setLastKey] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
-  const [currentPage, setCurrentPage] = useState(1)
-  const itemsPerPage = 50
+  const itemsPerPage = 25
 
   const employeeFilter = searchParams.get("employee")
 
@@ -88,7 +81,11 @@ export default function AdminAllEmailsPage() {
   }, [searchQuery, emails, directionFilter, threatFilter, statusFilter, employeeFilter])
 
   const loadEmails = async (reset = false) => {
-    setLoading(true)
+    if (reset) {
+      setLoading(true)
+    } else {
+      setLoadingMore(true)
+    }
     setError(null)
     
     try {
@@ -112,7 +109,6 @@ export default function AdminAllEmailsPage() {
       
       if (reset) {
         setEmails(data.emails)
-        setCurrentPage(1)
       } else {
         setEmails(prev => [...prev, ...data.emails])
       }
@@ -124,8 +120,15 @@ export default function AdminAllEmailsPage() {
       setError(err instanceof Error ? err.message : 'Failed to load emails')
     } finally {
       setLoading(false)
+      setLoadingMore(false)
     }
   }
+
+  const loadMoreEmails = useCallback(() => {
+    if (hasMore && !loading && !loadingMore) {
+      loadEmails(false)
+    }
+  }, [hasMore, loading, loadingMore])
 
   const applyFilters = () => {
     let filtered = emails
@@ -203,11 +206,6 @@ export default function AdminAllEmailsPage() {
     }
   }
 
-  const handleEmailClick = (email: Email) => {
-    setSelectedEmail(email)
-    setShowCopilot(true)
-  }
-
   const handleInvestigate = (email: Email) => {
     // Create a detection for investigation if it doesn't exist
     router.push(`/admin/investigate/${email.id}`)
@@ -217,33 +215,18 @@ export default function AdminAllEmailsPage() {
     loadEmails(true)
   }
 
-  const loadMoreEmails = () => {
-    if (hasMore && !loading) {
-      loadEmails(false)
-    }
-  }
-
-  // Generate test email (for testing purposes)
-  const generateTestEmail = async () => {
-    try {
-      setLoading(true)
-      console.log('🧪 Generating test email...')
-      
-      const response = await fetch('/api/email-processor', {
-        method: 'GET', // This triggers the mock email in the processor
-      })
-      
-      if (response.ok) {
-        console.log('✅ Test email generated')
-        // Reload emails to see the new one
-        setTimeout(() => loadEmails(true), 1000)
+  // Infinite scroll handler
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.innerHeight + document.documentElement.scrollTop 
+          >= document.documentElement.offsetHeight - 1000) {
+        loadMoreEmails()
       }
-    } catch (error) {
-      console.error('❌ Error generating test email:', error)
-    } finally {
-      setLoading(false)
     }
-  }
+
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [loadMoreEmails])
 
   if (error) {
     return (
@@ -268,312 +251,275 @@ export default function AdminAllEmailsPage() {
 
   return (
     <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={2}>
-      <div className="flex h-[calc(100vh-4rem)]">
-        {/* Main Content */}
-        <div className={`flex-1 ${showCopilot ? 'mr-80' : ''} transition-all duration-300`}>
-          <FadeInSection>
-            <div className="space-y-6">
-              {/* Header */}
-              <div className="flex justify-between items-center">
-                <div>
-                  <h2 className="text-2xl font-bold flex items-center gap-2">
-                    <Mail className="h-6 w-6" />
-                    All Emails
-                    {employeeFilter && (
-                      <Badge variant="outline">
-                        Filter: {employeeFilter}
-                      </Badge>
-                    )}
-                  </h2>
-                  <p className="text-muted-foreground mt-1">
-                    Monitor and analyze all email traffic • {filteredEmails.length} emails shown
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowCopilot(!showCopilot)}
-                    className={showCopilot ? 'bg-primary/10' : ''}
-                  >
-                    <Bot className="h-4 w-4 mr-2" />
-                    Copilot
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={generateTestEmail}
-                    disabled={loading}
-                  >
-                    <Database className="h-4 w-4 mr-2" />
-                    Test Email
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={refreshEmails}
-                    disabled={loading}
-                  >
-                    <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </Button>
-                </div>
-              </div>
-
-              {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-muted-foreground">Total Emails</p>
-                        <p className="text-2xl font-bold">{emails.length}</p>
-                      </div>
-                      <Mail className="h-8 w-8 text-muted-foreground" />
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-muted-foreground">Threats Detected</p>
-                        <p className="text-2xl font-bold text-red-600">
-                          {emails.filter(e => e.threatLevel !== 'none').length}
-                        </p>
-                      </div>
-                      <AlertTriangle className="h-8 w-8 text-red-600" />
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-muted-foreground">Phishing Attempts</p>
-                        <p className="text-2xl font-bold text-orange-600">
-                          {emails.filter(e => e.isPhishing).length}
-                        </p>
-                      </div>
-                      <Shield className="h-8 w-8 text-orange-600" />
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="pt-6">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-muted-foreground">Clean Emails</p>
-                        <p className="text-2xl font-bold text-green-600">
-                          {emails.filter(e => e.threatLevel === 'none').length}
-                        </p>
-                      </div>
-                      <Activity className="h-8 w-8 text-green-600" />
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Filters */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Filter className="h-5 w-5" />
-                    Filters & Search
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Search</label>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                        <Input
-                          placeholder="Search emails..."
-                          value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
-                          className="pl-10"
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Direction</label>
-                      <Select value={directionFilter} onValueChange={setDirectionFilter}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Directions</SelectItem>
-                          <SelectItem value="inbound">Inbound</SelectItem>
-                          <SelectItem value="outbound">Outbound</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Threat Level</label>
-                      <Select value={threatFilter} onValueChange={setThreatFilter}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Levels</SelectItem>
-                          <SelectItem value="threats">Any Threats</SelectItem>
-                          <SelectItem value="critical">Critical</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="low">Low</SelectItem>
-                          <SelectItem value="none">Clean</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Status</label>
-                      <Select value={statusFilter} onValueChange={setStatusFilter}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Status</SelectItem>
-                          <SelectItem value="received">Received</SelectItem>
-                          <SelectItem value="analyzed">Analyzed</SelectItem>
-                          <SelectItem value="quarantined">Quarantined</SelectItem>
-                          <SelectItem value="blocked">Blocked</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Emails Table */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>Email List</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {loading && emails.length === 0 ? (
-                    <div className="flex items-center justify-center py-8">
-                      <RefreshCw className="h-6 w-6 animate-spin mr-2" />
-                      Loading emails...
-                    </div>
-                  ) : filteredEmails.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      No emails found matching your criteria.
-                    </div>
-                  ) : (
-                    <>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Subject</TableHead>
-                            <TableHead>Sender</TableHead>
-                            <TableHead>Recipients</TableHead>
-                            <TableHead>Timestamp</TableHead>
-                            <TableHead>Direction</TableHead>
-                            <TableHead>Threat Level</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredEmails.map((email) => (
-                            <TableRow key={email.id} className="hover:bg-muted/50">
-                              <TableCell className="font-medium max-w-xs">
-                                <div className="truncate" title={email.subject}>
-                                  {email.subject}
-                                </div>
-                                {email.urls && email.urls.length > 0 && (
-                                  <div className="text-xs text-muted-foreground">
-                                    {email.urls.length} URL(s)
-                                  </div>
-                                )}
-                              </TableCell>
-                              <TableCell>{email.sender}</TableCell>
-                              <TableCell>
-                                <div className="max-w-xs">
-                                  {email.recipients.slice(0, 2).join(', ')}
-                                  {email.recipients.length > 2 && (
-                                    <span className="text-muted-foreground">
-                                      {' '}+{email.recipients.length - 2} more
-                                    </span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                {new Date(email.timestamp).toLocaleString()}
-                              </TableCell>
-                              <TableCell>
-                                <Badge variant={email.direction === 'inbound' ? 'secondary' : 'outline'}>
-                                  {email.direction}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                {getThreatBadge(email.threatLevel, email.isPhishing)}
-                              </TableCell>
-                              <TableCell>
-                                {getStatusBadge(email.status)}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex gap-1">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => handleEmailClick(email)}
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                  {(email.threatLevel !== 'none' || email.isPhishing) && (
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleInvestigate(email)}
-                                    >
-                                      <AlertTriangle className="h-4 w-4" />
-                                    </Button>
-                                  )}
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-
-                      {/* Load More Button */}
-                      {hasMore && (
-                        <div className="flex justify-center mt-4">
-                          <Button
-                            variant="outline"
-                            onClick={loadMoreEmails}
-                            disabled={loading}
-                          >
-                            {loading ? (
-                              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4 mr-2" />
-                            )}
-                            Load More Emails
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+      <FadeInSection>
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2">
+                <Mail className="h-6 w-6" />
+                All Emails
+                {employeeFilter && (
+                  <Badge variant="outline">
+                    Filter: {employeeFilter}
+                  </Badge>
+                )}
+              </h2>
+              <p className="text-muted-foreground mt-1">
+                Monitor and analyze all email traffic • {filteredEmails.length} emails shown
+              </p>
             </div>
-          </FadeInSection>
-        </div>
-
-        {/* Security Copilot Sidebar */}
-        {showCopilot && (
-          <div className="fixed right-0 top-16 h-[calc(100vh-4rem)] w-80 border-l bg-background z-10">
-            <SecurityCopilotEnhanced
-              emailData={selectedEmail}
-              messageId={selectedEmail?.messageId}
-              className="h-full"
-            />
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshEmails}
+                disabled={loading}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Total Emails</p>
+                    <p className="text-2xl font-bold">{emails.length}</p>
+                  </div>
+                  <Mail className="h-8 w-8 text-muted-foreground" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Threats Detected</p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {emails.filter(e => e.threatLevel !== 'none').length}
+                    </p>
+                  </div>
+                  <AlertTriangle className="h-8 w-8 text-red-600" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Phishing Attempts</p>
+                    <p className="text-2xl font-bold text-orange-600">
+                      {emails.filter(e => e.isPhishing).length}
+                    </p>
+                  </div>
+                  <Shield className="h-8 w-8 text-orange-600" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-muted-foreground">Clean Emails</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {emails.filter(e => e.threatLevel === 'none').length}
+                    </p>
+                  </div>
+                  <Activity className="h-8 w-8 text-green-600" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Filters */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Filter className="h-5 w-5" />
+                Filters & Search
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Search</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search emails..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Direction</label>
+                  <Select value={directionFilter} onValueChange={setDirectionFilter}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Directions</SelectItem>
+                      <SelectItem value="inbound">Inbound</SelectItem>
+                      <SelectItem value="outbound">Outbound</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Threat Level</label>
+                  <Select value={threatFilter} onValueChange={setThreatFilter}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Levels</SelectItem>
+                      <SelectItem value="threats">Any Threats</SelectItem>
+                      <SelectItem value="critical">Critical</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="medium">Medium</SelectItem>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="none">Clean</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Status</label>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="received">Received</SelectItem>
+                      <SelectItem value="analyzed">Analyzed</SelectItem>
+                      <SelectItem value="quarantined">Quarantined</SelectItem>
+                      <SelectItem value="blocked">Blocked</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Emails Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Email List</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {loading && emails.length === 0 ? (
+                <div className="flex items-center justify-center py-8">
+                  <RefreshCw className="h-6 w-6 animate-spin mr-2" />
+                  Loading emails...
+                </div>
+              ) : filteredEmails.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  No emails found matching your criteria.
+                </div>
+              ) : (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Subject</TableHead>
+                        <TableHead>Sender</TableHead>
+                        <TableHead>Recipients</TableHead>
+                        <TableHead>Timestamp</TableHead>
+                        <TableHead>Direction</TableHead>
+                        <TableHead>Threat Level</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredEmails.map((email) => (
+                        <TableRow key={email.id} className="hover:bg-muted/50">
+                          <TableCell className="font-medium max-w-xs">
+                            <div className="truncate" title={email.subject}>
+                              {email.subject}
+                            </div>
+                            {email.urls && email.urls.length > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                {email.urls.length} URL(s)
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>{email.sender}</TableCell>
+                          <TableCell>
+                            <div className="max-w-xs">
+                              {email.recipients.slice(0, 2).join(', ')}
+                              {email.recipients.length > 2 && (
+                                <span className="text-muted-foreground">
+                                  {' '}+{email.recipients.length - 2} more
+                                </span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {new Date(email.timestamp).toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={email.direction === 'inbound' ? 'secondary' : 'outline'}>
+                              {email.direction}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {getThreatBadge(email.threatLevel, email.isPhishing)}
+                          </TableCell>
+                          <TableCell>
+                            {getStatusBadge(email.status)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-1">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => router.push(`/admin/investigate/${email.id}`)}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              {(email.threatLevel !== 'none' || email.isPhishing) && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleInvestigate(email)}
+                                >
+                                  <AlertTriangle className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+
+                  {/* Loading More Indicator */}
+                  {loadingMore && (
+                    <div className="flex justify-center mt-4 py-4">
+                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      Loading more emails...
+                    </div>
+                  )}
+
+                  {/* End of results indicator */}
+                  {!hasMore && emails.length > 0 && (
+                    <div className="text-center mt-4 py-4 text-muted-foreground">
+                      All emails loaded
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </FadeInSection>
     </AppLayout>
   )
 }

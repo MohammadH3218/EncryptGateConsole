@@ -18,10 +18,6 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
-  Eye,
-  EyeOff,
-  Maximize2,
-  Minimize2,
   Clock,
   User,
   Mail,
@@ -29,7 +25,9 @@ import {
   Link,
   FileText,
   Save,
-  Share
+  Share,
+  Minimize2,
+  Maximize2
 } from "lucide-react"
 
 interface EmailDetails {
@@ -72,7 +70,7 @@ export default function InvestigationPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notes, setNotes] = useState("")
-  const [showCopilot, setShowCopilot] = useState(true)
+  const [showCopilot, setShowCopilot] = useState(false)
   const [copilotMinimized, setCopilotMinimized] = useState(false)
   const [investigationStatus, setInvestigationStatus] = useState("in_progress")
 
@@ -168,13 +166,13 @@ export default function InvestigationPage() {
   }
 
   const toggleCopilot = () => {
-    if (showCopilot && !copilotMinimized) {
-      setCopilotMinimized(true)
-    } else if (showCopilot && copilotMinimized) {
-      setShowCopilot(false)
-      setCopilotMinimized(false)
-    } else {
+    if (!showCopilot) {
       setShowCopilot(true)
+      setCopilotMinimized(false)
+    } else if (!copilotMinimized) {
+      setCopilotMinimized(true)
+    } else {
+      setShowCopilot(false)
       setCopilotMinimized(false)
     }
   }
@@ -216,11 +214,9 @@ export default function InvestigationPage() {
 
   return (
     <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={2}>
-      <div className="flex h-[calc(100vh-4rem)]">
-        {/* Main Content */}
-        <div className={`flex-1 transition-all duration-300 ${
-          showCopilot ? (copilotMinimized ? 'mr-16' : 'mr-80') : ''
-        }`}>
+      <div className="relative min-h-screen">
+        {/* Main Content - Full Width */}
+        <div className="w-full">
           <FadeInSection>
             <div className="space-y-6">
               {/* Header */}
@@ -250,7 +246,7 @@ export default function InvestigationPage() {
                     className={showCopilot && !copilotMinimized ? 'bg-primary/10' : ''}
                   >
                     <Bot className="h-4 w-4 mr-2" />
-                    {showCopilot ? (copilotMinimized ? 'Expand' : 'Minimize') : 'Security Copilot'}
+                    {!showCopilot ? 'Security Copilot' : copilotMinimized ? 'Expand Copilot' : 'Minimize Copilot'}
                   </Button>
                 </div>
               </div>
@@ -503,34 +499,30 @@ export default function InvestigationPage() {
           </FadeInSection>
         </div>
 
-        {/* Security Copilot Sidebar */}
+        {/* Security Copilot - Bottom Corner Overlay */}
         {showCopilot && (
-          <div className={`fixed right-0 top-16 h-[calc(100vh-4rem)] border-l bg-background z-10 transition-all duration-300 ${
-            copilotMinimized ? 'w-16' : 'w-80'
+          <div className={`fixed bottom-4 right-4 z-50 bg-background border rounded-lg shadow-xl transition-all duration-300 ${
+            copilotMinimized ? 'w-16 h-16' : 'w-96 h-[500px]'
           }`}>
             {copilotMinimized ? (
-              <div className="flex flex-col items-center p-2 space-y-2">
+              <div className="flex items-center justify-center h-full">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => setCopilotMinimized(false)}
-                  title="Expand Copilot"
+                  title="Expand Security Copilot"
+                  className="w-full h-full"
                 >
-                  <Maximize2 className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => setShowCopilot(false)}
-                  title="Close Copilot"
-                >
-                  <XCircle className="h-4 w-4" />
+                  <Bot className="h-6 w-6 text-primary" />
                 </Button>
               </div>
             ) : (
               <div className="h-full flex flex-col">
                 <div className="flex items-center justify-between p-3 border-b">
-                  <h3 className="font-medium">Security Copilot</h3>
+                  <h3 className="font-medium flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-primary" />
+                    Security Copilot
+                  </h3>
                   <div className="flex gap-1">
                     <Button
                       variant="ghost"
