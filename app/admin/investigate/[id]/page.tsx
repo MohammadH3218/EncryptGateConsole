@@ -1,839 +1,568 @@
+// app/admin/investigate/[id]/page.tsx
 "use client"
 
-// Replace the entire component with this implementation that keeps the original UI
-// but replaces the Team Activity sidebar with the Security Copilot
-
+import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { useState, useEffect, useRef } from "react"
+import { AppLayout } from "@/components/app-layout"
+import { FadeInSection } from "@/components/fade-in-section"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { FadeInSection } from "@/components/fade-in-section"
-import {
-  AlertTriangle,
-  FileText,
-  LinkIcon,
-  Shield,
-  Mail,
-  Check,
-  X,
-  ArrowRight,
-  ExternalLink,
-  Bot,
-  Send,
-} from "lucide-react"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { useToast } from "@/components/ui/use-toast"
-import {
-  getInvestigation,
-  saveInvestigationState,
-  removeInvestigation,
-  type InvestigationState,
-} from "@/lib/investigation-service"
-import { AppSidebar } from "@/components/sidebar/app-sidebar"
+import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot"
+import { 
+  ArrowLeft,
+  Bot,
+  Shield,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Eye,
+  EyeOff,
+  Maximize2,
+  Minimize2,
+  Clock,
+  User,
+  Mail,
+  Calendar,
+  Link,
+  FileText,
+  Save,
+  Share
+} from "lucide-react"
 
-// Mock data structure
-const mockEmailData = {
-  basic: {
-    sender: "suspicious.sender@malicious-domain.com",
-    recipient: "employee@company.com",
-    subject: "Urgent: Account Security Update Required",
-    timeReceived: "2024-01-31T15:42:00Z",
-    body: "Your account security needs immediate attention. Click here to verify...",
-  },
-  metadata: {
-    senderIP: "192.168.1.1",
-    location: "Unknown Location (Suspicious)",
-    mailServer: "mail.suspicious-server.com",
-    messageId: "<abc123@malicious-domain.com>",
-    headers: {
-      received: "from mail.suspicious-server.com",
-      contentType: "multipart/mixed",
-      xMailer: "Suspicious Mailer 1.0",
-    },
-  },
-  threat: {
-    riskScore: 85,
-    category: "Phishing",
-    authentication: {
-      spf: "Fail",
-      dkim: "Fail",
-      dmarc: "Fail",
-    },
-  },
-  content: {
-    links: [
-      { url: "http://malicious-site.com/login", status: "Flagged" },
-      { url: "http://legitimate-looking.com", status: "Unknown" },
-    ],
-    attachments: [
-      {
-        name: "invoice.pdf",
-        size: "250KB",
-        type: "application/pdf",
-        scanResult: "Suspicious",
-      },
-    ],
-    keywords: ["urgent", "security", "immediate", "verify"],
-  },
-  reputation: {
-    emailScore: 15,
-    domainScore: 20,
-    previousIncidents: 5,
-    knownCampaigns: ["PhishingCampaign2024", "MalwareSpread2023"],
-  },
-  security: {
-    tlsEncryption: false,
-    digitalSignature: "Not signed",
-    antivirusScan: "Failed",
-  },
-  actions: {
-    history: [
-      { action: "Flagged", timestamp: "2024-01-31T15:43:00Z", user: "System" },
-      { action: "Quarantined", timestamp: "2024-01-31T15:43:01Z", user: "System" },
-    ],
-    notes: [],
-  },
-  patterns: {
-    frequency: "High",
-    similarIncidents: 12,
-    volumeTrend: "Increasing",
-  },
-  compliance: {
-    gdprStatus: "Reviewed",
-    ccpaStatus: "Pending",
-    auditLog: [
-      { action: "Created", timestamp: "2024-01-31T15:42:00Z", user: "System" },
-      { action: "Updated", timestamp: "2024-01-31T15:43:00Z", user: "System" },
-    ],
-  },
-  emailChain: [
-    {
-      timestamp: "2024-01-31T15:42:00Z",
-      direction: "Inbound",
-      content: "Initial suspicious email",
-    },
-  ],
+interface EmailDetails {
+  messageId: string
+  subject: string
+  sender: string
+  recipients: string[]
+  timestamp: string
+  body: string
+  bodyHtml?: string
+  status: string
+  threatLevel: string
+  isPhishing: boolean
+  attachments: string[]
+  headers: Record<string, string>
+  direction: string
+  size: number
+  urls?: string[]
 }
 
-export default function AdminInvestigatePage() {
+interface DetectionDetails {
+  id: string
+  name: string
+  severity: string
+  status: string
+  description: string
+  indicators: string[]
+  recommendations: string[]
+  threatScore: number
+  confidence: number
+}
+
+export default function InvestigationPage() {
   const params = useParams()
   const router = useRouter()
-  const [emailData, setEmailData] = useState(mockEmailData)
-  const [activeTab, setActiveTab] = useState("overview")
-  const [isPushDialogOpen, setIsPushDialogOpen] = useState(false)
-  const [isAllowDialogOpen, setIsAllowDialogOpen] = useState(false)
-  const [isBlockDialogOpen, setIsBlockDialogOpen] = useState(false)
-  const [isSandboxDialogOpen, setIsSandboxDialogOpen] = useState(false)
-  const [isLinkAnalysisOpen, setIsLinkAnalysisOpen] = useState(false)
-  const [selectedAttachment, setSelectedAttachment] = useState<string>("")
-  const [selectedLink, setSelectedLink] = useState<string>("")
-  const [actionReason, setActionReason] = useState("")
-  const [linkAnalysis, setLinkAnalysis] = useState("")
-  const [investigationNotes, setInvestigationNotes] = useState("")
-  const [investigationProgress, setInvestigationProgress] = useState(0)
-  const { toast } = useToast()
+  const emailId = params.id as string
+  
+  const [emailDetails, setEmailDetails] = useState<EmailDetails | null>(null)
+  const [detectionDetails, setDetectionDetails] = useState<DetectionDetails | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [notes, setNotes] = useState("")
+  const [showCopilot, setShowCopilot] = useState(true)
+  const [copilotMinimized, setCopilotMinimized] = useState(false)
+  const [investigationStatus, setInvestigationStatus] = useState("in_progress")
 
-  // Security Copilot integration
-  const [isCopilotOpen, setIsCopilotOpen] = useState(true)
-  const [copilotDetectionData, setCopilotDetectionData] = useState<any>(null)
-  const [copilotEmailData, setCopilotEmailData] = useState<any>(null)
-
-  // Track which tabs have been visited to avoid duplicate progress updates
-  const visitedTabsRef = useRef<Set<string>>(new Set(["overview"]))
-
-  // Load investigation state
   useEffect(() => {
-    // Load investigation state if it exists
-    if (params.id) {
-      const investigation = getInvestigation(params.id as string)
-      if (investigation) {
-        // Restore investigation state
-        setInvestigationNotes(investigation.notes || "")
-        setInvestigationProgress(investigation.progress)
+    loadInvestigationData()
+  }, [emailId])
 
-        // Mark tabs as visited if progress is already high
-        if (investigation.progress > 50) {
-          visitedTabsRef.current = new Set(["overview", "technical", "threat", "content", "reputation"])
-        }
-      } else {
-        // Create a new investigation state
-        const newInvestigation: InvestigationState = {
-          id: params.id as string,
-          emailId: "email-123", // In a real app, this would be the actual email ID
-          emailSubject: emailData.basic.subject,
-          sender: emailData.basic.sender,
-          timestamp: emailData.basic.timeReceived,
-          lastUpdated: new Date().toISOString(),
-          notes: "",
-          progress: 0,
-        }
-        saveInvestigationState(newInvestigation)
+  const loadInvestigationData = async () => {
+    setLoading(true)
+    setError(null)
+    
+    try {
+      // Load email details - for now using mock data since the API might not have real data
+      const mockEmailDetails: EmailDetails = {
+        messageId: emailId,
+        subject: "Urgent: Account Security Update Required",
+        sender: "suspicious.sender@malicious-domain.com",
+        recipients: ["employee@company.com"],
+        timestamp: new Date().toISOString(),
+        body: "Your account security needs immediate attention. Click here to verify your credentials and prevent account suspension.",
+        bodyHtml: "<p>Your account security needs <strong>immediate attention</strong>. <a href='http://phishing.com/verify'>Click here</a> to verify your credentials and prevent account suspension.</p>",
+        status: "analyzed",
+        threatLevel: "high",
+        isPhishing: true,
+        attachments: [],
+        headers: {
+          "X-Originating-IP": "192.168.1.100",
+          "Return-Path": "suspicious.sender@malicious-domain.com",
+          "Message-ID": emailId
+        },
+        direction: "inbound",
+        size: 1024,
+        urls: ["http://phishing.com/verify", "http://malicious-domain.com/login"]
       }
 
-      // Set detection data for the Security Copilot
-      setCopilotDetectionData({
-        id: params.id,
-        severity: "Critical",
-        name: emailData.basic.subject,
-        sender: emailData.basic.sender,
-      })
-
-      // Set email data for the Security Copilot
-      setCopilotEmailData(emailData)
-    }
-  }, [params.id, emailData])
-
-  // Auto-save investigation state when progress changes
-  useEffect(() => {
-    const saveTimeout = setTimeout(() => {
-      if (params.id) {
-        const investigation = getInvestigation(params.id as string)
-        if (investigation) {
-          saveInvestigationState({
-            ...investigation,
-            notes: investigationNotes,
-            progress: investigationProgress,
-          })
-        }
+      const mockDetectionDetails: DetectionDetails = {
+        id: "det-001",
+        name: "Phishing Attempt Detected",
+        severity: "critical",
+        status: "new",
+        description: "This email exhibits multiple characteristics of a phishing attack, including urgent language, suspicious URLs, and credential harvesting attempts.",
+        indicators: [
+          "Suspicious sender domain",
+          "Urgent/threatening language",
+          "URL leads to credential harvesting site",
+          "Spoofing legitimate organization",
+          "Requests sensitive information"
+        ],
+        recommendations: [
+          "Block sender domain immediately",
+          "Notify affected users",
+          "Check for similar emails in organization",
+          "Update security awareness training",
+          "Report to security team"
+        ],
+        threatScore: 95,
+        confidence: 88
       }
-    }, 500) // Debounce saving to avoid excessive writes
 
-    return () => clearTimeout(saveTimeout)
-  }, [investigationNotes, investigationProgress, params.id])
-
-  const handleSignOut = () => {
-    localStorage.removeItem("access_token")
-    localStorage.removeItem("user_email")
-    router.push("/login")
-  }
-
-  const handleAllowSender = () => {
-    if (!actionReason.trim()) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Please provide a reason for allowing this sender.",
-      })
-      return
-    }
-
-    toast({
-      title: "Sender Allowed",
-      description: `${emailData.basic.sender} has been added to the allow list.`,
-    })
-
-    // Remove the investigation since it's complete
-    if (params.id) {
-      removeInvestigation(params.id as string)
-    }
-
-    setIsAllowDialogOpen(false)
-    setActionReason("")
-    router.push("/admin/allow-block-list")
-  }
-
-  const handleBlockSender = () => {
-    if (!actionReason.trim()) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Please provide a reason for blocking this sender.",
-      })
-      return
-    }
-
-    toast({
-      title: "Sender Blocked",
-      description: `${emailData.basic.sender} has been added to the block list.`,
-    })
-
-    // Remove the investigation since it's complete
-    if (params.id) {
-      removeInvestigation(params.id as string)
-    }
-
-    setIsBlockDialogOpen(false)
-    setActionReason("")
-    router.push("/admin/allow-block-list")
-  }
-
-  const handlePushConfirm = () => {
-    if (params.id) {
-      // Remove the investigation since it's being pushed
-      removeInvestigation(params.id as string)
-
-      toast({
-        title: "Investigation Pushed",
-        description: "The investigation has been moved to Pushed Requests.",
-      })
-      router.push("/admin/pushed-requests")
+      setEmailDetails(mockEmailDetails)
+      setDetectionDetails(mockDetectionDetails)
+    } catch (err) {
+      console.error('Failed to load investigation data:', err)
+      setError('Failed to load investigation details')
+    } finally {
+      setLoading(false)
     }
   }
 
-  const handleSandboxOpen = (attachmentName: string) => {
-    setSelectedAttachment(attachmentName)
-    setIsSandboxDialogOpen(true)
-
-    // Update progress when analyzing attachments
-    setInvestigationProgress((prev) => Math.min(prev + 15, 100))
-  }
-
-  const handleSandboxConfirm = () => {
-    toast({
-      title: "Opening in Sandbox",
-      description: `Opening ${selectedAttachment} in a secure sandbox environment.`,
-    })
-    setIsSandboxDialogOpen(false)
-  }
-
-  const handleLinkAnalysis = async (url: string) => {
-    setSelectedLink(url)
-    setLinkAnalysis("Analyzing link content...")
-    setIsLinkAnalysisOpen(true)
-
-    // Update progress when analyzing links
-    setInvestigationProgress((prev) => Math.min(prev + 10, 100))
-
-    // Simulate AI analysis
-    setTimeout(() => {
-      setLinkAnalysis(
-        `Analysis of ${url}:
-
-` +
-          "This link appears to be a phishing attempt. It leads to a page that mimics a legitimate login form. " +
-          "The domain was registered recently and has been associated with multiple phishing campaigns. " +
-          "Recommendation: Do not click this link and block the sender.",
-      )
-    }, 1500)
-  }
-
-  const getAuthenticationBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "pass":
-        return <Badge className="bg-green-500">{status}</Badge>
-      case "fail":
-        return <Badge variant="destructive">{status}</Badge>
+  const getRiskLevel = (threatLevel: string) => {
+    switch (threatLevel) {
+      case 'critical':
+        return { label: 'Critical Risk', color: 'bg-red-600', icon: AlertTriangle }
+      case 'high':
+        return { label: 'High Risk', color: 'bg-orange-500', icon: AlertTriangle }
+      case 'medium':
+        return { label: 'Medium Risk', color: 'bg-yellow-500', icon: AlertTriangle }
+      case 'low':
+        return { label: 'Low Risk', color: 'bg-blue-500', icon: Shield }
       default:
-        return <Badge variant="secondary">{status}</Badge>
+        return { label: 'No Risk', color: 'bg-green-500', icon: CheckCircle }
     }
   }
 
-  const getLinkStatusBadge = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "safe":
-        return <Badge className="bg-green-500">{status}</Badge>
-      case "flagged":
-        return <Badge variant="destructive">{status}</Badge>
-      default:
-        return <Badge variant="secondary">{status}</Badge>
+  const handleStatusUpdate = async (newStatus: string) => {
+    setInvestigationStatus(newStatus)
+    // TODO: API call to update status
+  }
+
+  const handleSaveNotes = async () => {
+    // TODO: API call to save investigation notes
+    console.log('Saving notes:', notes)
+  }
+
+  const toggleCopilot = () => {
+    if (showCopilot && !copilotMinimized) {
+      setCopilotMinimized(true)
+    } else if (showCopilot && copilotMinimized) {
+      setShowCopilot(false)
+      setCopilotMinimized(false)
+    } else {
+      setShowCopilot(true)
+      setCopilotMinimized(false)
     }
   }
 
-  // Update progress when changing tabs - fixed to avoid infinite loops
-  const handleTabChange = (value: string) => {
-    // First, update the active tab
-    setActiveTab(value)
-
-    // Then, check if this is the first time visiting this tab
-    if (!visitedTabsRef.current.has(value)) {
-      // Mark this tab as visited
-      visitedTabsRef.current.add(value)
-
-      // Only update progress if this is a new tab and progress is below threshold
-      if (value !== "overview" && investigationProgress < 75) {
-        // Calculate new progress value
-        const progressIncrement = 15
-        const newProgress = Math.min(investigationProgress + progressIncrement, 75)
-
-        // Update progress with the calculated value
-        setInvestigationProgress(newProgress)
-      }
-    }
-  }
-
-  // Custom layout for investigation page with Security Copilot in place of Team Activity
-  return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      {/* Left sidebar - UPDATED to match the design */}
-      <AppSidebar isCollapsed={false} onToggle={() => {}} username="John Doe" onSignOut={handleSignOut} />
-
-      {/* Main content */}
-      <div className="flex-1 overflow-auto">
-        <div className="p-6">
-          <FadeInSection>
-            <div className="max-w-7xl mx-auto space-y-4">
-              <Card>
-                <CardHeader>
-                  <div className="flex justify-between items-start">
-                    <div className="space-y-2">
-                      <CardTitle className="text-2xl">Investigation Details</CardTitle>
-                      <Badge variant="destructive">High Risk</Badge>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" className="gap-2" onClick={() => setIsAllowDialogOpen(true)}>
-                        <Check className="h-4 w-4" />
-                        Allow Sender
-                      </Button>
-                      <Button variant="outline" className="gap-2" onClick={() => setIsBlockDialogOpen(true)}>
-                        <X className="h-4 w-4" />
-                        Block Sender
-                      </Button>
-                      <Button variant="default" className="gap-2" onClick={() => setIsPushDialogOpen(true)}>
-                        <ArrowRight className="h-4 w-4" />
-                        Push
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Progress indicator */}
-                  <div className="mt-4">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-sm font-medium">Investigation Progress</span>
-                      <span className="text-sm font-medium">{investigationProgress}%</span>
-                    </div>
-                    <Progress value={investigationProgress} className="h-2" />
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Tabs defaultValue="overview" value={activeTab} onValueChange={handleTabChange} className="w-full">
-                    <TabsList className="grid grid-cols-5 gap-4 h-auto">
-                      <TabsTrigger value="overview" className="gap-2">
-                        <Mail className="h-4 w-4" />
-                        Overview
-                      </TabsTrigger>
-                      <TabsTrigger value="technical" className="gap-2">
-                        <FileText className="h-4 w-4" />
-                        Technical Details
-                      </TabsTrigger>
-                      <TabsTrigger value="threat" className="gap-2">
-                        <AlertTriangle className="h-4 w-4" />
-                        Threat Assessment
-                      </TabsTrigger>
-                      <TabsTrigger value="content" className="gap-2">
-                        <LinkIcon className="h-4 w-4" />
-                        Content Analysis
-                      </TabsTrigger>
-                      <TabsTrigger value="reputation" className="gap-2">
-                        <Shield className="h-4 w-4" />
-                        Reputation
-                      </TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="overview" className="mt-6">
-                      <div className="grid gap-4">
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Email Details</h3>
-                          <div className="grid gap-2">
-                            <div className="grid grid-cols-3 gap-4">
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">From</p>
-                                <p className="text-sm text-muted-foreground">{emailData.basic.sender}</p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">To</p>
-                                <p className="text-sm text-muted-foreground">{emailData.basic.recipient}</p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">Received</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {new Date(emailData.basic.timeReceived).toLocaleString()}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-sm font-medium">Subject</p>
-                              <p className="text-sm text-muted-foreground">{emailData.basic.subject}</p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Message Body</h3>
-                          <Card className="p-4">
-                            <pre className="whitespace-pre-wrap text-sm">{emailData.basic.body}</pre>
-                          </Card>
-                        </div>
-
-                        {/* Investigation Notes */}
-                        <div className="grid gap-2 mt-4">
-                          <h3 className="text-lg font-semibold">Investigation Notes</h3>
-                          <Textarea
-                            placeholder="Add your investigation notes here..."
-                            value={investigationNotes}
-                            onChange={(e) => setInvestigationNotes(e.target.value)}
-                            className="min-h-[100px]"
-                          />
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="technical" className="mt-6">
-                      {/* Technical tab content unchanged */}
-                      <div className="grid gap-4">
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Metadata</h3>
-                          <Card className="p-4">
-                            <div className="grid grid-cols-2 gap-4">
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">Sender IP</p>
-                                <p className="text-sm text-muted-foreground">{emailData.metadata.senderIP}</p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">Location</p>
-                                <p className="text-sm text-muted-foreground">{emailData.metadata.location}</p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">Mail Server</p>
-                                <p className="text-sm text-muted-foreground">{emailData.metadata.mailServer}</p>
-                              </div>
-                              <div className="space-y-1">
-                                <p className="text-sm font-medium">Message ID</p>
-                                <p className="text-sm text-muted-foreground">{emailData.metadata.messageId}</p>
-                              </div>
-                            </div>
-                          </Card>
-                        </div>
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Headers</h3>
-                          <Card className="p-4">
-                            <pre className="text-sm whitespace-pre-wrap">
-                              {JSON.stringify(emailData.metadata.headers, null, 2)}
-                            </pre>
-                          </Card>
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="threat" className="mt-6">
-                      {/* Threat tab content unchanged */}
-                      <div className="grid gap-6">
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Risk Assessment</h3>
-                          <Card className="p-6">
-                            <div className="space-y-4">
-                              <div className="space-y-2">
-                                <div className="flex justify-between">
-                                  <p className="text-sm font-medium">Risk Score</p>
-                                  <p className="text-sm font-medium">{emailData.threat.riskScore}/100</p>
-                                </div>
-                                <Progress value={emailData.threat.riskScore} className="h-2" />
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">Category</p>
-                                <Badge variant="destructive">{emailData.threat.category}</Badge>
-                              </div>
-                            </div>
-                          </Card>
-                        </div>
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Authentication Results</h3>
-                          <Card className="p-6">
-                            <div className="grid grid-cols-3 gap-4">
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">SPF</p>
-                                {getAuthenticationBadge(emailData.threat.authentication.spf)}
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">DKIM</p>
-                                {getAuthenticationBadge(emailData.threat.authentication.dkim)}
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">DMARC</p>
-                                {getAuthenticationBadge(emailData.threat.authentication.dmarc)}
-                              </div>
-                            </div>
-                          </Card>
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="content" className="mt-6">
-                      {/* Content tab content unchanged */}
-                      <div className="grid gap-6">
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Suspicious Links</h3>
-                          <Card className="p-4">
-                            <div className="space-y-4">
-                              {emailData.content.links.map((link, index) => (
-                                <div key={index} className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <LinkIcon className="h-4 w-4" />
-                                    <span className="text-sm">{link.url}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {getLinkStatusBadge(link.status)}
-                                    <Button variant="ghost" size="sm" onClick={() => handleLinkAnalysis(link.url)}>
-                                      <ExternalLink className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </Card>
-                        </div>
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Attachments</h3>
-                          <Card className="p-4">
-                            <div className="space-y-4">
-                              {emailData.content.attachments.map((attachment, index) => (
-                                <div key={index} className="flex items-center justify-between">
-                                  <div className="space-y-1">
-                                    <p className="text-sm font-medium">{attachment.name}</p>
-                                    <p className="text-sm text-muted-foreground">
-                                      {attachment.type} • {attachment.size}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="destructive">{attachment.scanResult}</Badge>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleSandboxOpen(attachment.name)}
-                                    >
-                                      <Shield className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </Card>
-                        </div>
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Detected Keywords</h3>
-                          <Card className="p-4">
-                            <div className="flex flex-wrap gap-2">
-                              {emailData.content.keywords.map((keyword, index) => (
-                                <Badge key={index} variant="secondary">
-                                  {keyword}
-                                </Badge>
-                              ))}
-                            </div>
-                          </Card>
-                        </div>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="reputation" className="mt-6">
-                      {/* Reputation tab content unchanged */}
-                      <div className="grid gap-6">
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Reputation Scores</h3>
-                          <Card className="p-6">
-                            <div className="grid grid-cols-2 gap-6">
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">Email Reputation</p>
-                                <Progress value={emailData.reputation.emailScore} className="h-2" />
-                                <p className="text-sm text-muted-foreground">{emailData.reputation.emailScore}/100</p>
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm font-medium">Domain Reputation</p>
-                                <Progress value={emailData.reputation.domainScore} className="h-2" />
-                                <p className="text-sm text-muted-foreground">{emailData.reputation.domainScore}/100</p>
-                              </div>
-                            </div>
-                          </Card>
-                        </div>
-                        <div className="grid gap-2">
-                          <h3 className="text-lg font-semibold">Known Campaigns</h3>
-                          <Card className="p-4">
-                            <div className="space-y-2">
-                              {emailData.reputation.knownCampaigns.map((campaign, index) => (
-                                <div key={index} className="flex items-center gap-2">
-                                  <AlertTriangle className="h-4 w-4 text-destructive" />
-                                  <span className="text-sm">{campaign}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </Card>
-                        </div>
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </CardContent>
-              </Card>
-            </div>
-          </FadeInSection>
+  if (loading) {
+    return (
+      <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={2}>
+        <div className="flex items-center justify-center h-96">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <span className="ml-2">Loading investigation...</span>
         </div>
-      </div>
+      </AppLayout>
+    )
+  }
 
-      {/* Security Copilot in place of Team Activity sidebar */}
-      <div className="w-[320px] border-l bg-background">
-        <div className="flex h-14 items-center justify-between border-b px-4">
-          <div className="flex items-center gap-2">
-            <Bot className="h-5 w-5" />
-            <h2 className="text-lg font-semibold">Security Copilot</h2>
-          </div>
-          <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
-            Active
-          </Badge>
-        </div>
-        <div className="h-[calc(100vh-3.5rem)] flex flex-col">
-          <div className="flex-1 overflow-auto p-4">
-            <div className="space-y-4">
-              <div className="bg-muted rounded-lg p-3">
-                <p className="text-sm">
-                  Hello! I'm your Security Copilot. I can help you investigate this detection by answering questions and
-                  providing insights. What would you like to know?
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">02:14 PM</p>
+  if (error || !emailDetails) {
+    return (
+      <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={2}>
+        <FadeInSection>
+          <Card className="border-destructive">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertTriangle className="h-5 w-5" />
+                <p>{error || 'Email not found'}</p>
               </div>
+              <Button onClick={() => router.back()} className="mt-4">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Go Back
+              </Button>
+            </CardContent>
+          </Card>
+        </FadeInSection>
+      </AppLayout>
+    )
+  }
 
-              <div className="mt-4">
-                <p className="text-xs text-muted-foreground mb-2">Suggested questions:</p>
-                <div className="flex flex-col gap-2">
-                  <Button variant="outline" size="sm" className="justify-start h-auto py-2 px-3">
-                    What makes this email suspicious?
+  const riskLevel = getRiskLevel(emailDetails.threatLevel)
+  const RiskIcon = riskLevel.icon
+
+  return (
+    <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={2}>
+      <div className="flex h-[calc(100vh-4rem)]">
+        {/* Main Content */}
+        <div className={`flex-1 transition-all duration-300 ${
+          showCopilot ? (copilotMinimized ? 'mr-16' : 'mr-80') : ''
+        }`}>
+          <FadeInSection>
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <Button variant="ghost" onClick={() => router.back()}>
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back to Detections
                   </Button>
-                  <Button variant="outline" size="sm" className="justify-start h-auto py-2 px-3">
-                    Analyze the sender's reputation
+                  <div>
+                    <h1 className="text-2xl font-bold">Investigation Details</h1>
+                    <Badge className={`${riskLevel.color} mt-2`}>
+                      <RiskIcon className="h-3 w-3 mr-1" />
+                      {riskLevel.label}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm">
+                    <Share className="h-4 w-4 mr-2" />
+                    Share
                   </Button>
-                  <Button variant="outline" size="sm" className="justify-start h-auto py-2 px-3">
-                    What actions should I take?
-                  </Button>
-                  <Button variant="outline" size="sm" className="justify-start h-auto py-2 px-3">
-                    Explain the risk level
-                  </Button>
-                  <Button variant="outline" size="sm" className="justify-start h-auto py-2 px-3">
-                    Show similar past incidents
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={toggleCopilot}
+                    className={showCopilot && !copilotMinimized ? 'bg-primary/10' : ''}
+                  >
+                    <Bot className="h-4 w-4 mr-2" />
+                    {showCopilot ? (copilotMinimized ? 'Expand' : 'Minimize') : 'Security Copilot'}
                   </Button>
                 </div>
               </div>
+
+              {/* Investigation Progress */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    Investigation Progress
+                    <div className="flex gap-2">
+                      <Button
+                        variant={investigationStatus === 'in_progress' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => handleStatusUpdate('in_progress')}
+                      >
+                        <Clock className="h-4 w-4 mr-2" />
+                        In Progress
+                      </Button>
+                      <Button
+                        variant={investigationStatus === 'resolved' ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => handleStatusUpdate('resolved')}
+                      >
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Resolved
+                      </Button>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="w-full bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="bg-primary h-2 rounded-full transition-all duration-300"
+                      style={{ width: investigationStatus === 'resolved' ? '100%' : '60%' }}
+                    />
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    {investigationStatus === 'resolved' ? 'Investigation completed' : 'Investigation in progress - 60% complete'}
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* Main Content Tabs */}
+              <Tabs defaultValue="overview" className="space-y-4">
+                <TabsList className="grid w-full grid-cols-5">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="technical">Technical Details</TabsTrigger>
+                  <TabsTrigger value="threat">Threat Assessment</TabsTrigger>
+                  <TabsTrigger value="content">Content Analysis</TabsTrigger>
+                  <TabsTrigger value="reputation">Reputation</TabsTrigger>
+                </TabsList>
+
+                {/* Overview Tab */}
+                <TabsContent value="overview" className="space-y-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Mail className="h-5 w-5" />
+                          Email Details
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">From</label>
+                          <p className="font-mono text-sm">{emailDetails.sender}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">To</label>
+                          <p className="font-mono text-sm">{emailDetails.recipients.join(', ')}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Subject</label>
+                          <p className="font-medium">{emailDetails.subject}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground">Received</label>
+                          <p className="text-sm">{new Date(emailDetails.timestamp).toLocaleString()}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Message Body</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="bg-muted p-4 rounded-lg">
+                          <p className="text-sm whitespace-pre-wrap">{emailDetails.body}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <FileText className="h-5 w-5" />
+                        Investigation Notes
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Textarea
+                        placeholder="Add your investigation notes here..."
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className="min-h-[100px]"
+                      />
+                      <Button onClick={handleSaveNotes} className="mt-2">
+                        <Save className="h-4 w-4 mr-2" />
+                        Save Notes
+                      </Button>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* Technical Details Tab */}
+                <TabsContent value="technical" className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Email Headers</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
+                        {Object.entries(emailDetails.headers).map(([key, value]) => (
+                          <div key={key}>
+                            <span className="text-blue-600">{key}:</span> {value}
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {emailDetails.urls && emailDetails.urls.length > 0 && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Link className="h-5 w-5" />
+                          URLs Found
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-2">
+                          {emailDetails.urls.map((url, index) => (
+                            <div key={index} className="p-3 bg-muted rounded-lg">
+                              <p className="font-mono text-sm text-red-600">{url}</p>
+                              <Badge variant="destructive" className="mt-1">Suspicious</Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+                </TabsContent>
+
+                {/* Threat Assessment Tab */}
+                <TabsContent value="threat" className="space-y-4">
+                  {detectionDetails && (
+                    <>
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Threat Indicators</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {detectionDetails.indicators.map((indicator, index) => (
+                              <div key={index} className="flex items-center gap-2">
+                                <AlertTriangle className="h-4 w-4 text-red-500" />
+                                <span className="text-sm">{indicator}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Recommended Actions</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {detectionDetails.recommendations.map((recommendation, index) => (
+                              <div key={index} className="flex items-center gap-2">
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                                <span className="text-sm">{recommendation}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </>
+                  )}
+                </TabsContent>
+
+                {/* Content Analysis Tab */}
+                <TabsContent value="content" className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Content Analysis</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium">Language Analysis</label>
+                          <p className="text-sm text-muted-foreground">Urgent and threatening language detected</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Sentiment</label>
+                          <Badge variant="destructive">Threatening</Badge>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Phishing Indicators</label>
+                          <div className="mt-2 space-y-1">
+                            <Badge variant="outline" className="mr-2">Account suspension threat</Badge>
+                            <Badge variant="outline" className="mr-2">Urgent action required</Badge>
+                            <Badge variant="outline" className="mr-2">Credential request</Badge>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                {/* Reputation Tab */}
+                <TabsContent value="reputation" className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Sender Reputation</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium">Domain Reputation</label>
+                          <Badge variant="destructive" className="ml-2">Malicious</Badge>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">IP Reputation</label>
+                          <Badge variant="destructive" className="ml-2">Known Bad Actor</Badge>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium">Historical Activity</label>
+                          <p className="text-sm text-muted-foreground">First time sender - no historical data</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </div>
-          </div>
-          <div className="p-3 border-t">
-            <form className="flex gap-2">
-              <Input placeholder="Ask a question..." className="flex-1" />
-              <Button type="submit" size="icon">
-                <Send className="h-4 w-4" />
-              </Button>
-            </form>
-          </div>
+          </FadeInSection>
         </div>
+
+        {/* Security Copilot Sidebar */}
+        {showCopilot && (
+          <div className={`fixed right-0 top-16 h-[calc(100vh-4rem)] border-l bg-background z-10 transition-all duration-300 ${
+            copilotMinimized ? 'w-16' : 'w-80'
+          }`}>
+            {copilotMinimized ? (
+              <div className="flex flex-col items-center p-2 space-y-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCopilotMinimized(false)}
+                  title="Expand Copilot"
+                >
+                  <Maximize2 className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => setShowCopilot(false)}
+                  title="Close Copilot"
+                >
+                  <XCircle className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="h-full flex flex-col">
+                <div className="flex items-center justify-between p-3 border-b">
+                  <h3 className="font-medium">Security Copilot</h3>
+                  <div className="flex gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCopilotMinimized(true)}
+                      title="Minimize"
+                    >
+                      <Minimize2 className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowCopilot(false)}
+                      title="Close"
+                    >
+                      <XCircle className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="flex-1">
+                  <SecurityCopilotEnhanced
+                    emailData={emailDetails}
+                    detectionData={detectionDetails}
+                    messageId={emailDetails.messageId}
+                    className="h-full border-0"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
-
-      {/* Dialogs */}
-      <AlertDialog open={isPushDialogOpen} onOpenChange={setIsPushDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Push Investigation</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to push this for further investigation?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handlePushConfirm}>Continue</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <Dialog open={isAllowDialogOpen} onOpenChange={setIsAllowDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Allow Sender</DialogTitle>
-            <DialogDescription>Please provide a reason for allowing this sender.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="reason">Reason:</Label>
-              <Input
-                id="reason"
-                value={actionReason}
-                onChange={(e) => setActionReason(e.target.value)}
-                placeholder="Enter reason for allowing sender..."
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsAllowDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleAllowSender}>Confirm</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isBlockDialogOpen} onOpenChange={setIsBlockDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Block Sender</DialogTitle>
-            <DialogDescription>Please provide a reason for blocking this sender.</DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="reason">Reason:</Label>
-              <Input
-                id="reason"
-                value={actionReason}
-                onChange={(e) => setActionReason(e.target.value)}
-                placeholder="Enter reason for blocking sender..."
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsBlockDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={handleBlockSender}>
-              Confirm
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Sandbox Dialog */}
-      <AlertDialog open={isSandboxDialogOpen} onOpenChange={setIsSandboxDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Open in Sandbox</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to open {selectedAttachment} in a secure sandbox environment?
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleSandboxConfirm}>Continue</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Link Analysis Dialog */}
-      <Dialog open={isLinkAnalysisOpen} onOpenChange={setIsLinkAnalysisOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Link Analysis</DialogTitle>
-            <DialogDescription>AI Analysis of: {selectedLink}</DialogDescription>
-          </DialogHeader>
-          <div className="mt-4 p-4 rounded-md bg-muted">
-            <pre className="whitespace-pre-wrap text-sm">{linkAnalysis}</pre>
-          </div>
-          <DialogFooter>
-            <Button onClick={() => setIsLinkAnalysisOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+    </AppLayout>
   )
 }
