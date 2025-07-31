@@ -44,6 +44,7 @@
     "autoprefixer": "^10.4.20",
     "axios": "^1.7.9",
     "class-variance-authority": "^0.7.1",
+    "client-lambda": "github:aws-sdk/client-lambda",
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
