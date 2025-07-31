@@ -2,16 +2,9 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { z } from 'zod';
-
-//
-// ─── CONFIG ────────────────────────────────────────────────────────────────────
-//
-const REGION   = process.env.AWS_REGION!;
-const FN_NAME  = process.env.GRAPH_FN_NAME!; // e.g. "EncryptGateGraphProcessor"
-
-const lambda = new LambdaClient({ region: REGION });
+import { ensureNeo4jConnection } from '@/lib/neo4j';
+import { getCopilotService } from '@/lib/copilot';
 
 //
 // ─── VALIDATION ────────────────────────────────────────────────────────────────
@@ -23,7 +16,7 @@ const GraphRequestSchema = z.object({
 type GraphRequest = z.infer<typeof GraphRequestSchema>;
 
 //
-// ─── POST: HAND OFF TO LAMBDA ──────────────────────────────────────────────────
+// ─── POST: DIRECT NEO4J OPERATIONS ─────────────────────────────────────────────
 //
 export async function POST(req: Request) {
   // 1) parse JSON
@@ -50,33 +43,106 @@ export async function POST(req: Request) {
     );
   }
 
-  // 3) invoke your Lambda
   try {
-    const invokeRes = await lambda.send(new InvokeCommand({
-      FunctionName:   FN_NAME,
-      InvocationType: 'RequestResponse', // wait for result
-      Payload:        Buffer.from(JSON.stringify(graphReq)),
-    }));
-
-    // 4) decode Lambda’s response payload
-    const raw = invokeRes.Payload;
-    let parsed: any = {};
-    if (raw) {
-      const str = Buffer.isBuffer(raw) ? raw.toString() : new TextDecoder().decode(raw);
-      try { parsed = JSON.parse(str); }
-      catch { parsed = { result: str }; }
+    console.log(`🔍 Processing graph action: ${graphReq.action}`);
+    
+    switch (graphReq.action) {
+      case 'add_email':
+        return await handleAddEmail(graphReq.data);
+      
+      case 'query_copilot':
+        return await handleQueryCopilot(graphReq.data);
+      
+      case 'get_email_context':
+        return await handleGetEmailContext(graphReq.data);
+      
+      default:
+        return NextResponse.json(
+          { error: 'Unknown action' },
+          { status: 400 }
+        );
     }
-
-    // 5) forward status code and body
-    const statusCode = invokeRes.FunctionError ? 500 : (parsed.statusCode || 200);
-    const body       = parsed.body ? JSON.parse(parsed.body) : parsed;
-
-    return NextResponse.json(body, { status: statusCode });
   } catch (err: any) {
-    console.error('[POST /api/graph] lambda invoke error', err);
+    console.error('[POST /api/graph] processing error', err);
     return NextResponse.json(
-      { error: 'Failed to invoke graph processor', message: err.message },
+      { error: 'Graph operation failed', message: err.message },
       { status: 500 }
     );
   }
+}
+
+//
+// ─── ACTION HANDLERS ────────────────────────────────────────────────────────────
+//
+async function handleAddEmail(data: any) {
+  const neo4j = await ensureNeo4jConnection();
+  
+  // Extract URLs from body if not provided
+  if (!data.urls && data.body) {
+    const urlRegex = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi;
+    data.urls = data.body.match(urlRegex) || [];
+  }
+  
+  await neo4j.addEmail({
+    messageId: data.messageId,
+    sender: data.sender,
+    recipients: data.recipients || [],
+    subject: data.subject || '',
+    body: data.body || '',
+    timestamp: data.timestamp,
+    urls: data.urls || [],
+  });
+  
+  console.log(`✅ Email added to graph: ${data.messageId}`);
+  
+  return NextResponse.json({
+    success: true,
+    message: 'Email added to graph database',
+    messageId: data.messageId,
+  });
+}
+
+async function handleQueryCopilot(data: any) {
+  const copilot = getCopilotService();
+  
+  const { question, messageId, context, detectionData } = data;
+  
+  // Get email context if messageId provided
+  let emailContext = context;
+  if (messageId && !emailContext) {
+    emailContext = await copilot.getEmailContext(messageId);
+  }
+  
+  // Process the question
+  const result = await copilot.processQuestion(question, emailContext);
+  
+  console.log(`🤖 Copilot query processed: ${question}`);
+  
+  return NextResponse.json({
+    response: result.response,
+    confidence: result.confidence,
+    error: result.error,
+    context: emailContext,
+  });
+}
+
+async function handleGetEmailContext(data: any) {
+  const copilot = getCopilotService();
+  const { messageId } = data;
+  
+  if (!messageId) {
+    return NextResponse.json(
+      { error: 'messageId required' },
+      { status: 400 }
+    );
+  }
+  
+  const context = await copilot.getEmailContext(messageId);
+  
+  console.log(`📧 Email context retrieved: ${messageId}`);
+  
+  return NextResponse.json({
+    context,
+    messageId,
+  });
 }
