@@ -81,15 +81,15 @@ async function getWorkMailConfig() {
 // 2) Check if an address is a monitored employee
 async function isMonitoredEmployee(email: string): Promise<boolean> {
   try {
-  const resp = await ddb.send(new QueryCommand({
-  TableName: EMPLOYEES_TABLE,
-  KeyConditionExpression:    'orgId = :orgId AND email = :email',
-  ExpressionAttributeValues: {
-    ':orgId': { S: ORG_ID },
-    ':email': { S: email }
-  }
-}))
-
+    console.log(`🔍 Checking if ${email} is monitored...`)
+    const resp = await ddb.send(new QueryCommand({
+      TableName: EMPLOYEES_TABLE,
+      KeyConditionExpression:    'orgId = :orgId AND email = :email',
+      ExpressionAttributeValues: {
+        ':orgId': { S: ORG_ID },
+        ':email': { S: email }
+      }
+    }))
     const isMonitored = Boolean(resp.Items?.length)
     console.log(`${isMonitored ? '✅' : '❌'} ${email} is ${isMonitored ? '' : 'not '}monitored`)
     return isMonitored
@@ -157,7 +157,7 @@ function extractUrls(text: string): string[] {
   return urls
 }
 
-// 6) Simple keyword‐based threat check
+// 6) Simple keyword-based threat check
 function containsSuspiciousKeywords(body: string): boolean {
   const suspicious = [
     'urgent', 'verify account',
@@ -180,7 +180,7 @@ export async function POST(req: Request) {
     const raw = await req.json()
     console.log('📨 Webhook payload:', JSON.stringify(raw, null, 2))
 
-    // 🔧 Normalize AWS Lambda SES event format into our expected shape
+    // 🔧 Normalize AWS Lambda SES event format
     const normalized: any = (() => {
       if (raw.Records?.[0]?.ses?.mail) {
         console.log('🔁 Normalizing AWS Lambda SES format to internal format')
@@ -269,17 +269,21 @@ export async function POST(req: Request) {
     try {
       console.log(`💾 Storing email in DynamoDB table: ${EMAILS_TABLE}`)
       const dbItem: Record<string, any> = {
-        messageId: { S: emailItem.messageId },
-        emailId:   { S: `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` },
-        sender:    { S: emailItem.sender },
-        recipients: { SS: emailItem.recipients },
-        subject:   { S: emailItem.subject },
-        body:      { S: emailItem.body },
-        bodyHtml:  { S: emailItem.bodyHtml },
-        timestamp: { S: emailItem.timestamp },
-        direction: { S: emailItem.direction },
-        size:      { N: emailItem.size.toString() },
-        status:    { S: 'received' },
+        // required primary key attributes:
+        userId:     { S: ORG_ID },
+        receivedAt: { S: emailItem.timestamp },
+
+        // existing attributes:
+        messageId:   { S: emailItem.messageId },
+        emailId:     { S: `email-${Date.now()}-${Math.random().toString(36).substr(2,9)}` },
+        sender:      { S: emailItem.sender },
+        recipients:  { SS: emailItem.recipients },
+        subject:     { S: emailItem.subject },
+        body:        { S: emailItem.body },
+        bodyHtml:    { S: emailItem.bodyHtml },
+        direction:   { S: emailItem.direction },
+        size:        { N: emailItem.size.toString() },
+        status:      { S: 'received' },
         threatLevel: { S: 'none' },
         isPhishing:  { BOOL: false },
         headers:     { S: JSON.stringify(emailItem.headers) },
@@ -376,11 +380,11 @@ export async function POST(req: Request) {
     // ─── DONE ────────────────────────────────────────────────────────────────
     console.log('🎉 WorkMail webhook processing completed successfully')
     return NextResponse.json({
-      status:          'processed',
-      messageId:       emailItem.messageId,
-      subject:         emailItem.subject,
-      participants:    { sender, recipients },
-      direction:       emailItem.direction,
+      status:           'processed',
+      messageId:        emailItem.messageId,
+      subject:          emailItem.subject,
+      participants:     { sender, recipients },
+      direction:        emailItem.direction,
       threatsTriggered: hasThreat,
       processing: {
         stored:          true,
@@ -406,7 +410,7 @@ export async function POST(req: Request) {
   }
 }
 
-// ─── GET for health‐check ─────────────────────────────────────────────────────
+// ─── GET for health-check ─────────────────────────────────────────────────────
 export async function GET() {
   console.log('🏥 WorkMail webhook health check')
   try {
