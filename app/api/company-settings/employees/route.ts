@@ -46,16 +46,16 @@ export async function GET(req: Request) {
     );
 
     const employees = (resp.Items || []).map((item) => ({
-      id: item.email!.S!,
-      name: item.name!.S || '',
-      email: item.email!.S || '',
-      department: item.department!.S || '',
-      jobTitle: item.jobTitle!.S || '',
-      status: item.status!.S || 'active',
-      addedAt: item.addedAt!.S || null,
-      lastEmailProcessed: item.lastEmailProcessed!.S || null,
-      syncedFromWorkMail: item.syncedFromWorkMail?.S || null,
-      workMailUserId: item.workMailUserId?.S || null,
+      id:                 item.email?.S ?? '',
+      name:               item.name?.S ?? '',
+      email:              item.email?.S ?? '',
+      department:         item.department?.S ?? '',
+      jobTitle:           item.jobTitle?.S ?? '',
+      status:             item.status?.S ?? 'active',
+      addedAt:            item.addedAt?.S ?? null,
+      lastEmailProcessed: item.lastEmailProcessed?.S ?? null,
+      syncedFromWorkMail: item.syncedFromWorkMail?.S ?? null,
+      workMailUserId:     item.workMailUserId?.S ?? null,
     }));
 
     return NextResponse.json(employees);
@@ -63,9 +63,9 @@ export async function GET(req: Request) {
     console.error('[employees:GET] Error:', err);
     return NextResponse.json(
       {
-        error: 'Failed to list monitored employees',
+        error:   'Failed to list monitored employees',
         message: err.message,
-        code: err.code || err.name,
+        code:    err.code || err.name,
       },
       { status: 500 }
     );
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
     if (!name || !email) {
       return NextResponse.json(
         {
-          error: 'Missing required fields',
+          error:    'Missing required fields',
           required: ['name', 'email'],
         },
         { status: 400 }
@@ -93,39 +93,40 @@ export async function POST(req: Request) {
       new PutItemCommand({
         TableName: EMPLOYEES_TABLE,
         Item: {
-          orgId: { S: ORG_ID },
-          email: { S: email },
-          name: { S: name },
-          department: { S: department || '' },
-          jobTitle: { S: jobTitle || '' },
-          status: { S: 'active' },
-          addedAt: { S: new Date().toISOString() },
-          lastEmailProcessed: { S: new Date().toISOString() },
+          orgId:               { S: ORG_ID },
+          email:               { S: email },
+          name:                { S: name },
+          department:          { S: department || '' },
+          jobTitle:            { S: jobTitle || '' },
+          status:              { S: 'active' },
+          addedAt:             { S: new Date().toISOString() },
+          lastEmailProcessed:  { S: new Date().toISOString() },
         },
       })
     );
 
+    const now = new Date().toISOString();
     return NextResponse.json({
-      id: email,
+      id:                 email,
       name,
       email,
-      department: department || '',
-      jobTitle: jobTitle || '',
-      status: 'active',
-      addedAt: new Date().toISOString(),
-      lastEmailProcessed: new Date().toISOString(),
+      department:         department || '',
+      jobTitle:           jobTitle || '',
+      status:             'active',
+      addedAt:            now,
+      lastEmailProcessed: now,
     });
   } catch (err: any) {
     console.error('[employees:POST] Error:', err);
     let status = 500;
-    let msg = 'Failed to add employee to monitoring';
+    let msg    = 'Failed to add employee to monitoring';
 
     if (err.name === 'ConditionalCheckFailedException') {
       status = 409;
-      msg = 'Employee already being monitored';
+      msg    = 'Employee already being monitored';
     } else if (err.name === 'InvalidParameterException') {
       status = 400;
-      msg = 'Invalid parameters provided';
+      msg    = 'Invalid parameters provided';
     }
 
     return NextResponse.json(
@@ -154,7 +155,7 @@ export async function PUT(req: Request) {
     const resp = await wmc.send(
       new ListUsersCommand({
         OrganizationId: WORKMAIL_ORG,
-        MaxResults: 1000,
+        MaxResults:     1000,
       })
     );
 
@@ -164,17 +165,15 @@ export async function PUT(req: Request) {
         new PutItemCommand({
           TableName: EMPLOYEES_TABLE,
           Item: {
-            orgId: { S: ORG_ID },
-            workMailUserId: { S: u.Id! },
-            email: { S: u.Email! },
-            name: { S: u.Name! },
-            status: { S: u.State! },
-            // optional extra fields:
-            syncedFromWorkMail: { S: new Date().toISOString() },
-            // if you have displayName or dept, you can map here:
-            department: { S: u.DisplayName || '' },
-            jobTitle: { S: '' },
-            addedAt: { S: new Date().toISOString() },
+            orgId:               { S: ORG_ID },
+            workMailUserId:      { S: u.Id! },
+            email:               { S: u.Email! },
+            name:                { S: u.Name! },
+            status:              { S: u.State! },
+            syncedFromWorkMail:  { S: new Date().toISOString() },
+            department:          { S: u.DisplayName || '' },
+            jobTitle:            { S: '' },
+            addedAt:             { S: new Date().toISOString() },
           },
         })
       );
