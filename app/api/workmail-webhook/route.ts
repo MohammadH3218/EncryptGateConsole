@@ -14,12 +14,12 @@ import {
 import { z } from 'zod'
 
 // ─── ENVIRONMENT ───────────────────────────────────────────────────────────────
-const ORG_ID            = process.env.ORGANIZATION_ID      || 'default-org';
-const CS_TABLE          = process.env.CLOUDSERVICES_TABLE || 'CloudServices';
-const EMPLOYEES_TABLE   = process.env.EMPLOYEES_TABLE_NAME || 'Employees';
-const EMAILS_TABLE      = process.env.EMAILS_TABLE_NAME    || 'Emails';
-const BASE_URL          = process.env.BASE_URL             || 'https://console-encryptgate.net';
-const AWS_REGION        = process.env.AWS_REGION           || 'us-east-1';
+const ORG_ID          = process.env.ORGANIZATION_ID      || 'default-org'
+const CS_TABLE        = process.env.CLOUDSERVICES_TABLE || 'CloudServices'
+const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees'
+const EMAILS_TABLE    = process.env.EMAILS_TABLE_NAME    || 'Emails'
+const BASE_URL        = process.env.BASE_URL             || 'https://console-encryptgate.net'
+const AWS_REGION      = process.env.AWS_REGION           || 'us-east-1'
 
 console.log('📧 WorkMail Webhook initialized:', {
   ORG_ID,
@@ -31,7 +31,7 @@ console.log('📧 WorkMail Webhook initialized:', {
 })
 
 if (!process.env.ORGANIZATION_ID) {
-  console.warn('⚠️ ORGANIZATION_ID not set, using default fallback');
+  console.warn('⚠️ ORGANIZATION_ID not set, using default fallback')
 }
 
 const ddb = new DynamoDBClient({ region: AWS_REGION })
@@ -47,9 +47,9 @@ const WorkMailWebhookSchema = z.object({
     commonHeaders: z.object({
       from:    z.array(z.string()),
       to:      z.array(z.string()),
-      subject: z.string().optional(),
-    }),
-  }),
+      subject: z.string().optional()
+    })
+  })
 })
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────────
@@ -61,22 +61,19 @@ async function getWorkMailConfig() {
     TableName: CS_TABLE,
     KeyConditionExpression:    'orgId = :orgId AND serviceType = :serviceType',
     ExpressionAttributeValues: {
-      ':orgId':        { S: ORG_ID },
-      ':serviceType':  { S: 'aws-workmail' },
+      ':orgId':       { S: ORG_ID },
+      ':serviceType': { S: 'aws-workmail' }
     }
   }))
-  
   if (!resp.Items?.length) {
     console.error('❌ No WorkMail configuration found in DynamoDB')
     throw new Error('WorkMail not configured')
   }
-  
   const item = resp.Items[0]
   const config = {
     organizationId: item.organizationId!.S!,
     region:         item.region!.S!
   }
-  
   console.log('✅ WorkMail config found:', config)
   return config
 }
@@ -84,16 +81,15 @@ async function getWorkMailConfig() {
 // 2) Check if an address is a monitored employee
 async function isMonitoredEmployee(email: string): Promise<boolean> {
   try {
-    console.log(`🔍 Checking if ${email} is monitored...`)
-    const resp = await ddb.send(new QueryCommand({
-      TableName: EMPLOYEES_TABLE,
-      KeyConditionExpression:    'orgId = :orgId AND email = :email',
-      ExpressionAttributeValues: {
-        ':orgId':  { S: ORG_ID },
-        ':email':  { S: email }
-      }
-    }))
-    
+  const resp = await ddb.send(new QueryCommand({
+  TableName: EMPLOYEES_TABLE,
+  KeyConditionExpression:    'orgId = :orgId AND email = :email',
+  ExpressionAttributeValues: {
+    ':orgId': { S: ORG_ID },
+    ':email': { S: email }
+  }
+}))
+
     const isMonitored = Boolean(resp.Items?.length)
     console.log(`${isMonitored ? '✅' : '❌'} ${email} is ${isMonitored ? '' : 'not '}monitored`)
     return isMonitored
@@ -119,22 +115,16 @@ async function parseRawMessage(
 ) {
   try {
     console.log(`📧 Fetching raw message content for: ${messageId}`)
-    const resp = await mailClient.send(new GetRawMessageContentCommand({
-      messageId
-    }))
-    
+    const resp = await mailClient.send(new GetRawMessageContentCommand({ messageId }))
     if (!resp.messageContent) {
       throw new Error('No message content received')
     }
-    
     const raw = await streamToString(resp.messageContent)
     console.log(`📄 Raw message size: ${raw.length} characters`)
-    
     const lines = raw.split('\n')
     let inBody = false
     const headers: Record<string,string> = {}
     let body = ''
-
     for (const line of lines) {
       if (!inBody) {
         if (line.trim() === '') {
@@ -151,7 +141,6 @@ async function parseRawMessage(
         body += line + '\n'
       }
     }
-    
     console.log(`✅ Parsed message: ${Object.keys(headers).length} headers, ${body.length} body chars`)
     return { headers, messageBody: body.trim() }
   } catch (err) {
@@ -178,11 +167,9 @@ function containsSuspiciousKeywords(body: string): boolean {
   ]
   const lower = body.toLowerCase()
   const found = suspicious.filter(k => lower.includes(k))
-  
   if (found.length > 0) {
     console.log(`⚠️ Found suspicious keywords: ${found.join(', ')}`)
   }
-  
   return found.length > 0
 }
 
@@ -190,10 +177,22 @@ function containsSuspiciousKeywords(body: string): boolean {
 export async function POST(req: Request) {
   try {
     console.log('📥 WorkMail webhook received')
-    const json = await req.json()
-    console.log('📨 Webhook payload:', JSON.stringify(json, null, 2))
-    
-    const { notificationType, mail } = WorkMailWebhookSchema.parse(json)
+    const raw = await req.json()
+    console.log('📨 Webhook payload:', JSON.stringify(raw, null, 2))
+
+    // 🔧 Normalize AWS Lambda SES event format into our expected shape
+    const normalized: any = (() => {
+      if (raw.Records?.[0]?.ses?.mail) {
+        console.log('🔁 Normalizing AWS Lambda SES format to internal format')
+        return {
+          notificationType: raw.Records[0].ses.notificationType || 'Delivery',
+          mail:             raw.Records[0].ses.mail
+        }
+      }
+      return raw
+    })()
+
+    const { notificationType, mail } = WorkMailWebhookSchema.parse(normalized)
 
     if (notificationType !== 'Delivery') {
       console.log(`⚠️ Ignoring non-Delivery notification: ${notificationType}`)
@@ -201,9 +200,9 @@ export async function POST(req: Request) {
     }
 
     console.log('📧 Processing email delivery notification:', {
-      messageId: mail.messageId,
-      timestamp: mail.timestamp,
-      source: mail.source,
+      messageId:   mail.messageId,
+      timestamp:   mail.timestamp,
+      source:      mail.source,
       destinations: mail.destination
     })
 
@@ -215,16 +214,16 @@ export async function POST(req: Request) {
 
     console.log('👥 Email participants:', { sender, recipients })
 
-    // Check if anyone involved is monitored
+    // Check if any monitored
     const fromMon = await isMonitoredEmployee(sender)
-    const toMons = await Promise.all(recipients.map(isMonitoredEmployee))
+    const toMons  = await Promise.all(recipients.map(isMonitoredEmployee))
     const anyMonitored = fromMon || toMons.some(Boolean)
 
     if (!anyMonitored) {
       console.log('ℹ️ No monitored addresses involved. Skipping processing.')
-      return NextResponse.json({ 
-        status: 'skipped', 
-        reason: 'no-monitored-users',
+      return NextResponse.json({
+        status:       'skipped',
+        reason:       'no-monitored-users',
         participants: { sender, recipients }
       })
     }
@@ -234,15 +233,12 @@ export async function POST(req: Request) {
     // fetch WorkMail config & raw content
     const { organizationId, region } = await getWorkMailConfig()
     const mailClient = new WorkMailMessageFlowClient({ region })
-    const { headers, messageBody } = await parseRawMessage(
-      mailClient,
-      mail.messageId
-    )
+    const { headers, messageBody } = await parseRawMessage(mailClient, mail.messageId)
 
-    // build our envelope
+    // build envelope
     const isOutbound = fromMon
-    const urls = extractUrls(messageBody)
-    const hasSuspiciousContent = urls.length > 0 || containsSuspiciousKeywords(messageBody)
+    const urls       = extractUrls(messageBody)
+    const hasThreat  = urls.length > 0 || containsSuspiciousKeywords(messageBody)
 
     const emailItem = {
       messageId: mail.messageId,
@@ -251,58 +247,51 @@ export async function POST(req: Request) {
       subject: mail.commonHeaders.subject || 'No Subject',
       timestamp: mail.timestamp,
       body: messageBody,
-      bodyHtml: messageBody, // Could parse HTML separately if needed
+      bodyHtml: messageBody,
       headers,
       attachments: [] as string[],
       direction: isOutbound ? 'outbound' : 'inbound',
       size: messageBody.length,
       urls,
-      hasThreat: hasSuspiciousContent
+      hasThreat
     }
 
     console.log('📝 Email data prepared:', {
       messageId: emailItem.messageId,
-      subject: emailItem.subject,
-      sender: emailItem.sender,
-      recipients: emailItem.recipients,
+      subject:   emailItem.subject,
+      sender:    emailItem.sender,
       direction: emailItem.direction,
-      bodyLength: emailItem.body.length,
-      urlCount: emailItem.urls.length,
+      urlCount:  emailItem.urls.length,
       hasThreat: emailItem.hasThreat
     })
 
-    // ─── 1) Store in DynamoDB EMAILS_TABLE ──────────────────────────────────
+    // ─── Store in DynamoDB ──────────────────────────────────────────────────
     try {
       console.log(`💾 Storing email in DynamoDB table: ${EMAILS_TABLE}`)
       const dbItem: Record<string, any> = {
         messageId: { S: emailItem.messageId },
-        emailId: { S: `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` },
-        sender: { S: emailItem.sender },
+        emailId:   { S: `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` },
+        sender:    { S: emailItem.sender },
         recipients: { SS: emailItem.recipients },
-        subject: { S: emailItem.subject },
-        body: { S: emailItem.body },
-        bodyHtml: { S: emailItem.bodyHtml },
+        subject:   { S: emailItem.subject },
+        body:      { S: emailItem.body },
+        bodyHtml:  { S: emailItem.bodyHtml },
         timestamp: { S: emailItem.timestamp },
         direction: { S: emailItem.direction },
-        size: { N: emailItem.size.toString() },
-        status: { S: 'received' },
-        threatLevel: { S: 'none' }, // Will be updated by threat detection
-        isPhishing: { BOOL: false },
-        headers: { S: JSON.stringify(emailItem.headers) },
+        size:      { N: emailItem.size.toString() },
+        status:    { S: 'received' },
+        threatLevel: { S: 'none' },
+        isPhishing:  { BOOL: false },
+        headers:     { S: JSON.stringify(emailItem.headers) },
         attachments: { SS: emailItem.attachments },
-        createdAt: { S: new Date().toISOString() }
-      };
-
-      // Only add orgId if we have a real organization ID
+        createdAt:   { S: new Date().toISOString() }
+      }
       if (ORG_ID !== 'default-org') {
-        dbItem.orgId = { S: ORG_ID };
+        dbItem.orgId = { S: ORG_ID }
       }
-
-      // Only add URLs if there are any
       if (emailItem.urls.length > 0) {
-        dbItem.urls = { SS: emailItem.urls };
+        dbItem.urls = { SS: emailItem.urls }
       }
-
       await ddb.send(new PutItemCommand({
         TableName: EMAILS_TABLE,
         Item: dbItem
@@ -310,21 +299,16 @@ export async function POST(req: Request) {
       console.log('✅ Email stored in DynamoDB successfully')
     } catch (err) {
       console.error('❌ DynamoDB storage failed:', err)
-      // Continue processing even if storage fails
     }
 
-    // ─── 2) Forward for further processing ──────────────────────────────────
+    // ─── Forward for further processing ──────────────────────────────────
     try {
       console.log('🔄 Forwarding to email processor...')
       const processorResponse = await fetch(`${BASE_URL}/api/email-processor`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          type: 'raw_email', 
-          ...emailItem 
-        })
+        body:    JSON.stringify({ type: 'raw_email', ...emailItem })
       })
-      
       if (processorResponse.ok) {
         console.log('✅ Email processor completed successfully')
       } else {
@@ -334,24 +318,23 @@ export async function POST(req: Request) {
       console.error('❌ Email processor request failed:', err)
     }
 
-    // ─── 3) Run threat‐detection if needed ───────────────────────────────────
-    if (hasSuspiciousContent) {
+    // ─── Threat detection ────────────────────────────────────────────────
+    if (hasThreat) {
       try {
         console.log('🚨 Running threat detection...')
         const threatResponse = await fetch(`${BASE_URL}/api/threat-detection`, {
-          method: 'POST',
+          method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+          body:    JSON.stringify({
             messageId: emailItem.messageId,
             sender,
             recipients,
-            subject: emailItem.subject,
-            body: emailItem.body,
+            subject:  emailItem.subject,
+            body:     emailItem.body,
             timestamp: emailItem.timestamp,
             urls
           })
         })
-        
         if (threatResponse.ok) {
           console.log('✅ Threat detection completed')
         } else {
@@ -362,26 +345,25 @@ export async function POST(req: Request) {
       }
     }
 
-    // ─── 4) Update your graph DB ────────────────────────────────────────────
+    // ─── Update graph DB ────────────────────────────────────────────────
     try {
       console.log('🌐 Updating graph database...')
       const graphResponse = await fetch(`${BASE_URL}/api/graph`, {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body:    JSON.stringify({
           action: 'add_email',
           data: {
             messageId: emailItem.messageId,
             sender,
             recipients,
             subject: emailItem.subject,
-            body: emailItem.body,
+            body:    emailItem.body,
             timestamp: emailItem.timestamp,
             urls
           }
         })
       })
-      
       if (graphResponse.ok) {
         console.log('✅ Graph database updated')
       } else {
@@ -393,67 +375,60 @@ export async function POST(req: Request) {
 
     // ─── DONE ────────────────────────────────────────────────────────────────
     console.log('🎉 WorkMail webhook processing completed successfully')
-    
     return NextResponse.json({
-      status: 'processed',
-      messageId: emailItem.messageId,
-      subject: emailItem.subject,
-      participants: { sender, recipients },
-      direction: emailItem.direction,
-      threatsTriggered: hasSuspiciousContent,
+      status:          'processed',
+      messageId:       emailItem.messageId,
+      subject:         emailItem.subject,
+      participants:    { sender, recipients },
+      direction:       emailItem.direction,
+      threatsTriggered: hasThreat,
       processing: {
-        stored: true,
-        processed: true,
-        threatAnalyzed: hasSuspiciousContent,
-        graphUpdated: true
+        stored:          true,
+        processed:       true,
+        threatAnalyzed:  hasThreat,
+        graphUpdated:    true
       }
     })
-
   } catch (err: any) {
     console.error('❌ WorkMail webhook processing failed:', {
       message: err.message,
-      name: err.name,
-      stack: err.stack?.split('\n').slice(0, 5)
+      name:    err.name,
+      stack:   err.stack?.split('\n').slice(0, 5)
     })
-    
     return NextResponse.json(
-      { 
-        error: 'Webhook processing failed', 
+      {
+        error:   'Webhook processing failed',
         message: err.message,
-        type: err.name
+        type:    err.name
       },
       { status: 500 }
     )
   }
 }
 
-// GET for health‐check
+// ─── GET for health‐check ─────────────────────────────────────────────────────
 export async function GET() {
   console.log('🏥 WorkMail webhook health check')
-  
   try {
-    // Test database connection
     const testQuery = await ddb.send(new QueryCommand({
       TableName: CS_TABLE,
-      KeyConditionExpression: 'orgId = :orgId',
+      KeyConditionExpression:    'orgId = :orgId',
       ExpressionAttributeValues: {
         ':orgId': { S: ORG_ID }
       },
       Limit: 1
     }))
-    
     console.log('✅ Database connection test passed')
-    
-    return NextResponse.json({ 
+    return NextResponse.json({
       status: 'webhook_ready',
       timestamp: new Date().toISOString(),
       environment: {
-        orgId: ORG_ID,
+        orgId:  ORG_ID,
         region: AWS_REGION,
         tables: {
           cloudServices: CS_TABLE,
-          employees: EMPLOYEES_TABLE,
-          emails: EMAILS_TABLE
+          employees:      EMPLOYEES_TABLE,
+          emails:         EMAILS_TABLE
         }
       },
       database: {
@@ -464,9 +439,9 @@ export async function GET() {
   } catch (err) {
     console.error('❌ Health check failed:', err)
     return NextResponse.json(
-      { 
-        status: 'unhealthy', 
-        error: err instanceof Error ? err.message : 'Unknown error',
+      {
+        status:    'unhealthy',
+        error:     err instanceof Error ? err.message : 'Unknown error',
         timestamp: new Date().toISOString()
       },
       { status: 500 }
