@@ -8,9 +8,19 @@ import { z } from 'zod';
 //
 // ─── CONFIG ────────────────────────────────────────────────────────────────────
 //
-const REGION = process.env.AWS_REGION!;
-const ORG_ID = process.env.ORGANIZATION_ID!;
-const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME!;
+const REGION = process.env.AWS_REGION || 'us-east-1';
+const ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
+const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
+
+console.log('📧 Email Processor initialized:', { REGION, ORG_ID, EMAILS_TABLE });
+
+if (!process.env.ORGANIZATION_ID) {
+  console.warn('⚠️ ORGANIZATION_ID not set, using default fallback');
+}
+
+if (!process.env.EMAILS_TABLE_NAME) {
+  console.warn('⚠️ EMAILS_TABLE_NAME not found in env vars, using fallback');
+}
 
 const ddb = new DynamoDBClient({ region: REGION });
 
@@ -59,7 +69,15 @@ type EmailRequest = z.infer<typeof EmailRequestSchema>;
 export async function POST(req: Request) {
   let payload: EmailRequest;
   try {
-    payload = EmailRequestSchema.parse(await req.json());
+    const rawPayload = await req.json();
+    console.log('📨 Email processor received payload:', {
+      type: rawPayload.type,
+      messageId: rawPayload.messageId,
+      sender: rawPayload.sender,
+      recipientCount: rawPayload.recipients?.length || 0
+    });
+    
+    payload = EmailRequestSchema.parse(rawPayload);
   } catch (err: any) {
     console.error('❌ [email-processor] Invalid payload:', err);
     return NextResponse.json(
@@ -69,22 +87,34 @@ export async function POST(req: Request) {
   }
 
   try {
-    console.log(`📧 Processing email: ${payload.messageId}`);
+    console.log(`📧 Processing email: ${payload.messageId} (type: ${payload.type})`);
     
     // Store email in DynamoDB
     await storeEmail(payload);
     
-    console.log(`✅ Email stored successfully: ${payload.messageId}`);
+    console.log(`✅ Email processed and stored successfully: ${payload.messageId}`);
     
     return NextResponse.json({
       status: 'processed',
       messageId: payload.messageId,
+      type: payload.type,
       message: `Email ${payload.type} processed successfully`,
+      timestamp: new Date().toISOString()
     });
   } catch (err: any) {
-    console.error('❌ [email-processor] Processing error:', err);
+    console.error('❌ [email-processor] Processing error:', {
+      message: err.message,
+      messageId: payload.messageId,
+      type: payload.type
+    });
+    
     return NextResponse.json(
-      { error: 'Failed to process email', message: err.message },
+      { 
+        error: 'Failed to process email', 
+        message: err.message,
+        messageId: payload.messageId,
+        type: payload.type
+      },
       { status: 500 }
     );
   }
@@ -95,16 +125,18 @@ export async function POST(req: Request) {
 //
 async function storeEmail(email: EmailRequest) {
   if (email.type === 'workmail_webhook') {
+    console.log('⚠️ WorkMail webhook type - would need to fetch actual email content');
     // For webhook notifications, we'd need to fetch the actual email content
     // This is a simplified implementation
     return;
   }
 
-  // Generate a unique email ID
+  console.log('💾 Storing email in DynamoDB...');
+
+  // Generate a unique email ID if not present
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
   const item: Record<string, any> = {
-    orgId: { S: ORG_ID },
     emailId: { S: emailId },
     messageId: { S: email.messageId },
     subject: { S: email.subject },
@@ -119,6 +151,11 @@ async function storeEmail(email: EmailRequest) {
     size: { N: email.size.toString() },
     createdAt: { S: new Date().toISOString() },
   };
+
+  // Only add orgId if we have a real organization ID
+  if (ORG_ID !== 'default-org') {
+    item.orgId = { S: ORG_ID };
+  }
 
   // Add optional fields
   if (email.bodyHtml) {
@@ -137,45 +174,136 @@ async function storeEmail(email: EmailRequest) {
     item.urls = { SS: email.urls };
   }
 
-  await ddb.send(
-    new PutItemCommand({
-      TableName: EMAILS_TABLE,
-      Item: item,
-    })
-  );
+  console.log('📝 Email item prepared for DynamoDB:', {
+    orgId: ORG_ID,
+    emailId,
+    messageId: email.messageId,
+    subject: email.subject,
+    sender: email.sender,
+    recipientCount: email.recipients.length,
+    bodyLength: email.body.length,
+    hasUrls: !!(email.urls && email.urls.length > 0),
+    hasOrgId: ORG_ID !== 'default-org'
+  });
+
+  try {
+    await ddb.send(
+      new PutItemCommand({
+        TableName: EMAILS_TABLE,
+        Item: item,
+      })
+    );
+    
+    console.log('✅ Email stored in DynamoDB successfully');
+  } catch (err: any) {
+    console.error('❌ DynamoDB storage failed:', {
+      error: err.message,
+      code: err.code,
+      tableName: EMAILS_TABLE,
+      messageId: email.messageId
+    });
+    throw new Error(`Failed to store email in database: ${err.message}`);
+  }
 }
 
 //
-// ─── GET: QUICK MOCK TEST ──────────────────────────────────────────────────────
+// ─── GET: QUICK MOCK TEST AND HEALTH CHECK ─────────────────────────────────────
 //
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const action = url.searchParams.get('action') || 'test';
+
+  if (action === 'health') {
+    // Health check
+    try {
+      console.log('🏥 Email processor health check');
+      
+      return NextResponse.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        environment: {
+          orgId: ORG_ID,
+          region: REGION,
+          emailsTable: EMAILS_TABLE,
+          hasOrgId: ORG_ID !== 'default-org'
+        },
+        version: '1.0.0'
+      });
+    } catch (err: any) {
+      console.error('❌ Health check failed:', err);
+      return NextResponse.json(
+        { 
+          status: 'unhealthy', 
+          error: err.message,
+          timestamp: new Date().toISOString()
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  // Mock email test
+  console.log('🧪 Generating mock email for testing...');
+  
+  const mockId = `mock-${Date.now()}`;
   const mock: EmailRequest = {
-    type:       'mock_email',
-    messageId:  `<mock-${Date.now()}@example.com>`,
-    subject:    'Smoke Test Email',
-    sender:     'test@fake.com',
-    recipients: ['user@company.com'],
-    timestamp:  new Date().toISOString(),
-    body:       'This is a test for the smoke-test.',
-    bodyHtml:   '<p>This is a test for the smoke-test.</p>',
-    attachments:[],
-    headers:    { 'X-Smoke': 'true' },
-    direction:  'inbound',
-    size:       128,
+    type: 'mock_email',
+    messageId: `<${mockId}@encryptgate-test.com>`,
+    subject: `Test Email - ${new Date().toLocaleString()}`,
+    sender: 'test-sender@encryptgate-demo.com',
+    recipients: ['test-recipient@company.com'],
+    timestamp: new Date().toISOString(),
+    body: `This is a test email generated at ${new Date().toLocaleString()} for testing the email processing system.
+
+This email contains:
+- A test subject line
+- Mock sender and recipient
+- Sample body content
+- Test timestamp
+
+This helps verify that the email processing pipeline is working correctly.`,
+    bodyHtml: `<p>This is a test email generated at <strong>${new Date().toLocaleString()}</strong> for testing the email processing system.</p>
+<p>This email contains:</p>
+<ul>
+<li>A test subject line</li>
+<li>Mock sender and recipient</li>
+<li>Sample body content</li>
+<li>Test timestamp</li>
+</ul>
+<p>This helps verify that the email processing pipeline is working correctly.</p>`,
+    attachments: [],
+    headers: { 'X-Test': 'true', 'X-Generated': new Date().toISOString() },
+    direction: 'inbound',
+    size: 350,
+    urls: []
   };
 
   try {
     await storeEmail(mock);
     
+    console.log('✅ Mock email test completed successfully');
+    
     return NextResponse.json({
-      status: 'test-processed',
-      payload: mock,
+      status: 'test-completed',
+      action: 'mock_email_generated',
+      payload: {
+        messageId: mock.messageId,
+        subject: mock.subject,
+        sender: mock.sender,
+        recipients: mock.recipients,
+        timestamp: mock.timestamp
+      },
       message: 'Mock email processed and stored successfully',
+      instructions: 'Check the All Emails page to see if this test email appears'
     });
   } catch (err: any) {
-    console.error('❌ [email-processor] Mock processing error:', err);
+    console.error('❌ Mock email test failed:', err);
     return NextResponse.json(
-      { error: 'Mock processing failed', message: err.message },
+      { 
+        error: 'Mock email test failed', 
+        message: err.message,
+        action: 'mock_email_failed'
+      },
       { status: 500 }
     );
   }

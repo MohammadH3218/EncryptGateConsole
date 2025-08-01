@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Table,
   TableBody,
@@ -32,7 +33,11 @@ import {
   Filter,
   RefreshCw,
   Eye,
-  Activity
+  Activity,
+  Info,
+  Database,
+  Wifi,
+  Users
 } from "lucide-react"
 
 interface Email {
@@ -58,6 +63,14 @@ interface EmailsResponse {
   emails: Email[]
   lastKey: string | null
   hasMore: boolean
+  message?: string
+  debug?: {
+    orgId: string
+    tableName: string
+    totalItems?: number
+    scannedCount?: number
+    itemCount?: number
+  }
 }
 
 export default function AdminAllEmailsPage() {
@@ -77,6 +90,7 @@ export default function AdminAllEmailsPage() {
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [debugInfo, setDebugInfo] = useState<any>(null)
   const [lastKey, setLastKey] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const ITEMS_PER_PAGE = 25
@@ -84,35 +98,86 @@ export default function AdminAllEmailsPage() {
   // Fetch emails
   const loadEmails = useCallback(
     async (reset = false) => {
-      reset ? setLoading(true) : setLoadingMore(true)
-      setError(null)
+      const isInitialLoad = reset;
+      isInitialLoad ? setLoading(true) : setLoadingMore(true);
+      setError(null);
+
+      console.log('📧 Loading emails...', { 
+        reset, 
+        currentCount: emails.length, 
+        lastKey: reset ? null : lastKey 
+      });
 
       try {
-        const params = new URLSearchParams({ limit: ITEMS_PER_PAGE.toString() })
-        if (!reset && lastKey) params.set("lastKey", lastKey)
+        const params = new URLSearchParams({ limit: ITEMS_PER_PAGE.toString() });
+        if (!reset && lastKey) {
+          params.set("lastKey", lastKey);
+          console.log('⏭️ Using pagination with lastKey');
+        }
 
-        const res = await fetch(`/api/email?${params}`)
-        if (!res.ok) throw new Error(`Status ${res.status}`)
-        const data: EmailsResponse = await res.json()
+        const apiUrl = `/api/email?${params}`;
+        console.log('🔗 Fetching from:', apiUrl);
 
-        setEmails(prev => (reset ? data.emails : [...prev, ...data.emails]))
-        setLastKey(data.lastKey)
-        setHasMore(data.hasMore)
+        const res = await fetch(apiUrl);
+        console.log('📡 API Response status:', res.status);
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('❌ API Error Response:', errorText);
+          throw new Error(`HTTP ${res.status}: ${errorText}`);
+        }
+
+        const data: EmailsResponse = await res.json();
+        console.log('📊 API Response data:', {
+          emailCount: data.emails?.length || 0,
+          hasMore: data.hasMore,
+          message: data.message,
+          debug: data.debug
+        });
+
+        // Store debug info for display
+        setDebugInfo(data.debug);
+
+        // Log detailed email info
+        if (data.emails && data.emails.length > 0) {
+          console.log('📋 Sample emails received:', data.emails.slice(0, 3).map(e => ({
+            id: e.id,
+            subject: e.subject,
+            sender: e.sender,
+            timestamp: e.timestamp
+          })));
+        } else {
+          console.log('ℹ️ No emails in response');
+        }
+
+        setEmails(prev => (reset ? data.emails : [...prev, ...data.emails]));
+        setLastKey(data.lastKey);
+        setHasMore(data.hasMore);
+
+        console.log('✅ Emails loaded successfully:', {
+          totalEmails: reset ? data.emails.length : emails.length + data.emails.length,
+          hasMore: data.hasMore
+        });
+
       } catch (e: any) {
-        console.error("❌ loadEmails error", e)
-        setError(e.message || "Failed to load emails")
+        console.error("❌ loadEmails error details:", {
+          message: e.message,
+          stack: e.stack?.split('\n').slice(0, 3)
+        });
+        setError(e.message || "Failed to load emails");
       } finally {
-        setLoading(false)
-        setLoadingMore(false)
+        setLoading(false);
+        setLoadingMore(false);
       }
     },
-    [lastKey]
-  )
+    [lastKey, emails.length]
+  );
 
   // Initial load
   useEffect(() => {
-    loadEmails(true)
-  }, [loadEmails])
+    console.log('🚀 All Emails page mounted, loading initial data...');
+    loadEmails(true);
+  }, []);
 
   // Infinite scroll
   useEffect(() => {
@@ -122,58 +187,73 @@ export default function AdminAllEmailsPage() {
         document.documentElement.scrollHeight - 300
       ) {
         if (hasMore && !loading && !loadingMore) {
-          loadEmails(false)
+          console.log('📜 Infinite scroll triggered');
+          loadEmails(false);
         }
       }
-    }
-    window.addEventListener("scroll", onScroll)
-    return () => window.removeEventListener("scroll", onScroll)
-  }, [hasMore, loading, loadingMore, loadEmails])
+    };
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [hasMore, loading, loadingMore, loadEmails]);
 
   // Apply filters
   useEffect(() => {
-    let list = [...emails]
+    console.log('🔍 Applying filters...', {
+      searchQuery,
+      employeeFilter,
+      directionFilter,
+      threatFilter,
+      statusFilter,
+      totalEmails: emails.length
+    });
+
+    let list = [...emails];
 
     // Text search
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
+      const q = searchQuery.toLowerCase();
       list = list.filter(e =>
         e.subject.toLowerCase().includes(q) ||
         e.sender.toLowerCase().includes(q) ||
         e.recipients.some(r => r.toLowerCase().includes(q)) ||
         e.body.toLowerCase().includes(q)
-      )
+      );
     }
 
     // Employee filter
     if (employeeFilter) {
-      const f = employeeFilter.toLowerCase()
+      const f = employeeFilter.toLowerCase();
       list = list.filter(e =>
         e.sender.toLowerCase().includes(f) ||
         e.recipients.some(r => r.toLowerCase().includes(f))
-      )
+      );
     }
 
     // Direction filter
     if (directionFilter !== "all") {
-      list = list.filter(e => e.direction === directionFilter)
+      list = list.filter(e => e.direction === directionFilter);
     }
 
     // Threat filter
     if (threatFilter !== "all") {
       if (threatFilter === "threats") {
-        list = list.filter(e => e.threatLevel !== "none")
+        list = list.filter(e => e.threatLevel !== "none");
       } else {
-        list = list.filter(e => e.threatLevel === threatFilter)
+        list = list.filter(e => e.threatLevel === threatFilter);
       }
     }
 
     // Status filter
     if (statusFilter !== "all") {
-      list = list.filter(e => e.status === statusFilter)
+      list = list.filter(e => e.status === statusFilter);
     }
 
-    setFilteredEmails(list)
+    console.log('✅ Filters applied:', {
+      originalCount: emails.length,
+      filteredCount: list.length
+    });
+
+    setFilteredEmails(list);
   }, [
     emails,
     searchQuery,
@@ -181,41 +261,49 @@ export default function AdminAllEmailsPage() {
     directionFilter,
     threatFilter,
     statusFilter
-  ])
+  ]);
 
   // Badge renderers
   const getThreatBadge = (lvl: string, phish: boolean) => {
     if (phish) {
-      return <Badge variant="destructive">Phishing</Badge>
+      return <Badge variant="destructive">Phishing</Badge>;
     }
     switch (lvl) {
       case "critical":
-        return <Badge variant="destructive">Critical</Badge>
+        return <Badge variant="destructive">Critical</Badge>;
       case "high":
-        return <Badge variant="destructive">High</Badge>
+        return <Badge variant="destructive">High</Badge>;
       case "medium":
-        return <Badge variant="outline">Medium</Badge>
+        return <Badge variant="outline">Medium</Badge>;
       case "low":
-        return <Badge variant="outline">Low</Badge>
+        return <Badge variant="outline">Low</Badge>;
       default:
-        return <Badge variant="outline">Clean</Badge>
+        return <Badge variant="outline">Clean</Badge>;
     }
-  }
+  };
+
   const getStatusBadge = (st: string) => {
     switch (st) {
       case "quarantined":
-        return <Badge variant="destructive">Quarantined</Badge>
+        return <Badge variant="destructive">Quarantined</Badge>;
       case "blocked":
-        return <Badge variant="destructive">Blocked</Badge>
+        return <Badge variant="destructive">Blocked</Badge>;
       case "analyzed":
-        return <Badge variant="outline">Analyzed</Badge>
+        return <Badge variant="outline">Analyzed</Badge>;
       default:
-        return <Badge variant="secondary">Received</Badge>
+        return <Badge variant="secondary">Received</Badge>;
     }
-  }
+  };
 
-  const refreshEmails = () => loadEmails(true)
-  const viewEmail = (id: string) => router.push(`/admin/investigate/${id}`)
+  const refreshEmails = () => {
+    console.log('🔄 Manual refresh triggered');
+    loadEmails(true);
+  };
+
+  const viewEmail = (id: string) => {
+    console.log('👁️ Viewing email:', id);
+    router.push(`/admin/investigate/${id}`);
+  };
 
   // Error state
   if (error) {
@@ -226,19 +314,58 @@ export default function AdminAllEmailsPage() {
         notificationsCount={2}
       >
         <FadeInSection>
+          <Alert variant="destructive" className="mb-6">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Error Loading Emails</AlertTitle>
+            <AlertDescription>
+              {error}
+            </AlertDescription>
+          </Alert>
+          
+          {debugInfo && (
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  Debug Information
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 text-sm">
+                  <div><strong>Organization ID:</strong> {debugInfo.orgId || 'Not set'}</div>
+                  <div><strong>Table Name:</strong> {debugInfo.tableName}</div>
+                  <div><strong>Region:</strong> {debugInfo.region || 'Not specified'}</div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card className="border-destructive">
-            <CardContent>
-              <div className="flex items-center gap-2 text-destructive">
-                <AlertTriangle /> Error: {error}
+            <CardContent className="pt-6">
+              <div className="flex flex-col items-center gap-4">
+                <AlertTriangle className="h-12 w-12 text-destructive" />
+                <div className="text-center">
+                  <h3 className="text-lg font-semibold">Failed to Load Emails</h3>
+                  <p className="text-muted-foreground mt-2">
+                    There was an error connecting to the email database. This could be due to:
+                  </p>
+                  <ul className="text-sm text-muted-foreground mt-2 text-left max-w-md">
+                    <li>• WorkMail webhook not configured</li>
+                    <li>• Database connection issues</li>
+                    <li>• Missing environment variables</li>
+                    <li>• AWS permissions issues</li>
+                  </ul>
+                </div>
+                <Button onClick={refreshEmails} className="mt-4">
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Retry
+                </Button>
               </div>
-              <Button onClick={refreshEmails} className="mt-4">
-                <RefreshCw className="animate-spin mr-2" /> Retry
-              </Button>
             </CardContent>
           </Card>
         </FadeInSection>
       </AppLayout>
-    )
+    );
   }
 
   // Main UI
@@ -268,10 +395,45 @@ export default function AdminAllEmailsPage() {
           </Button>
         </div>
 
+        {/* Debug Info */}
+        {debugInfo && (
+          <Card className="mb-6 bg-muted/30">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <Database className="h-4 w-4" />
+                Database Connection Status
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                <div>
+                  <div className="font-medium">Organization</div>
+                  <div className="text-muted-foreground">{debugInfo.orgId || 'Not set'}</div>
+                </div>
+                <div>
+                  <div className="font-medium">Table</div>
+                  <div className="text-muted-foreground">{debugInfo.tableName}</div>
+                </div>
+                <div>
+                  <div className="font-medium">Items Found</div>
+                  <div className="text-muted-foreground">{debugInfo.totalItems || 0}</div>
+                </div>
+                <div>
+                  <div className="font-medium">Connection</div>
+                  <div className="flex items-center gap-1 text-green-600">
+                    <Wifi className="h-3 w-3" />
+                    Active
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <Card>
-            <CardContent>
+            <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total</p>
@@ -282,7 +444,7 @@ export default function AdminAllEmailsPage() {
             </CardContent>
           </Card>
           <Card>
-            <CardContent>
+            <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Threats</p>
@@ -295,7 +457,7 @@ export default function AdminAllEmailsPage() {
             </CardContent>
           </Card>
           <Card>
-            <CardContent>
+            <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Phishing</p>
@@ -308,7 +470,7 @@ export default function AdminAllEmailsPage() {
             </CardContent>
           </Card>
           <Card>
-            <CardContent>
+            <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Clean</p>
@@ -332,9 +494,9 @@ export default function AdminAllEmailsPage() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
-                <label className="block text-sm">Search</label>
+                <label className="block text-sm font-medium mb-2">Search</label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground" />
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
                   <Input
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
@@ -344,7 +506,7 @@ export default function AdminAllEmailsPage() {
                 </div>
               </div>
               <div>
-                <label className="block text-sm">Direction</label>
+                <label className="block text-sm font-medium mb-2">Direction</label>
                 <Select
                   value={directionFilter}
                   onValueChange={setDirectionFilter}
@@ -358,7 +520,7 @@ export default function AdminAllEmailsPage() {
                 </Select>
               </div>
               <div>
-                <label className="block text-sm">Threat Level</label>
+                <label className="block text-sm font-medium mb-2">Threat Level</label>
                 <Select
                   value={threatFilter}
                   onValueChange={setThreatFilter}
@@ -376,7 +538,7 @@ export default function AdminAllEmailsPage() {
                 </Select>
               </div>
               <div>
-                <label className="block text-sm">Status</label>
+                <label className="block text-sm font-medium mb-2">Status</label>
                 <Select
                   value={statusFilter}
                   onValueChange={setStatusFilter}
@@ -403,12 +565,43 @@ export default function AdminAllEmailsPage() {
           <CardContent>
             {(loading && emails.length === 0) ? (
               <div className="text-center py-8">
-                <RefreshCw className="animate-spin mx-auto" />
-                Loading emails...
+                <RefreshCw className="animate-spin mx-auto h-8 w-8 mb-4" />
+                <p>Loading emails...</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Connecting to database and fetching email data...
+                </p>
+              </div>
+            ) : filteredEmails.length === 0 && emails.length === 0 ? (
+              <div className="text-center py-12">
+                <Mail className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+                <h3 className="text-lg font-medium mb-2">No Emails Found</h3>
+                <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                  No emails are currently available. This might be because:
+                </p>
+                <ul className="text-sm text-muted-foreground mb-6 text-left max-w-md mx-auto space-y-1">
+                  <li>• No monitored employees have received emails yet</li>
+                  <li>• WorkMail webhook is not configured</li>
+                  <li>• Emails are not being processed by the system</li>
+                </ul>
+                <div className="flex gap-2 justify-center">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => router.push('/admin/company-settings/user-management')}
+                  >
+                    <Users className="mr-2 h-4 w-4" />
+                    Manage Employees
+                  </Button>
+                  <Button onClick={refreshEmails}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Refresh
+                  </Button>
+                </div>
               </div>
             ) : filteredEmails.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                No emails match your criteria.
+                <Search className="h-12 w-12 mx-auto mb-4" />
+                <p>No emails match your current filters.</p>
+                <p className="text-sm mt-2">Try adjusting your search criteria.</p>
               </div>
             ) : (
               <>
@@ -428,21 +621,29 @@ export default function AdminAllEmailsPage() {
                   <TableBody>
                     {filteredEmails.map(email => (
                       <TableRow key={email.id} className="hover:bg-muted/50">
-                        <TableCell className="font-medium truncate max-w-xs">
-                          {email.subject}
-                          {email.urls?.length ? (
-                            <div className="text-xs text-muted-foreground">
-                              {email.urls.length} URL{email.urls.length > 1 ? "s" : ""}
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell>{email.sender}</TableCell>
-                        <TableCell className="truncate max-w-sm">
-                          {email.recipients.slice(0, 2).join(", ")}
-                          {email.recipients.length > 2 && ` +${email.recipients.length - 2}`}
+                        <TableCell className="font-medium">
+                          <div className="max-w-xs">
+                            <div className="truncate">{email.subject || 'No Subject'}</div>
+                            {email.urls?.length ? (
+                              <div className="text-xs text-muted-foreground">
+                                {email.urls.length} URL{email.urls.length > 1 ? "s" : ""}
+                              </div>
+                            ) : null}
+                          </div>
                         </TableCell>
                         <TableCell>
-                          {new Date(email.timestamp).toLocaleString()}
+                          <div className="max-w-xs truncate">{email.sender}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="max-w-sm truncate">
+                            {email.recipients.slice(0, 2).join(", ")}
+                            {email.recipients.length > 2 && ` +${email.recipients.length - 2}`}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            {new Date(email.timestamp).toLocaleString()}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -458,15 +659,14 @@ export default function AdminAllEmailsPage() {
                           {getStatusBadge(email.status)}
                         </TableCell>
                         <TableCell>
-                          <div className="flex gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => viewEmail(email.id)}
-                            >
-                              <Eye />
-                            </Button>
-                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => viewEmail(email.id)}
+                            title="View Email Details"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -476,13 +676,13 @@ export default function AdminAllEmailsPage() {
                 {/* Load more indicator */}
                 {loadingMore && (
                   <div className="text-center py-4">
-                    <RefreshCw className="animate-spin mx-auto" />
-                    Loading more...
+                    <RefreshCw className="animate-spin mx-auto h-5 w-5 mb-2" />
+                    <p className="text-sm text-muted-foreground">Loading more emails...</p>
                   </div>
                 )}
-                {!hasMore && !loadingMore && (
+                {!hasMore && !loadingMore && emails.length > 0 && (
                   <div className="text-center py-4 text-muted-foreground">
-                    All emails loaded
+                    <div className="text-sm">All emails loaded ({emails.length} total)</div>
                   </div>
                 )}
               </>
@@ -491,5 +691,5 @@ export default function AdminAllEmailsPage() {
         </Card>
       </FadeInSection>
     </AppLayout>
-  )
+  );
 }
