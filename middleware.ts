@@ -6,17 +6,23 @@ export function middleware(request: NextRequest) {
   // Get the path
   const path = request.nextUrl.pathname
   
+  // Allow ALL API routes to pass through without authentication
+  // This includes webhooks, email processing, and other API endpoints
+  if (path.startsWith('/api/')) {
+    return NextResponse.next()
+  }
+  
   // Define public paths that don't require authentication
   const isPublicPath = 
     path === '/login' || 
-    path === '/api/auth/login' || 
-    path === '/api/auth/callback' || 
-    path === '/api/auth/logout'
+    path === '/' ||
+    path.startsWith('/_next/') ||
+    path === '/favicon.ico'
   
   // Check for authentication token
   const token = request.cookies.get('access_token')?.value
   
-  // Redirect logic
+  // Redirect logic - only apply to non-API, non-public paths
   if (!isPublicPath && !token) {
     // If user is on a protected path but has no token, redirect to login
     return NextResponse.redirect(new URL('/login', request.url))
@@ -30,11 +36,12 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
-     * - api/auth (API routes that handle authentication)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
+     * 
+     * Note: We handle API route exclusion in the middleware function itself
      */
-    '/((?!api/auth|_next/static|_next/image|favicon.ico).*)',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 }
