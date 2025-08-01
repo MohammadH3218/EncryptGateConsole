@@ -133,7 +133,7 @@ async function parseRawMessage(
         }
         const idx = line.indexOf(':')
         if (idx > 0) {
-          headers[line.slice(0, idx).toLowerCase()] = line.slice(idx+1).trim()
+          headers[line.slice(0, idx).toLowerCase()] = line.slice(idx + 1).trim()
         }
       } else {
         body += line + '\n'
@@ -155,7 +155,7 @@ function extractUrls(text: string): string[] {
   return urls
 }
 
-// 6) Simple keyword‐based threat check
+// 6) Simple keyword-based threat check
 function containsSuspiciousKeywords(body: string): boolean {
   const suspicious = [
     'urgent', 'verify account',
@@ -178,7 +178,7 @@ export async function POST(req: Request) {
     const raw = await req.json()
     console.log('📨 Webhook payload:', JSON.stringify(raw, null,2))
 
-    // 🔧 Normalize AWS SES Lambda format if needed
+    // Normalize SES Lambda format
     const normalized: any = raw.Records?.[0]?.ses?.mail
       ? {
           notificationType: raw.Records[0].ses.notificationType || 'Delivery',
@@ -199,6 +199,7 @@ export async function POST(req: Request) {
       ? mail.commonHeaders.to
       : mail.destination
 
+    // check monitored
     const fromMon = await isMonitoredEmployee(sender)
     const toMons  = await Promise.all(recipients.map(isMonitoredEmployee))
     if (!(fromMon || toMons.some(x=>x))) {
@@ -206,31 +207,36 @@ export async function POST(req: Request) {
       return NextResponse.json({
         status:'skipped',
         reason:'no-monitored-users',
-        participants:{sender,recipients}
+        participants:{ sender, recipients }
       })
     }
 
-    // fetch config & raw body
+    // fetch raw content
     const { region } = await getWorkMailConfig()
     const mailClient = new WorkMailMessageFlowClient({ region })
     const { headers, messageBody } = await parseRawMessage(mailClient, mail.messageId)
 
     const isOutbound = fromMon
-    const urls       = extractUrls(messageBody)
-    const hasThreat  = urls.length>0 || containsSuspiciousKeywords(messageBody)
+    // pick the monitored user for partition key
+    const userId = isOutbound
+      ? sender
+      : recipients[toMons.findIndex(Boolean)] ?? recipients[0]
+
+    const urls      = extractUrls(messageBody)
+    const hasThreat = urls.length > 0 || containsSuspiciousKeywords(messageBody)
 
     const emailItem = {
       messageId: mail.messageId,
       sender,
       recipients,
-      subject: mail.commonHeaders.subject || 'No Subject',
+      subject:   mail.commonHeaders.subject || 'No Subject',
       timestamp: mail.timestamp,
-      body: messageBody,
-      bodyHtml: messageBody,
+      body:      messageBody,
+      bodyHtml:  messageBody,
       headers,
       attachments: [] as string[],
-      direction: isOutbound ? 'outbound' : 'inbound',
-      size: messageBody.length,
+      direction:   isOutbound ? 'outbound' : 'inbound',
+      size:        messageBody.length,
       urls,
       hasThreat
     }
@@ -239,11 +245,8 @@ export async function POST(req: Request) {
     try {
       console.log(`💾 Writing to DynamoDB table ${EMAILS_TABLE}`)
       const dbItem: Record<string,any> = {
-        // **Table keys** must match YOUR table’s schema:
-        userId:     { S: ORG_ID },                  // HASH key
+        userId:     { S: userId },                  // HASH key
         receivedAt: { S: emailItem.timestamp },     // RANGE key
-
-        // everything else:
         messageId:  { S: emailItem.messageId },
         emailId:    { S:`email-${Date.now()}-${Math.random().toString(36).slice(2,8)}` },
         sender:     { S: emailItem.sender },
@@ -264,7 +267,7 @@ export async function POST(req: Request) {
 
       await ddb.send(new PutItemCommand({
         TableName: EMAILS_TABLE,
-        Item: dbItem
+        Item:      dbItem
       }))
       console.log('✅ DynamoDB write succeeded')
     } catch(err) {
@@ -274,30 +277,35 @@ export async function POST(req: Request) {
     // ─── Forward + threat + graph calls (unchanged) ─────────────────────────
     try {
       await fetch(`${BASE_URL}/api/email-processor`, {
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({type:'raw_email',...emailItem})
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ type:'raw_email', ...emailItem })
       })
-    } catch{}    
+    } catch{}
+
     if (hasThreat) {
       try {
-        await fetch(`${BASE_URL}/api/threat-detection`,{
-          method:'POST',headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({...emailItem})
+        await fetch(`${BASE_URL}/api/threat-detection`, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify(emailItem)
         })
-      } catch{}      
+      } catch{}
     }
+
     try {
-      await fetch(`${BASE_URL}/api/graph`,{
-        method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({action:'add_email',data:{...emailItem}})
+      await fetch(`${BASE_URL}/api/graph`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ action:'add_email', data: emailItem })
       })
     } catch{}
 
     console.log('🎉 Processing complete')
     return NextResponse.json({
-      status:'processed',
-      messageId: emailItem.messageId,
-      direction: emailItem.direction,
+      status:           'processed',
+      messageId:        emailItem.messageId,
+      direction:        emailItem.direction,
       threatsTriggered: hasThreat
     })
 
@@ -316,13 +324,13 @@ export async function GET() {
   try {
     await ddb.send(new QueryCommand({
       TableName: CS_TABLE,
-      KeyConditionExpression: 'orgId = :orgId',
-      ExpressionAttributeValues: { ':orgId':{ S: ORG_ID } },
-      Limit:1
+      KeyConditionExpression:    'orgId = :orgId',
+      ExpressionAttributeValues: { ':orgId': { S: ORG_ID } },
+      Limit: 1
     }))
     return NextResponse.json({ status:'webhook_ready' })
   } catch(err) {
     console.error('❌ Health check failed', err)
-    return NextResponse.json({ status:'unhealthy' },{ status:500 })
+    return NextResponse.json({ status:'unhealthy' }, { status:500 })
   }
 }
