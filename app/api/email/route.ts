@@ -1,23 +1,20 @@
-// app/api/email/route.ts
+// app/api/email/route.ts - UPDATED to work with userId+receivedAt schema
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import {
   DynamoDBClient,
   ScanCommand,
+  QueryCommand,
   ScanCommandInput,
 } from '@aws-sdk/client-dynamodb';
 
 const REGION       = process.env.AWS_REGION           || 'us-east-1';
-const ORG_ID       = process.env.ORGANIZATION_ID      || 'default-org'; // Fallback if not set
+const ORG_ID       = process.env.ORGANIZATION_ID      || 'default-org';
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME    || 'Emails';
-const BASE_URL     = process.env.BASE_URL            || 'https://console-encryptgate.net';
+const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees';
 
-console.log('📧 Email API initialized:', { REGION, ORG_ID, EMAILS_TABLE, BASE_URL });
-
-if (!process.env.ORGANIZATION_ID) {
-  console.warn('⚠️ ORGANIZATION_ID not set, using default fallback');
-}
+console.log('📧 Email API initialized:', { REGION, ORG_ID, EMAILS_TABLE, EMPLOYEES_TABLE });
 
 const ddb = new DynamoDBClient({ region: REGION });
 
@@ -33,71 +30,119 @@ export async function GET(request: Request) {
     const limit = Math.min(1000, Math.max(1, parseInt(rawLim, 10) || 50));
     console.log(`🔍 Query parameters: limit=${limit}, hasLastKey=${!!rawKey}`);
 
-    // Build scan params
-    const params: ScanCommandInput = { 
-      TableName: EMAILS_TABLE, 
-      Limit: limit 
-    };
-
-    // Add organization filter only if ORG_ID is not the default fallback
-    if (ORG_ID && ORG_ID !== 'default-org') {
-      params.FilterExpression = 'orgId = :orgId';
-      params.ExpressionAttributeValues = {
-        ':orgId': { S: ORG_ID }
-      };
-      console.log(`🏢 Filtering by organization: ${ORG_ID}`);
-    } else {
-      console.log('📋 Scanning all emails (no organization filter)');
-    }
-
-    // Resume pagination if lastKey present
-    if (rawKey) {
-      try {
-        params.ExclusiveStartKey = JSON.parse(decodeURIComponent(rawKey));
-        console.log('⏭️ Resuming pagination with lastKey');
-      } catch (e) {
-        console.warn('⚠️ Invalid lastKey, ignoring:', rawKey);
+    // Get list of monitored employees
+    let monitoredEmployees: string[] = [];
+    try {
+      if (ORG_ID !== 'default-org') {
+        const empResp = await ddb.send(new QueryCommand({
+          TableName: EMPLOYEES_TABLE,
+          KeyConditionExpression: 'orgId = :orgId',
+          ExpressionAttributeValues: {
+            ':orgId': { S: ORG_ID }
+          }
+        }));
+        monitoredEmployees = (empResp.Items || []).map(item => item.email?.S).filter(Boolean) as string[];
+        console.log(`👥 Found ${monitoredEmployees.length} monitored employees:`, monitoredEmployees);
       }
+    } catch (empError) {
+      console.warn('⚠️ Could not fetch monitored employees:', empError);
     }
 
-    console.log('🔍 Scanning DynamoDB with params:', {
-      TableName: EMAILS_TABLE,
-      Limit: limit,
-      HasFilter: !!params.FilterExpression,
-      HasPagination: !!params.ExclusiveStartKey
-    });
+    let allEmails: any[] = [];
+    let lastEvaluatedKey: any = undefined;
 
-    const resp = await ddb.send(new ScanCommand(params));
-    const items = resp.Items || [];
+    // If we have monitored employees, query by userId for each one
+    if (monitoredEmployees.length > 0) {
+      console.log('📋 Querying emails for each monitored employee...');
+      
+      for (const employeeEmail of monitoredEmployees) {
+        try {
+          const queryParams: any = {
+            TableName: EMAILS_TABLE,
+            KeyConditionExpression: 'userId = :userId',
+            ExpressionAttributeValues: {
+              ':userId': { S: employeeEmail }
+            },
+            ScanIndexForward: false, // Get newest first
+            Limit: Math.ceil(limit / monitoredEmployees.length) // Distribute limit across employees
+          };
 
-    console.log(`✅ DynamoDB scan completed: ${items.length} items returned`);
-    console.log(`📊 Scan consumed ${resp.ScannedCount} items, returned ${resp.Count} items`);
+          console.log(`🔍 Querying emails for employee: ${employeeEmail}`);
+          const result = await ddb.send(new QueryCommand(queryParams));
+          
+          if (result.Items && result.Items.length > 0) {
+            allEmails.push(...result.Items);
+            console.log(`📧 Found ${result.Items.length} emails for ${employeeEmail}`);
+          }
+        } catch (queryError: any) {
+          console.warn(`⚠️ Error querying emails for ${employeeEmail}:`, queryError.message);
+        }
+      }
+    } else {
+      // Fallback: scan the entire table if no monitored employees
+      console.log('📋 No monitored employees found, scanning entire table...');
+      
+      const scanParams: ScanCommandInput = { 
+        TableName: EMAILS_TABLE, 
+        Limit: limit 
+      };
 
-    if (items.length === 0) {
-      console.log('ℹ️ No emails found in database');
+      if (rawKey) {
+        try {
+          scanParams.ExclusiveStartKey = JSON.parse(decodeURIComponent(rawKey));
+          console.log('⏭️ Resuming pagination with lastKey');
+        } catch (e) {
+          console.warn('⚠️ Invalid lastKey, ignoring:', rawKey);
+        }
+      }
+
+      const resp = await ddb.send(new ScanCommand(scanParams));
+      allEmails = resp.Items || [];
+      lastEvaluatedKey = resp.LastEvaluatedKey;
+    }
+
+    console.log(`✅ Retrieved ${allEmails.length} total emails`);
+
+    if (allEmails.length === 0) {
+      console.log('ℹ️ No emails found');
+      
       return NextResponse.json({
         emails: [],
         lastKey: null,
         hasMore: false,
-        message: 'No emails found. Make sure WorkMail webhook is configured and employees are receiving emails.',
+        message: monitoredEmployees.length === 0 
+          ? 'No monitored employees configured. Please add employees to monitoring first.'
+          : 'No emails found for monitored employees. Make sure WorkMail webhook is configured and employees are receiving emails.',
         debug: {
           orgId: ORG_ID,
           tableName: EMAILS_TABLE,
-          scannedCount: resp.ScannedCount || 0,
-          itemCount: resp.Count || 0,
-          hasOrgFilter: ORG_ID !== 'default-org'
+          monitoredEmployees: monitoredEmployees.length,
+          employeeList: monitoredEmployees
         }
       });
     }
 
+    // Sort all emails by timestamp (newest first)
+    allEmails.sort((a, b) => {
+      const timeA = a.receivedAt?.S || a.timestamp?.S || '0';
+      const timeB = b.receivedAt?.S || b.timestamp?.S || '0';
+      return timeB.localeCompare(timeA);
+    });
+
+    // Limit results
+    const limitedEmails = allEmails.slice(0, limit);
+
     // Map DynamoDB items into plain JSON
-    const emails = items.map((item, index) => {
+    const emails = limitedEmails.map((item, index) => {
       console.log(`📄 Processing email ${index + 1}:`, {
         messageId: item.messageId?.S || 'unknown',
         sender: item.sender?.S || 'unknown',
         subject: item.subject?.S || 'No Subject',
-        timestamp: item.timestamp?.S || 'unknown'
+        timestamp: item.receivedAt?.S || item.timestamp?.S || 'unknown',
+        userId: item.userId?.S || 'none'
       });
+
+      const timestamp = item.receivedAt?.S || item.timestamp?.S || new Date().toISOString();
 
       return {
         id: item.messageId?.S || item.emailId?.S || `unknown-${index}`,
@@ -105,17 +150,24 @@ export async function GET(request: Request) {
         subject: item.subject?.S || 'No Subject',
         sender: item.sender?.S || '',
         recipients: item.recipients?.SS || [],
-        timestamp: item.timestamp?.S || new Date().toISOString(),
+        timestamp: timestamp,
         body: item.body?.S || '',
         bodyHtml: item.bodyHtml?.S,
         status: item.status?.S || 'received',
         threatLevel: item.threatLevel?.S || 'none',
         isPhishing: item.isPhishing?.BOOL || false,
         attachments: item.attachments?.SS || [],
-        headers: item.headers?.S ? JSON.parse(item.headers.S) : {},
+        headers: item.headers?.S ? (() => {
+          try {
+            return JSON.parse(item.headers.S);
+          } catch {
+            return {};
+          }
+        })() : {},
         direction: item.direction?.S || 'inbound',
         size: parseInt(item.size?.N || '0', 10),
         urls: item.urls?.SS || [],
+        userId: item.userId?.S || '', // Include for debugging
       };
     });
 
@@ -129,29 +181,32 @@ export async function GET(request: Request) {
         sender: emails[0].sender,
         recipients: emails[0].recipients,
         timestamp: emails[0].timestamp,
+        userId: emails[0].userId,
         bodyLength: emails[0].body.length
       });
     }
 
     const response = {
       emails,
-      lastKey: resp.LastEvaluatedKey
-        ? encodeURIComponent(JSON.stringify(resp.LastEvaluatedKey))
+      lastKey: lastEvaluatedKey 
+        ? encodeURIComponent(JSON.stringify(lastEvaluatedKey))
         : null,
-      hasMore: Boolean(resp.LastEvaluatedKey),
+      hasMore: Boolean(lastEvaluatedKey),
       debug: {
         orgId: ORG_ID,
         tableName: EMAILS_TABLE,
         totalItems: emails.length,
-        hasMore: Boolean(resp.LastEvaluatedKey),
-        hasOrgFilter: ORG_ID !== 'default-org'
+        hasMore: Boolean(lastEvaluatedKey),
+        monitoredEmployees: monitoredEmployees.length,
+        queryMethod: monitoredEmployees.length > 0 ? 'query_by_userId' : 'scan_table'
       }
     };
 
     console.log('📤 Returning response:', {
       emailCount: emails.length,
       hasMore: response.hasMore,
-      hasLastKey: !!response.lastKey
+      hasLastKey: !!response.lastKey,
+      queryMethod: response.debug.queryMethod
     });
 
     return NextResponse.json(response);
@@ -173,13 +228,13 @@ export async function GET(request: Request) {
           'Check AWS credentials and permissions',
           'Verify table name exists in DynamoDB',
           'Ensure organization ID is correct (if set)',
-          'Check if WorkMail webhook is configured and working'
+          'Check if WorkMail webhook is configured and working',
+          'Verify monitored employees are configured'
         ],
         debug: {
           orgId: ORG_ID,
           tableName: EMAILS_TABLE,
-          region: REGION,
-          hasOrgFilter: ORG_ID !== 'default-org'
+          region: REGION
         }
       },
       { status: 500 }
@@ -199,6 +254,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    const BASE_URL = process.env.BASE_URL || 'https://console-encryptgate.net';
     console.log(`🔄 Forwarding to email processor: ${BASE_URL}/api/email-processor`);
     const resp = await fetch(`${BASE_URL}/api/email-processor`, {
       method: 'POST',
