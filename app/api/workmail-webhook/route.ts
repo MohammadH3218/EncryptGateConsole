@@ -84,7 +84,8 @@ async function isMonitoredEmployee(email: string): Promise<boolean> {
     console.log(`🔍 Checking if ${email} is monitored...`)
     const resp = await ddb.send(new QueryCommand({
       TableName: EMPLOYEES_TABLE,
-      KeyConditionExpression:    'orgId = :orgId AND email = :email',
+      KeyConditionExpression: 'orgId = :orgId',
+      FilterExpression: 'email = :email',
       ExpressionAttributeValues: {
         ':orgId': { S: ORG_ID },
         ':email': { S: email }
@@ -185,6 +186,17 @@ export async function POST(req: Request) {
           mail: raw.Records[0].ses.mail
         }
       : raw
+
+    console.log('🔄 Normalized payload:', JSON.stringify(normalized, null, 2))
+
+    try {
+      const { notificationType, mail } = WorkMailWebhookSchema.parse(normalized)
+      console.log('✅ Schema validation passed')
+    } catch (schemaError: any) {
+      console.error('❌ Schema validation failed:', schemaError.message)
+      console.error('❌ Schema errors:', JSON.stringify(schemaError.errors || schemaError, null, 2))
+      throw new Error(`Schema validation failed: ${schemaError.message}`)
+    }
 
     const { notificationType, mail } = WorkMailWebhookSchema.parse(normalized)
 
