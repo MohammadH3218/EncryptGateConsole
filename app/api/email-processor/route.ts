@@ -1,4 +1,4 @@
-// app/api/email-processor/route.ts
+// app/api/email-processor/route.ts - FIXED to match webhook schema
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -121,7 +121,7 @@ export async function POST(req: Request) {
 }
 
 //
-// ─── STORE EMAIL IN DYNAMODB ──────────────────────────────────────────────────
+// ─── STORE EMAIL IN DYNAMODB - FIXED TO MATCH WEBHOOK FORMAT ──────────────────
 //
 async function storeEmail(email: EmailRequest) {
   if (email.type === 'workmail_webhook') {
@@ -136,26 +136,33 @@ async function storeEmail(email: EmailRequest) {
   // Generate a unique email ID if not present
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
+  // Determine userId - for mock emails, use the first recipient or sender
+  let userId: string;
+  if (email.direction === 'outbound') {
+    userId = email.sender;
+  } else {
+    userId = email.recipients[0]; // Use first recipient for inbound emails
+  }
+
+  console.log(`📝 Using userId: ${userId} for email storage`);
+
+  // Match the webhook storage format exactly
   const item: Record<string, any> = {
-    emailId: { S: emailId },
+    userId: { S: userId },                    // HASH key (required)
+    receivedAt: { S: email.timestamp },       // RANGE key (required)
     messageId: { S: email.messageId },
-    subject: { S: email.subject },
+    emailId: { S: emailId },
     sender: { S: email.sender },
     recipients: { SS: email.recipients },
-    timestamp: { S: email.timestamp },
+    subject: { S: email.subject },
     body: { S: email.body },
+    direction: { S: email.direction },
+    size: { N: email.size.toString() },
     status: { S: 'received' },
     threatLevel: { S: 'none' },
     isPhishing: { BOOL: false },
-    direction: { S: email.direction },
-    size: { N: email.size.toString() },
     createdAt: { S: new Date().toISOString() },
   };
-
-  // Only add orgId if we have a real organization ID
-  if (ORG_ID !== 'default-org') {
-    item.orgId = { S: ORG_ID };
-  }
 
   // Add optional fields
   if (email.bodyHtml) {
@@ -174,16 +181,16 @@ async function storeEmail(email: EmailRequest) {
     item.urls = { SS: email.urls };
   }
 
-  console.log('📝 Email item prepared for DynamoDB:', {
-    orgId: ORG_ID,
+  console.log('📝 Email item prepared for DynamoDB (webhook format):', {
+    userId,
+    receivedAt: email.timestamp,
     emailId,
     messageId: email.messageId,
     subject: email.subject,
     sender: email.sender,
     recipientCount: email.recipients.length,
     bodyLength: email.body.length,
-    hasUrls: !!(email.urls && email.urls.length > 0),
-    hasOrgId: ORG_ID !== 'default-org'
+    hasUrls: !!(email.urls && email.urls.length > 0)
   });
 
   try {
@@ -200,7 +207,8 @@ async function storeEmail(email: EmailRequest) {
       error: err.message,
       code: err.code,
       tableName: EMAILS_TABLE,
-      messageId: email.messageId
+      messageId: email.messageId,
+      userId: userId
     });
     throw new Error(`Failed to store email in database: ${err.message}`);
   }
@@ -242,7 +250,7 @@ export async function GET(req: Request) {
     }
   }
 
-  // Mock email test
+  // Mock email test - FIXED to work with webhook schema
   console.log('🧪 Generating mock email for testing...');
   
   const mockId = `mock-${Date.now()}`;
@@ -251,7 +259,7 @@ export async function GET(req: Request) {
     messageId: `<${mockId}@encryptgate-test.com>`,
     subject: `Test Email - ${new Date().toLocaleString()}`,
     sender: 'test-sender@encryptgate-demo.com',
-    recipients: ['test-recipient@company.com'],
+    recipients: ['contact@encryptgate.net'], // Use your monitored employee
     timestamp: new Date().toISOString(),
     body: `This is a test email generated at ${new Date().toLocaleString()} for testing the email processing system.
 
@@ -291,7 +299,8 @@ This helps verify that the email processing pipeline is working correctly.`,
         subject: mock.subject,
         sender: mock.sender,
         recipients: mock.recipients,
-        timestamp: mock.timestamp
+        timestamp: mock.timestamp,
+        userId: mock.recipients[0] // Show which userId was used
       },
       message: 'Mock email processed and stored successfully',
       instructions: 'Check the All Emails page to see if this test email appears'
