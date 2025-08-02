@@ -216,10 +216,27 @@ export async function POST(req: Request) {
     }
 
     console.log('📧 Processing email:', mail.messageId)
-    const sender     = mail.commonHeaders.from[0] || mail.source
-    const recipients = mail.commonHeaders.to.length
+    
+    // Helper function to extract email from display name format like "Name <email@domain.com>"
+    const extractEmail = (emailStr: string): string => {
+      const match = emailStr.match(/<([^>]+)>/)
+      return match ? match[1] : emailStr.trim()
+    }
+    
+    const rawSender = mail.commonHeaders.from[0] || mail.source
+    const rawRecipients = mail.commonHeaders.to.length
       ? mail.commonHeaders.to
       : mail.destination
+    
+    const sender = extractEmail(rawSender)
+    const recipients = rawRecipients.map(extractEmail)
+    
+    console.log('📧 Extracted addresses:', {
+      rawSender,
+      extractedSender: sender,
+      rawRecipients,
+      extractedRecipients: recipients
+    })
 
     // check monitored
     const fromMon = await isMonitoredEmployee(sender)
