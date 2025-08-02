@@ -182,8 +182,18 @@ export async function POST(req: Request) {
     // Normalize SES Lambda format
     const normalized: any = raw.Records?.[0]?.ses?.mail
       ? {
-          notificationType: raw.Records[0].ses.notificationType || 'Delivery',
-          mail: raw.Records[0].ses.mail
+          notificationType: 'Delivery', // SES events are always delivery events
+          mail: {
+            messageId: raw.Records[0].ses.mail.messageId,
+            timestamp: raw.Records[0].ses.mail.timestamp,
+            source: raw.Records[0].ses.mail.commonHeaders.from[0] || raw.Records[0].ses.mail.source,
+            destination: raw.Records[0].ses.mail.destination,
+            commonHeaders: {
+              from: raw.Records[0].ses.mail.commonHeaders.from,
+              to: raw.Records[0].ses.mail.commonHeaders.to,
+              subject: raw.Records[0].ses.mail.commonHeaders.subject
+            }
+          }
         }
       : raw
 
@@ -223,10 +233,41 @@ export async function POST(req: Request) {
       })
     }
 
-    // fetch raw content
-    const { region } = await getWorkMailConfig()
-    const mailClient = new WorkMailMessageFlowClient({ region })
-    const { headers, messageBody } = await parseRawMessage(mailClient, mail.messageId)
+    // For SES events, we don't need to fetch raw content as we don't have WorkMail integration
+    // Instead, we'll extract what we can from the SES headers and create a basic body
+    let headers: Record<string, string> = {}
+    let messageBody = ''
+    
+    // Check if this is from SES (has original raw structure)
+    if (raw.Records?.[0]?.ses) {
+      const sesRecord = raw.Records[0].ses
+      
+      // Extract headers from SES format
+      if (sesRecord.mail.headers) {
+        sesRecord.mail.headers.forEach((header: any) => {
+          headers[header.name.toLowerCase()] = header.value
+        })
+      }
+      
+      // Create a basic message body since SES doesn't provide the body content
+      messageBody = `Email received via SES webhook processing.
+      
+Subject: ${mail.commonHeaders.subject || 'No Subject'}
+From: ${mail.commonHeaders.from.join(', ')}
+To: ${mail.commonHeaders.to.join(', ')}
+Date: ${headers.date || mail.timestamp}
+
+[Email body content not available in SES webhook - email was processed through Amazon SES]`
+      
+      console.log('📧 Using SES webhook data (no raw message content available)')
+    } else {
+      // Original WorkMail flow
+      const { region } = await getWorkMailConfig()
+      const mailClient = new WorkMailMessageFlowClient({ region })
+      const parsed = await parseRawMessage(mailClient, mail.messageId)
+      headers = parsed.headers
+      messageBody = parsed.messageBody
+    }
 
     const isOutbound = fromMon
     // pick the monitored user for partition key
