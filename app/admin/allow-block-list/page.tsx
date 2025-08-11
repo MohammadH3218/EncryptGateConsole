@@ -20,11 +20,11 @@ export default function AllowBlockListPage() {
   return (
     <AppLayout username="John Doe" notificationsCount={0}>
       <FadeInSection>
-        <h2 className="text-2xl font-bold mb-4">Allow/Block List</h2>
+        <h2 className="text-2xl font-bold mb-4 text-white">Allow/Block List</h2>
         <Tabs defaultValue="blocked" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-4">
-            <TabsTrigger value="blocked">Blocked Senders</TabsTrigger>
-            <TabsTrigger value="allowed">Allowed Senders</TabsTrigger>
+          <TabsList className="grid w-full grid-cols-2 mb-4 bg-[#1f1f1f] border-[#1f1f1f]">
+            <TabsTrigger value="blocked" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Blocked Senders</TabsTrigger>
+            <TabsTrigger value="allowed" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Allowed Senders</TabsTrigger>
           </TabsList>
           <TabsContent value="blocked">
             <BlockedSendersList searchQuery={searchQuery} blockedSenders={blockedSenders} />

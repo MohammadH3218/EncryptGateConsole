@@ -457,27 +457,27 @@ export default function CloudServicesPage() {
   )
 
   return (
-    <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={0}>
+    <AppLayout username="John Doe" notificationsCount={0}>
       <FadeInSection>
         <div className="space-y-8">
-          <Alert>
-            <AlertTitle>Cloud Services</AlertTitle>
-            <AlertDescription>
+          <Alert className="bg-blue-900/20 border-blue-500/20 text-white">
+            <AlertTitle className="text-white">Cloud Services</AlertTitle>
+            <AlertDescription className="text-gray-300">
               Connect AWS Cognito for security-team logins and AWS
               WorkMail to monitor employee mail for threats.
             </AlertDescription>
           </Alert>
 
           {/* ── Cognito Section ─────────────────────────────────────────────── */}
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Users className="h-5 w-5" />
+                  <CardTitle className="flex items-center gap-2 text-white">
+                    <Users className="h-5 w-5 text-white" />
                     Security Team Identity Provider
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-gray-400">
                     AWS Cognito → manage your security team's access.
                   </CardDescription>
                 </div>
@@ -487,15 +487,15 @@ export default function CloudServicesPage() {
                     onOpenChange={setIsCognitoDialogOpen}
                   >
                     <DialogTrigger asChild>
-                      <Button>
+                      <Button className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                         <Plus className="mr-2 h-4 w-4" />
                         Connect Cognito
                       </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="bg-[#1f1f1f] border-[#1f1f1f] text-white">
                       <DialogHeader>
-                        <DialogTitle>Connect AWS Cognito</DialogTitle>
-                        <DialogDescription>
+                        <DialogTitle className="text-white">Connect AWS Cognito</DialogTitle>
+                        <DialogDescription className="text-gray-400">
                           Provide your User Pool ID, Client ID & secret,
                           and Region.
                         </DialogDescription>
@@ -503,13 +503,13 @@ export default function CloudServicesPage() {
                       <div className="space-y-4">
                         <Alert
                           variant="default"
-                          className="bg-blue-50 border-blue-200"
+                          className="bg-blue-900/20 border-blue-500/20 text-white"
                         >
-                          <Info className="h-4 w-4" />
-                          <AlertTitle>
+                          <Info className="h-4 w-4 text-blue-400" />
+                          <AlertTitle className="text-white">
                             Cognito Configuration
                           </AlertTitle>
-                          <AlertDescription className="text-sm">
+                          <AlertDescription className="text-sm text-gray-300">
                             You'll find these in the AWS Cognito Console.
                           </AlertDescription>
                         </Alert>
@@ -518,7 +518,7 @@ export default function CloudServicesPage() {
                         <div className="grid grid-cols-4 items-center gap-4">
                           <Label
                             htmlFor="userPoolId"
-                            className="text-right"
+                            className="text-right text-white"
                           >
                             User Pool ID
                           </Label>
@@ -533,6 +533,7 @@ export default function CloudServicesPage() {
                                 }))
                               }
                               placeholder="us-east-1_abcdefghi"
+                              className="bg-[#2a2a2a] border-[#2a2a2a] text-white placeholder:text-gray-400"
                             />
                             <p className="text-xs text-muted-foreground">
                               format: region_identifier

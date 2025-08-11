@@ -3,9 +3,9 @@
 import type React from "react"
 
 import { useState } from "react"
+import { useRouter, usePathname } from "next/navigation"
 import {
   Bell,
-  Settings,
   User,
   Shield,
   Mail,
@@ -31,30 +31,34 @@ interface AppLayoutProps {
 export function AppLayout({ children, username, notificationsCount = 0 }: AppLayoutProps) {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
+  const router = useRouter()
+  const pathname = usePathname()
 
   const mainNavItems = [
-    { icon: Shield, label: "Dashboard", active: true },
-    { icon: Mail, label: "All Emails" },
-    { icon: AlertTriangle, label: "Detections" },
-    { icon: FileText, label: "Allow/Block List" },
-    { icon: UserCheck, label: "Assignments" },
-    { icon: FileText, label: "Pushed Requests" },
-    { icon: Users, label: "Manage Employees" },
+    { icon: Shield, label: "Dashboard", href: "/admin/dashboard" },
+    { icon: Mail, label: "All Emails", href: "/admin/all-emails" },
+    { icon: AlertTriangle, label: "Detections", href: "/admin/detections" },
+    { icon: FileText, label: "Allow/Block List", href: "/admin/allow-block-list" },
+    { icon: UserCheck, label: "Assignments", href: "/admin/assignments" },
+    { icon: FileText, label: "Pushed Requests", href: "/admin/pushed-requests" },
+    { icon: Users, label: "Manage Employees", href: "/admin/manage-employees" },
   ]
 
   const companySettingsItems = [
-    { icon: Settings, label: "Company Settings" },
-    { icon: Lock, label: "Cloud Services" },
-    { icon: User, label: "User Management" },
-    { icon: Shield, label: "Roles & Permissions" },
+    { icon: Lock, label: "Cloud Services", href: "/admin/company-settings/cloud-services" },
+    { icon: User, label: "User Management", href: "/admin/company-settings/user-management" },
+    { icon: Shield, label: "Roles & Permissions", href: "/admin/company-settings/roles" },
   ]
 
   const userSettingsItems = [
-    { icon: Settings, label: "User Settings" },
-    { icon: User, label: "Profile" },
-    { icon: Bell, label: "Notifications" },
-    { icon: Lock, label: "Security" },
+    { icon: User, label: "Profile", href: "/admin/user-settings/profile" },
+    { icon: Bell, label: "Notifications", href: "/admin/user-settings/notifications" },
+    { icon: Lock, label: "Security", href: "/admin/user-settings/security" },
   ]
+
+  const handleNavigation = (href: string) => {
+    router.push(href)
+  }
 
   const notifications = [
     {
@@ -118,34 +122,46 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
           {/* Navigation */}
           <nav className="p-4 space-y-1">
             {/* Main Navigation */}
-            {mainNavItems.map((item, index) => (
-              <button
-                key={index}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  item.active
-                    ? "bg-[#1f1f1f] text-white"
-                    : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
-                }`}
-              >
-                <item.icon className="w-4 h-4" />
-                {item.label}
-              </button>
-            ))}
+            {mainNavItems.map((item, index) => {
+              const isActive = pathname === item.href
+              return (
+                <button
+                  key={index}
+                  onClick={() => handleNavigation(item.href)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? "bg-[#1f1f1f] text-white"
+                      : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
+                  }`}
+                >
+                  <item.icon className="w-4 h-4" />
+                  {item.label}
+                </button>
+              )
+            })}
 
             <div className="pt-4">
               <div className="px-3 py-2">
                 <div className="h-px bg-[#1f1f1f] mb-2"></div>
                 <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Company Settings</span>
               </div>
-              {companySettingsItems.map((item, index) => (
-                <button
-                  key={`company-${index}`}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </button>
-              ))}
+              {companySettingsItems.map((item, index) => {
+                const isActive = pathname === item.href
+                return (
+                  <button
+                    key={`company-${index}`}
+                    onClick={() => handleNavigation(item.href)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      isActive
+                        ? "bg-[#1f1f1f] text-white"
+                        : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
+                    }`}
+                  >
+                    <item.icon className="w-4 h-4" />
+                    {item.label}
+                  </button>
+                )
+              })}
             </div>
 
             <div className="pt-4">
@@ -153,15 +169,23 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                 <div className="h-px bg-[#1f1f1f] mb-2"></div>
                 <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">User Settings</span>
               </div>
-              {userSettingsItems.map((item, index) => (
-                <button
-                  key={`user-${index}`}
-                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </button>
-              ))}
+              {userSettingsItems.map((item, index) => {
+                const isActive = pathname === item.href
+                return (
+                  <button
+                    key={`user-${index}`}
+                    onClick={() => handleNavigation(item.href)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      isActive
+                        ? "bg-[#1f1f1f] text-white"
+                        : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
+                    }`}
+                  >
+                    <item.icon className="w-4 h-4" />
+                    {item.label}
+                  </button>
+                )
+              })}
             </div>
           </nav>
 

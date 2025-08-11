@@ -262,18 +262,18 @@ export default function AdminDetectionsPage() {
 
   if (error) {
     return (
-      <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={3}>
+      <AppLayout username="John Doe" notificationsCount={3}>
         <FadeInSection>
-          <Card className="border-destructive">
+          <Card className="border-red-500/20 bg-[#0f0f0f]">
             <CardContent className="pt-6">
-              <div className="flex items-center gap-2 text-destructive">
+              <div className="flex items-center gap-2 text-red-400">
                 <AlertTriangle className="h-5 w-5" />
                 <div>
-                  <p className="font-medium">Error loading detections</p>
-                  <p className="text-sm mt-1">{error}</p>
+                  <p className="font-medium text-white">Error loading detections</p>
+                  <p className="text-sm mt-1 text-gray-400">{error}</p>
                 </div>
               </div>
-              <Button onClick={refreshDetections} className="mt-4">
+              <Button onClick={refreshDetections} className="mt-4 bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Retry
               </Button>
@@ -285,17 +285,17 @@ export default function AdminDetectionsPage() {
   }
 
   return (
-    <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={stats.new}>
+    <AppLayout username="John Doe" notificationsCount={stats.new}>
       <FadeInSection>
         <div className="space-y-6">
           {/* Header */}
           <div className="flex justify-between items-center">
             <div>
-              <h2 className="text-2xl font-bold flex items-center gap-2">
-                <AlertTriangle className="h-6 w-6" />
+              <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
+                <AlertTriangle className="h-6 w-6 text-white" />
                 Security Detections
               </h2>
-              <p className="text-muted-foreground mt-1">
+              <p className="text-gray-400 mt-1">
                 Monitor and investigate security threats • {filteredDetections.length} detections shown
               </p>
             </div>
@@ -305,6 +305,7 @@ export default function AdminDetectionsPage() {
                 size="sm"
                 onClick={refreshDetections}
                 disabled={loading}
+                className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
               >
                 <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
@@ -314,144 +315,144 @@ export default function AdminDetectionsPage() {
 
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card>
+            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-muted-foreground">Total Detections</p>
-                    <p className="text-2xl font-bold">{stats.total}</p>
+                    <p className="text-sm font-medium text-gray-400">Total Detections</p>
+                    <p className="text-2xl font-bold text-white">{stats.total}</p>
                   </div>
-                  <Shield className="h-8 w-8 text-muted-foreground" />
+                  <Shield className="h-8 w-8 text-gray-400" />
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-muted-foreground">Critical Threats</p>
-                    <p className="text-2xl font-bold text-red-600">{stats.critical}</p>
+                    <p className="text-sm font-medium text-gray-400">Critical Threats</p>
+                    <p className="text-2xl font-bold text-red-400">{stats.critical}</p>
                   </div>
-                  <AlertTriangle className="h-8 w-8 text-red-600" />
+                  <AlertTriangle className="h-8 w-8 text-red-400" />
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-muted-foreground">In Progress</p>
-                    <p className="text-2xl font-bold text-yellow-600">{stats.inProgress}</p>
+                    <p className="text-sm font-medium text-gray-400">In Progress</p>
+                    <p className="text-2xl font-bold text-yellow-400">{stats.inProgress}</p>
                   </div>
-                  <Activity className="h-8 w-8 text-yellow-600" />
+                  <Activity className="h-8 w-8 text-yellow-400" />
                 </div>
               </CardContent>
             </Card>
-            <Card>
+            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-muted-foreground">Resolved</p>
-                    <p className="text-2xl font-bold text-green-600">{stats.resolved}</p>
+                    <p className="text-sm font-medium text-gray-400">Resolved</p>
+                    <p className="text-2xl font-bold text-green-400">{stats.resolved}</p>
                   </div>
-                  <CheckCircle className="h-8 w-8 text-green-600" />
+                  <CheckCircle className="h-8 w-8 text-green-400" />
                 </div>
               </CardContent>
             </Card>
           </div>
 
           {/* Severity Distribution */}
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5" />
+              <CardTitle className="flex items-center gap-2 text-white">
+                <TrendingUp className="h-5 w-5 text-white" />
                 Threat Severity Distribution
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-4 gap-4">
-                <div className="text-center p-4 border rounded-lg">
-                  <div className="text-2xl font-bold text-red-600">{stats.critical}</div>
-                  <div className="text-sm text-muted-foreground">Critical</div>
+                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
+                  <div className="text-2xl font-bold text-red-400">{stats.critical}</div>
+                  <div className="text-sm text-gray-400">Critical</div>
                 </div>
-                <div className="text-center p-4 border rounded-lg">
-                  <div className="text-2xl font-bold text-orange-600">{stats.high}</div>
-                  <div className="text-sm text-muted-foreground">High</div>
+                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
+                  <div className="text-2xl font-bold text-orange-400">{stats.high}</div>
+                  <div className="text-sm text-gray-400">High</div>
                 </div>
-                <div className="text-center p-4 border rounded-lg">
-                  <div className="text-2xl font-bold text-yellow-600">{stats.medium}</div>
-                  <div className="text-sm text-muted-foreground">Medium</div>
+                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
+                  <div className="text-2xl font-bold text-yellow-400">{stats.medium}</div>
+                  <div className="text-sm text-gray-400">Medium</div>
                 </div>
-                <div className="text-center p-4 border rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">{stats.low}</div>
-                  <div className="text-sm text-muted-foreground">Low</div>
+                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
+                  <div className="text-2xl font-bold text-blue-400">{stats.low}</div>
+                  <div className="text-sm text-gray-400">Low</div>
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Filters */}
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Filter className="h-5 w-5" />
+              <CardTitle className="flex items-center gap-2 text-lg text-white">
+                <Filter className="h-5 w-5 text-white" />
                 Filters & Search
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Search</label>
+                  <label className="text-sm font-medium text-white">Search</label>
                   <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                       placeholder="Search detections..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10"
+                      className="pl-10 bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Severity</label>
+                  <label className="text-sm font-medium text-white">Severity</label>
                   <Select value={severityFilter} onValueChange={setSeverityFilter}>
-                    <SelectTrigger>
+                    <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Severities</SelectItem>
-                      <SelectItem value="critical">Critical</SelectItem>
-                      <SelectItem value="high">High</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="low">Low</SelectItem>
+                    <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                      <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All Severities</SelectItem>
+                      <SelectItem value="critical" className="text-white focus:bg-[#2a2a2a] focus:text-white">Critical</SelectItem>
+                      <SelectItem value="high" className="text-white focus:bg-[#2a2a2a] focus:text-white">High</SelectItem>
+                      <SelectItem value="medium" className="text-white focus:bg-[#2a2a2a] focus:text-white">Medium</SelectItem>
+                      <SelectItem value="low" className="text-white focus:bg-[#2a2a2a] focus:text-white">Low</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Status</label>
+                  <label className="text-sm font-medium text-white">Status</label>
                   <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger>
+                    <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="new">New</SelectItem>
-                      <SelectItem value="in_progress">In Progress</SelectItem>
-                      <SelectItem value="resolved">Resolved</SelectItem>
-                      <SelectItem value="false_positive">False Positive</SelectItem>
+                    <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                      <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All Status</SelectItem>
+                      <SelectItem value="new" className="text-white focus:bg-[#2a2a2a] focus:text-white">New</SelectItem>
+                      <SelectItem value="in_progress" className="text-white focus:bg-[#2a2a2a] focus:text-white">In Progress</SelectItem>
+                      <SelectItem value="resolved" className="text-white focus:bg-[#2a2a2a] focus:text-white">Resolved</SelectItem>
+                      <SelectItem value="false_positive" className="text-white focus:bg-[#2a2a2a] focus:text-white">False Positive</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Assignment</label>
+                  <label className="text-sm font-medium text-white">Assignment</label>
                   <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
-                    <SelectTrigger>
+                    <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="assigned">Assigned</SelectItem>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
+                    <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                      <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
+                      <SelectItem value="assigned" className="text-white focus:bg-[#2a2a2a] focus:text-white">Assigned</SelectItem>
+                      <SelectItem value="unassigned" className="text-white focus:bg-[#2a2a2a] focus:text-white">Unassigned</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -460,55 +461,55 @@ export default function AdminDetectionsPage() {
           </Card>
 
           {/* Detections Table */}
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
-              <CardTitle>Detection List</CardTitle>
+              <CardTitle className="text-white">Detection List</CardTitle>
             </CardHeader>
             <CardContent>
               {loading && detections.length === 0 ? (
                 <div className="flex items-center justify-center py-8">
-                  <RefreshCw className="h-6 w-6 animate-spin mr-2" />
-                  Loading detections...
+                  <RefreshCw className="h-6 w-6 animate-spin mr-2 text-white" />
+                  <span className="text-white">Loading detections...</span>
                 </div>
               ) : filteredDetections.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
+                <div className="text-center py-8 text-gray-400">
                   {detections.length === 0 ? (
                     <div>
-                      <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                      <p className="text-lg font-medium">No detections found</p>
-                      <p className="text-sm">Start monitoring emails to see security detections here.</p>
+                      <AlertTriangle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                      <p className="text-lg font-medium text-white">No detections found</p>
+                      <p className="text-sm text-gray-400">Start monitoring emails to see security detections here.</p>
                     </div>
                   ) : (
-                    "No detections match your current filters."
+                    <p className="text-white">No detections match your current filters.</p>
                   )}
                 </div>
               ) : (
                 <>
                   <Table>
                     <TableHeader>
-                      <TableRow>
-                        <TableHead>Detection</TableHead>
-                        <TableHead>Sender</TableHead>
-                        <TableHead>Severity</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Threat Score</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead>Assigned</TableHead>
-                        <TableHead>Actions</TableHead>
+                      <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                        <TableHead className="text-white">Detection</TableHead>
+                        <TableHead className="text-white">Sender</TableHead>
+                        <TableHead className="text-white">Severity</TableHead>
+                        <TableHead className="text-white">Status</TableHead>
+                        <TableHead className="text-white">Threat Score</TableHead>
+                        <TableHead className="text-white">Created</TableHead>
+                        <TableHead className="text-white">Assigned</TableHead>
+                        <TableHead className="text-white">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredDetections.map((detection) => (
-                        <TableRow key={detection.id} className="hover:bg-muted/50">
-                          <TableCell className="font-medium">
+                        <TableRow key={detection.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                          <TableCell className="font-medium text-white">
                             <div>
                               <div className="font-medium">{detection.name}</div>
-                              <div className="text-sm text-muted-foreground">
+                              <div className="text-sm text-gray-400">
                                 {detection.detectionId}
                               </div>
                             </div>
                           </TableCell>
-                          <TableCell>{detection.sentBy}</TableCell>
+                          <TableCell className="text-white">{detection.sentBy}</TableCell>
                           <TableCell>
                             {getSeverityBadge(detection.severity)}
                           </TableCell>
@@ -520,7 +521,7 @@ export default function AdminDetectionsPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
-                              <div className="w-16 h-2 bg-gray-200 rounded-full">
+                              <div className="w-16 h-2 bg-[#1f1f1f] rounded-full">
                                 <div 
                                   className={`h-2 rounded-full ${
                                     detection.threatScore >= 80 ? 'bg-red-500' :
@@ -531,23 +532,23 @@ export default function AdminDetectionsPage() {
                                   style={{ width: `${detection.threatScore}%` }}
                                 />
                               </div>
-                              <span className="text-sm">{detection.threatScore}</span>
+                              <span className="text-sm text-white">{detection.threatScore}</span>
                             </div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="text-white">
                             {new Date(detection.createdAt).toLocaleDateString()}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="text-white">
                             {detection.assignedTo.length > 0 ? (
                               <div className="flex items-center gap-1">
-                                <Users className="h-4 w-4" />
+                                <Users className="h-4 w-4 text-gray-400" />
                                 <span className="text-sm">
                                   {detection.assignedTo.slice(0, 2).join(', ')}
                                   {detection.assignedTo.length > 2 && ` +${detection.assignedTo.length - 2}`}
                                 </span>
                               </div>
                             ) : (
-                              <span className="text-sm text-muted-foreground">Unassigned</span>
+                              <span className="text-sm text-gray-400">Unassigned</span>
                             )}
                           </TableCell>
                           <TableCell>
@@ -557,6 +558,7 @@ export default function AdminDetectionsPage() {
                                 size="sm"
                                 onClick={() => handleInvestigate(detection)}
                                 title="Investigate"
+                                className="text-white hover:bg-[#2a2a2a] hover:text-white"
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
@@ -570,14 +572,14 @@ export default function AdminDetectionsPage() {
                   {/* Loading More Indicator */}
                   {loadingMore && (
                     <div className="flex justify-center mt-4 py-4">
-                      <RefreshCw className="h-4 w-4 animate-spin mr-2" />
-                      Loading more detections...
+                      <RefreshCw className="h-4 w-4 animate-spin mr-2 text-white" />
+                      <span className="text-white">Loading more detections...</span>
                     </div>
                   )}
 
                   {/* End of results indicator */}
                   {!hasMore && detections.length > 0 && (
-                    <div className="text-center mt-4 py-4 text-muted-foreground">
+                    <div className="text-center mt-4 py-4 text-gray-400">
                       All detections loaded
                     </div>
                   )}
