@@ -4,7 +4,8 @@ import { NextResponse } from 'next/server'
 import {
   DynamoDBClient,
   QueryCommand,
-  PutItemCommand
+  PutItemCommand,
+  GetItemCommand
 } from '@aws-sdk/client-dynamodb'
 import {
   WorkMailMessageFlowClient,
@@ -76,17 +77,27 @@ async function getWorkMailConfig() {
 async function isMonitoredEmployee(email: string): Promise<boolean> {
   try {
     console.log(`🔍 Checking if ${email} is monitored...`)
-    const resp = await ddb.send(new QueryCommand({
+    
+    // Direct key lookup instead of query with filter
+    const resp = await ddb.send(new GetItemCommand({
       TableName: EMPLOYEES_TABLE,
-      KeyConditionExpression: 'orgId = :orgId',
-      FilterExpression: 'email = :email',
-      ExpressionAttributeValues: {
-        ':orgId': { S: ORG_ID },
-        ':email': { S: email }
+      Key: {
+        orgId: { S: ORG_ID },
+        email: { S: email }
       }
     }))
-    const isMonitored = Boolean(resp.Items?.length)
+    
+    const isMonitored = Boolean(resp.Item)
     console.log(`${isMonitored ? '✅' : '❌'} ${email} is ${isMonitored ? '' : 'not '}monitored`)
+    
+    if (isMonitored) {
+      console.log(`📋 Employee details:`, {
+        name: resp.Item?.name?.S,
+        department: resp.Item?.department?.S,
+        status: resp.Item?.status?.S
+      })
+    }
+    
     return isMonitored
   } catch (err) {
     console.error('❌ Error checking monitored employee:', err)
