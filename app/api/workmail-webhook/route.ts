@@ -13,7 +13,7 @@ import {
 import { z } from 'zod'
 
 const ORG_ID          = process.env.ORGANIZATION_ID      || 'default-org'
-const CS_TABLE        = process.env.CLOUDSERVICES_TABLE || 'CloudServices'
+const CS_TABLE        = process.env.CLOUDSERVICES_TABLE  || 'CloudServices'
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees'
 const EMAILS_TABLE    = process.env.EMAILS_TABLE_NAME    || 'Emails'
 const BASE_URL        = process.env.BASE_URL             || 'https://console-encryptgate.net'
@@ -167,23 +167,56 @@ export async function POST(req: Request) {
     console.log('📥 WorkMail webhook received')
     const raw = await req.json()
     console.log('📨 Webhook payload:', JSON.stringify(raw, null,2))
+    
+    const safeFirst = (arr: any) => Array.isArray(arr) && arr.length ? arr[0] : undefined
 
-    const normalized: any = raw.Records?.[0]?.ses?.mail
+    const extractEmail = (s: string): string => {
+      if (!s) return ""
+      const m = s.match(/<([^>]+)>/)
+      return (m ? m[1] : s).trim()
+    }
+
+    const isSes = !!raw?.Records?.[0]?.ses?.mail;
+    const isWorkMail = !!raw?.summaryVersion && !!raw?.messageId && !!raw?.envelope;
+
+    const normalized = isSes
       ? {
           notificationType: 'Delivery',
           mail: {
             messageId: raw.Records[0].ses.mail.messageId,
             timestamp: raw.Records[0].ses.mail.timestamp,
-            source: raw.Records[0].ses.mail.commonHeaders.from[0] || raw.Records[0].ses.mail.source,
-            destination: raw.Records[0].ses.mail.destination,
+            source:
+              (Array.isArray(raw.Records[0].ses.mail.commonHeaders?.from) &&
+               raw.Records[0].ses.mail.commonHeaders.from[0]) ||
+              raw.Records[0].ses.mail.source ||
+              "",
+            destination: raw.Records[0].ses.mail.destination || [],
             commonHeaders: {
-              from: raw.Records[0].ses.mail.commonHeaders.from,
-              to: raw.Records[0].ses.mail.commonHeaders.to,
-              subject: raw.Records[0].ses.mail.commonHeaders.subject
+              from: raw.Records[0].ses.mail.commonHeaders?.from || [],
+              to:   raw.Records[0].ses.mail.commonHeaders?.to   || [],
+              subject: raw.Records[0].ses.mail.commonHeaders?.subject || ""
             }
           }
         }
-      : raw
+      : isWorkMail
+        ? {
+            notificationType: 'Delivery',
+            mail: {
+              messageId: raw.messageId,
+              timestamp: new Date().toISOString(),
+              source:
+                (Array.isArray(raw.headers?.from) && raw.headers.from[0]) ??
+                raw?.envelope?.mailFrom?.address ??
+                "",
+              destination: (raw.envelope?.recipients || []).map((r: any) => r.address),
+              commonHeaders: {
+                from: raw.headers?.from || (raw.envelope?.mailFrom ? [raw.envelope.mailFrom.address] : []),
+                to:   raw.headers?.to   || (raw.envelope?.recipients || []).map((r: any) => r.address),
+                subject: raw.subject || ""
+              }
+            }
+          }
+        : raw;
 
     console.log('🔄 Normalized payload:', JSON.stringify(normalized, null, 2))
 
@@ -205,11 +238,6 @@ export async function POST(req: Request) {
 
     console.log('📧 Processing email:', mail.messageId)
     
-    const extractEmail = (emailStr: string): string => {
-      const match = emailStr.match(/<([^>]+)>/)
-      return match ? match[1] : emailStr.trim()
-    }
-    
     const rawSender = mail.commonHeaders.from[0] || mail.source
     const rawRecipients = mail.commonHeaders.to.length
       ? mail.commonHeaders.to
@@ -224,6 +252,12 @@ export async function POST(req: Request) {
       rawRecipients,
       extractedRecipients: recipients
     })
+
+    // Check if we have valid participants before proceeding
+    if (!sender && recipients.length === 0) {
+      console.log('⚠️ No valid sender or recipients found')
+      return NextResponse.json({ status: 'skipped', reason: 'no-parties' })
+    }
 
     const fromMon = await isMonitoredEmployee(sender)
     const toMons  = await Promise.all(recipients.map(isMonitoredEmployee))
@@ -292,26 +326,29 @@ Date: ${headers.date || mail.timestamp}
 
     try {
       console.log(`💾 Writing to DynamoDB table ${EMAILS_TABLE}`)
-      const dbItem: Record<string,any> = {
-        userId:     { S: userId },                  // HASH key
-        receivedAt: { S: emailItem.timestamp },     // RANGE key
+      const dbItem: Record<string, any> = {
+        userId:     { S: userId },
+        receivedAt: { S: emailItem.timestamp },
         messageId:  { S: emailItem.messageId },
-        emailId:    { S:`email-${Date.now()}-${Math.random().toString(36).slice(2,8)}` },
-        sender:     { S: emailItem.sender },
-        recipients: { SS: emailItem.recipients },
-        subject:    { S: emailItem.subject },
-        body:       { S: emailItem.body },
-        bodyHtml:   { S: emailItem.bodyHtml },
+        emailId:    { S: `email-${Date.now()}-${Math.random().toString(36).slice(2,8)}` },
+        sender:     { S: emailItem.sender || '' },
+        subject:    { S: emailItem.subject || 'No Subject' },
+        body:       { S: emailItem.body || '' },
+        bodyHtml:   { S: emailItem.bodyHtml || '' },
         direction:  { S: emailItem.direction },
-        size:       { N: emailItem.size.toString() },
-        status:     { S:'received' },
-        threatLevel:{ S:'none' },
-        isPhishing: { BOOL:false },
-        headers:    { S: JSON.stringify(headers) },
-        attachments:{ SS: emailItem.attachments },
+        size:       { N: String(emailItem.size || 0) },
+        status:     { S: 'received' },
+        threatLevel:{ S: 'none' },
+        isPhishing: { BOOL: false },
         createdAt:  { S: new Date().toISOString() }
       }
-      if (urls.length) dbItem.urls = { SS: urls }
+
+      if (recipients.length)              dbItem.recipients  = { SS: recipients }
+      if (emailItem.attachments?.length)  dbItem.attachments = { SS: emailItem.attachments }
+      if (emailItem.urls?.length)         dbItem.urls        = { SS: emailItem.urls }
+      if (headers && Object.keys(headers).length) {
+        dbItem.headers = { S: JSON.stringify(headers) }
+      }
 
       await ddb.send(new PutItemCommand({
         TableName: EMAILS_TABLE,
@@ -322,13 +359,6 @@ Date: ${headers.date || mail.timestamp}
       console.error('❌ DynamoDB write failed', err)
     }
 
-    try {
-      await fetch(`${BASE_URL}/api/email-processor`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ type:'raw_email', ...emailItem })
-      })
-    } catch{}
 
     if (hasThreat) {
       try {
