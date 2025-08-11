@@ -52,64 +52,12 @@ export async function GET(request: Request) {
     console.log(`✅ DynamoDB scan returned ${resp.Items?.length || 0} detection items`);
 
     if (!resp.Items || resp.Items.length === 0) {
-      console.log('ℹ️ No detections found, returning mock data for demonstration');
+      console.log('ℹ️ No detections found, returning empty array');
       
-      // Return mock data when no real data exists
-      const mockDetections = [
-        {
-          id: 'det-001',
-          detectionId: 'det-001',
-          emailMessageId: '<phishing@example.com>',
-          severity: 'critical',
-          name: 'Phishing Attempt Detected',
-          status: 'new',
-          assignedTo: [],
-          sentBy: 'attacker@suspicious.com',
-          timestamp: new Date().toISOString(),
-          description: 'Sophisticated phishing email attempting to steal credentials',
-          indicators: ['Suspicious sender domain', 'Urgent language', 'Credential harvesting URL'],
-          recommendations: ['Block sender', 'Warn users', 'Investigate similar emails'],
-          threatScore: 95,
-          confidence: 88,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: 'det-002',
-          detectionId: 'det-002',
-          emailMessageId: '<malware@example.com>',
-          severity: 'high',
-          name: 'Malware Detection',
-          status: 'in_progress',
-          assignedTo: ['John Doe'],
-          sentBy: 'unknown@malware.net',
-          timestamp: new Date(Date.now() - 3600000).toISOString(),
-          description: 'Email contains suspicious attachment with potential malware',
-          indicators: ['Malicious attachment', 'Unknown sender', 'Suspicious file type'],
-          recommendations: ['Quarantine email', 'Scan endpoints', 'Block sender domain'],
-          threatScore: 82,
-          confidence: 92,
-          createdAt: new Date(Date.now() - 3600000).toISOString(),
-        },
-        {
-          id: 'det-003',
-          detectionId: 'det-003',
-          emailMessageId: '<spam@example.com>',
-          severity: 'medium',
-          name: 'Spam Message Detected',
-          status: 'resolved',
-          assignedTo: ['Jane Smith'],
-          sentBy: 'spam@marketing.biz',
-          timestamp: new Date(Date.now() - 7200000).toISOString(),
-          description: 'Unsolicited commercial email with deceptive subject line',
-          indicators: ['Mass mailing', 'Deceptive subject', 'Unsubscribe fraud'],
-          recommendations: ['Add to spam filter', 'Block sender', 'Monitor patterns'],
-          threatScore: 45,
-          confidence: 75,
-          createdAt: new Date(Date.now() - 7200000).toISOString(),
-        },
-      ];
+      // Return empty array when no real data exists
+      const emptyDetections: any[] = [];
 
-      return NextResponse.json(mockDetections);
+      return NextResponse.json(emptyDetections);
     }
 
     const detections = resp.Items.map((item) => ({

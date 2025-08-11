@@ -1,67 +1,21 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { BlockedSendersList } from "@/components/blocked-senders-list"
 import { AllowedSendersList } from "@/components/allowed-senders-list"
-import { useRouter } from "next/navigation"
 
-// Mock data for allowed and blocked senders
-const mockBlockedSenders = [
-  {
-    id: 1,
-    email: "malicious@phishing.com",
-    reason: "Known phishing domain",
-    blockedBy: "John Doe",
-    timestamp: "2024-01-31T15:20:00Z",
-  },
-  {
-    id: 2,
-    email: "suspicious@unknown.net",
-    reason: "Suspicious attachment",
-    blockedBy: "System",
-    timestamp: "2024-01-31T14:10:00Z",
-  },
-  {
-    id: 3,
-    email: "spam@marketing.biz",
-    reason: "Spam content detected",
-    blockedBy: "Jane Smith",
-    timestamp: "2024-01-31T12:30:00Z",
-  },
-]
+// Empty arrays for production use
+const mockBlockedSenders: any[] = []
 
-const mockAllowedSenders = [
-  {
-    id: 1,
-    email: "partner@trusted.com",
-    reason: "Business partner",
-    allowedBy: "John Doe",
-    timestamp: "2024-01-31T15:20:00Z",
-  },
-  {
-    id: 2,
-    email: "client@important.org",
-    reason: "VIP client",
-    allowedBy: "Jane Smith",
-    timestamp: "2024-01-31T14:10:00Z",
-  },
-  {
-    id: 3,
-    email: "vendor@supplier.net",
-    reason: "Approved vendor",
-    allowedBy: "System",
-    timestamp: "2024-01-31T12:30:00Z",
-  },
-]
+const mockAllowedSenders: any[] = []
 
 export default function AllowBlockListPage() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [blockedSenders, setBlockedSenders] = useState(mockBlockedSenders)
-  const [allowedSenders, setAllowedSenders] = useState(mockAllowedSenders)
-  const router = useRouter()
+  const [blockedSenders] = useState(mockBlockedSenders)
+  const [allowedSenders] = useState(mockAllowedSenders)
 
   return (
     <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={0}>

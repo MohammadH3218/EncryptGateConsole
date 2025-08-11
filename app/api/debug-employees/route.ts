@@ -1,4 +1,3 @@
-// app/api/debug-employees/route.ts - Debug endpoint to check monitored employees
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -31,21 +30,12 @@ export async function GET() {
     
     console.log('🔍 DEBUG: Found employees:', employees);
     
-    // Test specific emails
-    const testEmails = ['mohammadh@encryptgate.net', 'contact@encryptgate.net'];
-    const testResults = {};
-    
-    for (const email of testEmails) {
-      const found = employees.find(emp => emp.email === email);
-      testResults[email] = found ? 'FOUND' : 'NOT_FOUND';
-    }
     
     return NextResponse.json({
       status: 'debug-success',
       config: { ORG_ID, EMPLOYEES_TABLE, AWS_REGION },
       totalEmployees: employees.length,
       employees,
-      testResults,
       timestamp: new Date().toISOString()
     });
     

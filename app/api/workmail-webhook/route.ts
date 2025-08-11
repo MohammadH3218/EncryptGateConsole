@@ -1,4 +1,3 @@
-// app/api/workmail-webhook/route.ts
 export const runtime = 'nodejs'
 
 import { NextResponse } from 'next/server'
@@ -13,7 +12,6 @@ import {
 } from '@aws-sdk/client-workmailmessageflow'
 import { z } from 'zod'
 
-// ─── ENVIRONMENT ───────────────────────────────────────────────────────────────
 const ORG_ID          = process.env.ORGANIZATION_ID      || 'default-org'
 const CS_TABLE        = process.env.CLOUDSERVICES_TABLE || 'CloudServices'
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees'
@@ -36,7 +34,6 @@ if (!process.env.ORGANIZATION_ID) {
 
 const ddb = new DynamoDBClient({ region: AWS_REGION })
 
-// ─── WEBHOOK PAYLOAD SCHEMA ────────────────────────────────────────────────────
 const WorkMailWebhookSchema = z.object({
   notificationType: z.string(),
   mail: z.object({
@@ -52,9 +49,7 @@ const WorkMailWebhookSchema = z.object({
   })
 })
 
-// ─── HELPERS ───────────────────────────────────────────────────────────────────
 
-// 1) Fetch WorkMail config from your CloudServices table
 async function getWorkMailConfig() {
   console.log('🔍 Fetching WorkMail configuration...')
   const resp = await ddb.send(new QueryCommand({
@@ -78,7 +73,6 @@ async function getWorkMailConfig() {
   return config
 }
 
-// 2) Check if an address is a monitored employee
 async function isMonitoredEmployee(email: string): Promise<boolean> {
   try {
     console.log(`🔍 Checking if ${email} is monitored...`)
@@ -100,7 +94,6 @@ async function isMonitoredEmployee(email: string): Promise<boolean> {
   }
 }
 
-// 3) Turn an async stream into a string
 async function streamToString(stream: any): Promise<string> {
   const chunks: Buffer[] = []
   for await (const chunk of stream) {
@@ -109,7 +102,6 @@ async function streamToString(stream: any): Promise<string> {
   return Buffer.concat(chunks).toString('utf-8')
 }
 
-// 4) Parse the raw MIME into headers + body
 async function parseRawMessage(
   mailClient: WorkMailMessageFlowClient,
   messageId: string
@@ -148,7 +140,6 @@ async function parseRawMessage(
   }
 }
 
-// 5) Extract URLs
 function extractUrls(text: string): string[] {
   const re = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi
   const urls = text.match(re) || []
@@ -156,7 +147,6 @@ function extractUrls(text: string): string[] {
   return urls
 }
 
-// 6) Simple keyword-based threat check
 function containsSuspiciousKeywords(body: string): boolean {
   const suspicious = [
     'urgent', 'verify account',
@@ -172,17 +162,15 @@ function containsSuspiciousKeywords(body: string): boolean {
   return found.length > 0
 }
 
-// ─── MAIN WEBHOOK HANDLER ──────────────────────────────────────────────────────
 export async function POST(req: Request) {
   try {
     console.log('📥 WorkMail webhook received')
     const raw = await req.json()
     console.log('📨 Webhook payload:', JSON.stringify(raw, null,2))
 
-    // Normalize SES Lambda format
     const normalized: any = raw.Records?.[0]?.ses?.mail
       ? {
-          notificationType: 'Delivery', // SES events are always delivery events
+          notificationType: 'Delivery',
           mail: {
             messageId: raw.Records[0].ses.mail.messageId,
             timestamp: raw.Records[0].ses.mail.timestamp,
@@ -217,7 +205,6 @@ export async function POST(req: Request) {
 
     console.log('📧 Processing email:', mail.messageId)
     
-    // Helper function to extract email from display name format like "Name <email@domain.com>"
     const extractEmail = (emailStr: string): string => {
       const match = emailStr.match(/<([^>]+)>/)
       return match ? match[1] : emailStr.trim()
@@ -238,7 +225,6 @@ export async function POST(req: Request) {
       extractedRecipients: recipients
     })
 
-    // check monitored
     const fromMon = await isMonitoredEmployee(sender)
     const toMons  = await Promise.all(recipients.map(isMonitoredEmployee))
     if (!(fromMon || toMons.some(x=>x))) {
@@ -250,23 +236,18 @@ export async function POST(req: Request) {
       })
     }
 
-    // For SES events, we don't need to fetch raw content as we don't have WorkMail integration
-    // Instead, we'll extract what we can from the SES headers and create a basic body
     let headers: Record<string, string> = {}
     let messageBody = ''
     
-    // Check if this is from SES (has original raw structure)
     if (raw.Records?.[0]?.ses) {
       const sesRecord = raw.Records[0].ses
       
-      // Extract headers from SES format
       if (sesRecord.mail.headers) {
         sesRecord.mail.headers.forEach((header: any) => {
           headers[header.name.toLowerCase()] = header.value
         })
       }
       
-      // Create a basic message body since SES doesn't provide the body content
       messageBody = `Email received via SES webhook processing.
       
 Subject: ${mail.commonHeaders.subject || 'No Subject'}
@@ -278,7 +259,6 @@ Date: ${headers.date || mail.timestamp}
       
       console.log('📧 Using SES webhook data (no raw message content available)')
     } else {
-      // Original WorkMail flow
       const { region } = await getWorkMailConfig()
       const mailClient = new WorkMailMessageFlowClient({ region })
       const parsed = await parseRawMessage(mailClient, mail.messageId)
@@ -287,7 +267,6 @@ Date: ${headers.date || mail.timestamp}
     }
 
     const isOutbound = fromMon
-    // pick the monitored user for partition key
     const userId = isOutbound
       ? sender
       : recipients[toMons.findIndex(Boolean)] ?? recipients[0]
@@ -311,7 +290,6 @@ Date: ${headers.date || mail.timestamp}
       hasThreat
     }
 
-    // ─── Store in DynamoDB ────────────────────────────────────────────────
     try {
       console.log(`💾 Writing to DynamoDB table ${EMAILS_TABLE}`)
       const dbItem: Record<string,any> = {
@@ -344,7 +322,6 @@ Date: ${headers.date || mail.timestamp}
       console.error('❌ DynamoDB write failed', err)
     }
 
-    // ─── Forward + threat + graph calls (unchanged) ─────────────────────────
     try {
       await fetch(`${BASE_URL}/api/email-processor`, {
         method:'POST',
@@ -388,7 +365,6 @@ Date: ${headers.date || mail.timestamp}
   }
 }
 
-// ─── GET health-check ─────────────────────────────────────────────────────────
 export async function GET() {
   console.log('🏥 Health check')
   try {

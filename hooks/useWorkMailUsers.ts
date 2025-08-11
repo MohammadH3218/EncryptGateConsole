@@ -21,7 +21,6 @@ export function useWorkMailUsers() {
     setLoading(true)
     setError(null)
     try {
-      console.log('📋 Fetching WorkMail users...')
       const res = await fetch("/api/company-settings/employees/workmail-users")
       
       if (!res.ok) {
@@ -30,7 +29,6 @@ export function useWorkMailUsers() {
       }
       
       const data: WorkMailUser[] = await res.json()
-      console.log(`✅ Fetched ${data.length} WorkMail users`)
       setWorkMailUsers(data)
     } catch (err) {
       console.error('❌ Error fetching WorkMail users:', err)
