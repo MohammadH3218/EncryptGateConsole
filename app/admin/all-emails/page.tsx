@@ -34,7 +34,6 @@ import {
   RefreshCw,
   Eye,
   Activity,
-  Info,
   Database,
   Wifi,
   Users
@@ -310,7 +309,6 @@ export default function AdminAllEmailsPage() {
     return (
       <AppLayout
         username="John Doe"
-        onSearch={setSearchQuery}
         notificationsCount={2}
       >
         <FadeInSection>
@@ -372,7 +370,6 @@ export default function AdminAllEmailsPage() {
   return (
     <AppLayout
       username="John Doe"
-      onSearch={setSearchQuery}
       notificationsCount={2}
     >
       <FadeInSection>

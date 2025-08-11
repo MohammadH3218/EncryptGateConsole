@@ -21,11 +21,11 @@ interface PushedDetection {
 }
 
 export default function PushedRequestsPage() {
-  const [searchQuery, setSearchQuery] = useState("")
+  const [searchQuery] = useState("")
   const [pushedDetections] = useState<PushedDetection[]>([])
 
   return (
-    <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={0}>
+    <AppLayout username="John Doe" notificationsCount={0}>
       <FadeInSection>
         <h2 className="text-2xl font-bold mb-4">Pushed Requests</h2>
         <PushedDetectionsList searchQuery={searchQuery} pushedDetections={pushedDetections} />
