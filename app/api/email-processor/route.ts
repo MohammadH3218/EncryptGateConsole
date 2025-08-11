@@ -12,14 +12,14 @@ const REGION = process.env.AWS_REGION || 'us-east-1';
 const ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
-console.log('📧 Email Processor initialized:', { REGION, ORG_ID, EMAILS_TABLE });
+// Email processor initialized
 
 if (!process.env.ORGANIZATION_ID) {
-  console.warn('⚠️ ORGANIZATION_ID not set, using default fallback');
+  console.warn('ORGANIZATION_ID not set, using default fallback');
 }
 
 if (!process.env.EMAILS_TABLE_NAME) {
-  console.warn('⚠️ EMAILS_TABLE_NAME not found in env vars, using fallback');
+  console.warn('EMAILS_TABLE_NAME not found in env vars, using fallback');
 }
 
 const ddb = new DynamoDBClient({ region: REGION });
@@ -70,12 +70,7 @@ export async function POST(req: Request) {
   let payload: EmailRequest;
   try {
     const rawPayload = await req.json();
-    console.log('📨 Email processor received payload:', {
-      type: rawPayload.type,
-      messageId: rawPayload.messageId,
-      sender: rawPayload.sender,
-      recipientCount: rawPayload.recipients?.length || 0
-    });
+    // Process email payload
     
     payload = EmailRequestSchema.parse(rawPayload);
   } catch (err: any) {
@@ -87,12 +82,12 @@ export async function POST(req: Request) {
   }
 
   try {
-    console.log(`📧 Processing email: ${payload.messageId} (type: ${payload.type})`);
+    // Processing email
     
     // Store email in DynamoDB
     await storeEmail(payload);
     
-    console.log(`✅ Email processed and stored successfully: ${payload.messageId}`);
+    // Email processed successfully
     
     return NextResponse.json({
       status: 'processed',
@@ -125,13 +120,11 @@ export async function POST(req: Request) {
 //
 async function storeEmail(email: EmailRequest) {
   if (email.type === 'workmail_webhook') {
-    console.log('⚠️ WorkMail webhook type - would need to fetch actual email content');
-    // For webhook notifications, we'd need to fetch the actual email content
-    // This is a simplified implementation
+    // WorkMail webhook type - would need to fetch actual email content
     return;
   }
 
-  console.log('💾 Storing email in DynamoDB...');
+  // Storing email in DynamoDB
 
   // Generate a unique email ID if not present
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -144,7 +137,7 @@ async function storeEmail(email: EmailRequest) {
     userId = email.recipients[0]; // Use first recipient for inbound emails
   }
 
-  console.log(`📝 Using userId: ${userId} for email storage`);
+  // Using userId for email storage
 
   // Match the webhook storage format exactly
   const item: Record<string, any> = {
@@ -181,17 +174,7 @@ async function storeEmail(email: EmailRequest) {
     item.urls = { SS: email.urls };
   }
 
-  console.log('📝 Email item prepared for DynamoDB (webhook format):', {
-    userId,
-    receivedAt: email.timestamp,
-    emailId,
-    messageId: email.messageId,
-    subject: email.subject,
-    sender: email.sender,
-    recipientCount: email.recipients.length,
-    bodyLength: email.body.length,
-    hasUrls: !!(email.urls && email.urls.length > 0)
-  });
+  // Email item prepared for DynamoDB
 
   try {
     await ddb.send(
@@ -201,7 +184,7 @@ async function storeEmail(email: EmailRequest) {
       })
     );
     
-    console.log('✅ Email stored in DynamoDB successfully');
+    // Email stored successfully
   } catch (err: any) {
     console.error('❌ DynamoDB storage failed:', {
       error: err.message,
@@ -224,7 +207,7 @@ export async function GET(req: Request) {
   if (action === 'health') {
     // Health check
     try {
-      console.log('🏥 Email processor health check');
+      // Health check
       
       return NextResponse.json({
         status: 'healthy',
@@ -251,7 +234,7 @@ export async function GET(req: Request) {
   }
 
   // Mock email test - FIXED to work with webhook schema
-  console.log('🧪 Generating mock email for testing...');
+  // Generating mock email for testing
   
   const mockId = `mock-${Date.now()}`;
   const mock: EmailRequest = {
@@ -289,7 +272,7 @@ This helps verify that the email processing pipeline is working correctly.`,
   try {
     await storeEmail(mock);
     
-    console.log('✅ Mock email test completed successfully');
+    // Mock email test completed
     
     return NextResponse.json({
       status: 'test-completed',

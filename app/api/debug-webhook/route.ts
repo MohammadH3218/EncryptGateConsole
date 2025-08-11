@@ -7,35 +7,8 @@ export async function POST(req: Request) {
   try {
     const payload = await req.json();
     
-    console.log('🔍 DEBUG: Received payload from Lambda:');
-    console.log(JSON.stringify(payload, null, 2));
-    
-    // Log the structure
-    console.log('🔍 DEBUG: Payload structure analysis:');
-    console.log('- Has Records:', !!payload.Records);
-    console.log('- Records length:', payload.Records?.length || 0);
-    
-    if (payload.Records?.[0]) {
-      const record = payload.Records[0];
-      console.log('- First record has ses:', !!record.ses);
-      console.log('- First record has mail:', !!record.ses?.mail);
-      console.log('- notificationType:', record.ses?.notificationType);
-      
-      if (record.ses?.mail) {
-        const mail = record.ses.mail;
-        console.log('- mail.messageId:', mail.messageId);
-        console.log('- mail.timestamp:', mail.timestamp);
-        console.log('- mail.source:', mail.source);
-        console.log('- mail.destination:', mail.destination);
-        console.log('- mail.commonHeaders:', !!mail.commonHeaders);
-        
-        if (mail.commonHeaders) {
-          console.log('  - from:', mail.commonHeaders.from);
-          console.log('  - to:', mail.commonHeaders.to);
-          console.log('  - subject:', mail.commonHeaders.subject);
-        }
-      }
-    }
+    // Log essential debug information only
+    console.log('Debug webhook received payload with', payload.Records?.length || 0, 'records');
     
     return NextResponse.json({
       status: 'debug-received',
@@ -45,7 +18,7 @@ export async function POST(req: Request) {
     });
     
   } catch (err: any) {
-    console.error('🔍 DEBUG: Error processing payload:', err);
+    console.error('Debug webhook error:', err.message);
     return NextResponse.json({
       error: 'Failed to process debug payload',
       message: err.message

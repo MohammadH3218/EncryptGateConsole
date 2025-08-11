@@ -95,7 +95,7 @@ export default function LoginPage() {
     const fallback = "https://api.console-encryptgate.net"
     const base = configured || fallback
     setApiBaseUrl(base)
-    console.log(`API URL set to ${base}`)
+    // API URL configured
     if (base) fetchServerTime(base)
   }, [])
 
@@ -120,11 +120,12 @@ export default function LoginPage() {
         setServerTime(data.server_time)
         const offset = new Date(data.server_time).getTime() - Date.now()
         localStorage.setItem("server_time_offset", offset.toString())
-        if (Math.abs(offset) > 10000)
-          console.warn(`Time sync diff >10s: ${Math.round(Math.abs(offset)/1000)}s`)
+        if (Math.abs(offset) > 10000) {
+          console.warn(`Time sync difference: ${Math.round(Math.abs(offset)/1000)}s`)
+        }
       }
     } catch (e) {
-      console.error("Failed fetching server time", e)
+      console.error("Failed to sync server time")
     }
   }
 
@@ -167,7 +168,7 @@ export default function LoginPage() {
         }
       }
     } catch (e) {
-      console.error("Error fetching MFA codes", e)
+      console.error("Error fetching MFA codes")
     }
   }
 
@@ -188,7 +189,7 @@ export default function LoginPage() {
     const pwToUse = stored || password
 
     try {
-      console.log("Authenticating:", email)
+      // Authenticating user
       const resp = await fetchWithRetry(
         `${apiBaseUrl}/api/auth/authenticate`,
         {
@@ -200,7 +201,7 @@ export default function LoginPage() {
         }
       )
       const data: LoginResponse = await resp.json()
-      console.log("Auth response status:", resp.status)
+      // Processing authentication response
 
       if (!resp.ok) {
         throw new Error(data.detail || `Authentication failed (${resp.status})`)
@@ -264,7 +265,7 @@ export default function LoginPage() {
         throw new Error("Unexpected authentication response")
       }
     } catch (e: any) {
-      console.error("Login error:", e)
+      console.error("Authentication failed:", e.message)
       setError(e.message || "Login failed")
     } finally {
       setIsLoading(false)
@@ -301,7 +302,7 @@ export default function LoginPage() {
     setError("")
 
     try {
-      console.log("NEW_PASSWORD_REQUIRED challenge")
+      // Processing password change challenge
       const res = await fetchWithRetry(
         `${apiBaseUrl}/api/auth/respond-to-challenge`,
         {
@@ -319,7 +320,7 @@ export default function LoginPage() {
         1
       )
       const d = await res.json()
-      console.log("Password change status:", res.status)
+      // Processing password change response
       if (!res.ok) {
         throw new Error(d.detail || `Failed to change password (${res.status})`)
       }
@@ -377,7 +378,7 @@ export default function LoginPage() {
         await handleLogin()
       }
     } catch (e: any) {
-      console.error("Password change error", e)
+      console.error("Password change failed:", e.message)
       setError(e.message || "Failed to change password")
     } finally {
       setIsLoading(false)
@@ -423,7 +424,7 @@ export default function LoginPage() {
         2
       )
       const d = await resp.json()
-      console.log("MFA setup verify status:", resp.status)
+      // Processing MFA setup verification
       if (!resp.ok) {
         // handle expired-code as success
         if (
@@ -456,7 +457,7 @@ export default function LoginPage() {
       localStorage.removeItem("temp_refresh_token")
       router.push("/admin/dashboard")
     } catch (e: any) {
-      console.error("MFA setup error", e)
+      console.error("MFA setup failed:", e.message)
       setError(e.message || "MFA setup failed")
     } finally {
       setIsLoading(false)
@@ -525,7 +526,7 @@ export default function LoginPage() {
       // success
       finalizeLogin(d.access_token||"", d.id_token||"", d.refresh_token||"")
     } catch (e: any) {
-      console.error("MFA verify error", e)
+      console.error("MFA verification failed:", e.message)
       setError(e.message || "MFA verification failed")
     } finally {
       setIsLoading(false)

@@ -13,48 +13,21 @@ import { getInProgressInvestigations } from "@/lib/investigation-service"
 import { cn } from "@/lib/utils"
 import { AssignmentsList } from "@/components/assignments-list"
 
-// Mock data for assignments
-const mockAssignments = [
-  {
-    id: 1,
-    uniqueId: "DET-001",
-    severity: "Critical",
-    name: "Phishing Attempt",
-    status: "In Progress",
-    assignedTo: ["John Doe"],
-    sentBy: "suspicious@phishing.com",
-    timestamp: "2024-01-31T15:20:00Z",
-    description: "Suspicious email with malicious attachment",
-    indicators: ["Suspicious sender", "Malicious attachment", "Urgent request"],
-    recommendations: ["Block sender", "Delete email", "Notify affected users"],
-  },
-  {
-    id: 2,
-    uniqueId: "DET-002",
-    severity: "High",
-    name: "Suspicious Login",
-    status: "New",
-    assignedTo: ["John Doe", "Jane Smith"],
-    sentBy: "security@company.com",
-    timestamp: "2024-01-31T14:10:00Z",
-    description: "Multiple failed login attempts from unusual location",
-    indicators: ["Multiple failures", "Unusual location", "Off-hours activity"],
-    recommendations: ["Reset password", "Enable 2FA", "Review access logs"],
-  },
-  {
-    id: 3,
-    uniqueId: "DET-003",
-    severity: "Medium",
-    name: "Data Exfiltration Attempt",
-    status: "In Progress",
-    assignedTo: ["John Doe"],
-    sentBy: "employee@company.com",
-    timestamp: "2024-01-31T12:30:00Z",
-    description: "Large amount of data being sent to external location",
-    indicators: ["Large data transfer", "Unusual recipient", "Sensitive data"],
-    recommendations: ["Block transfer", "Investigate user", "Review DLP policies"],
-  },
-]
+interface Assignment {
+  id: number
+  uniqueId: string
+  severity: string
+  name: string
+  status: string
+  assignedTo: string[]
+  sentBy: string
+  timestamp: string
+  description: string
+  indicators: string[]
+  recommendations: string[]
+}
+
+const mockAssignments: Assignment[] = []
 type Investigation = ReturnType<typeof getInProgressInvestigations>[0];
 
 interface InvestigationWithSeverity extends Investigation {
@@ -63,7 +36,7 @@ interface InvestigationWithSeverity extends Investigation {
 
 export default function AssignmentsPage() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [assignments, setAssignments] = useState(mockAssignments)
+  const [assignments] = useState<Assignment[]>(mockAssignments)
   const [inProgressInvestigations, setInProgressInvestigations] = useState<InvestigationWithSeverity[]>([])
   const [activeTab, setActiveTab] = useState("continue")
   const router = useRouter()
@@ -72,12 +45,9 @@ export default function AssignmentsPage() {
     // Load in-progress investigations
     const investigations = getInProgressInvestigations()
 
-    // Add mock severity for demo purposes
-    // In a real app, this would come from the actual investigation data
     const investigationsWithSeverity = investigations.map((inv) => ({
       ...inv,
-      severity:
-        Math.random() > 0.7 ? "Critical" : Math.random() > 0.5 ? "High" : Math.random() > 0.3 ? "Medium" : "Low",
+      severity: "Low",
     }))
 
     // Sort by severity (Critical -> High -> Medium -> Low)
@@ -96,9 +66,6 @@ export default function AssignmentsPage() {
     router.push(`/admin/investigate/${id}`)
   }
 
-  const handleStartInvestigation = (id: number) => {
-    router.push(`/admin/investigate/${id}`)
-  }
 
   const getSeverityBadgeClass = (severity: string) => {
     switch (severity) {

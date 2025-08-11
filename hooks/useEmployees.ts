@@ -25,14 +25,12 @@ export function useEmployees() {
     setLoading(true)
     setError(null)
     try {
-      console.log('📋 Fetching monitored employees...')
       const res = await fetch("/api/company-settings/employees")
       if (!res.ok) {
         const errorData = await res.json()
         throw new Error(errorData.message || "Failed to load employees")
       }
       const data: Employee[] = await res.json()
-      console.log(`✅ Fetched ${data.length} monitored employees`)
       setEmployees(data)
     } catch (err) {
       console.error('❌ Error fetching employees:', err)
@@ -47,7 +45,6 @@ export function useEmployees() {
       setLoading(true)
       setError(null)
       try {
-        console.log(`👤 Adding employee to monitoring: ${employee.email}`)
         const res = await fetch("/api/company-settings/employees", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -59,7 +56,6 @@ export function useEmployees() {
         }
         const newEmp: Employee = await res.json()
         setEmployees((prev) => [...prev, newEmp])
-        console.log(`✅ Employee added to monitoring: ${employee.email}`)
         return newEmp
       } catch (err) {
         console.error(`❌ Error adding employee:`, err)
@@ -77,7 +73,6 @@ export function useEmployees() {
       setLoading(true)
       setError(null)
       try {
-        console.log(`🗑️ Removing employee from monitoring: ${id}`)
         const res = await fetch(
           `/api/company-settings/employees/${encodeURIComponent(id)}`,
           { method: "DELETE" }
@@ -87,7 +82,6 @@ export function useEmployees() {
           throw new Error(errorData.message || "Failed to remove employee")
         }
         setEmployees((prev) => prev.filter((e) => e.id !== id))
-        console.log(`✅ Employee removed from monitoring: ${id}`)
       } catch (err) {
         console.error(`❌ Error removing employee:`, err)
         setError(err as Error)

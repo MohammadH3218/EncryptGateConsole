@@ -27,90 +27,17 @@ import { Cloud, MoreHorizontal, Plus, Search, Shield } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
-// Mock data for roles
-const mockRoles = [
-  {
-    id: "role-1",
-    name: "Security Admin",
-    description: "Full access to all security features",
-    userCount: 3,
-    permissions: [
-      "view_dashboard",
-      "manage_users",
-      "manage_roles",
-      "view_detections",
-      "manage_detections",
-      "view_emails",
-      "manage_allow_block_list",
-      "manage_cloud_services",
-    ],
-  },
-  {
-    id: "role-2",
-    name: "IT Specialist",
-    description: "Access to view and manage detections",
-    userCount: 5,
-    permissions: ["view_dashboard", "view_detections", "manage_detections", "view_emails", "manage_allow_block_list"],
-  },
-  {
-    id: "role-3",
-    name: "Security Analyst",
-    description: "Access to view and analyze security data",
-    userCount: 2,
-    permissions: ["view_dashboard", "view_detections", "view_emails"],
-  },
-]
+// Empty array for production use
+const mockRoles: any[] = []
 
-// Mock data for users
-const mockUsers = [
-  {
-    id: "user-1",
-    email: "john.smith@company1.com",
-    name: "John Smith",
-    role: "Security Admin",
-    status: "active",
-    lastLogin: "2024-01-31T15:20:00Z",
-  },
-  {
-    id: "user-2",
-    email: "jane.doe@company1.com",
-    name: "Jane Doe",
-    role: "IT Specialist",
-    status: "active",
-    lastLogin: "2024-01-30T10:15:00Z",
-  },
-  {
-    id: "user-3",
-    email: "bob.johnson@company1.com",
-    name: "Bob Johnson",
-    role: "Security Analyst",
-    status: "pending",
-    lastLogin: null,
-  },
-]
+// Empty array for production use
+const mockUsers: any[] = []
 
-// Mock data for permissions
-const mockPermissions = [
-  { id: "view_dashboard", name: "View Dashboard", description: "Can view the dashboard" },
-  { id: "manage_users", name: "Manage Users", description: "Can add, edit, and delete users" },
-  { id: "manage_roles", name: "Manage Roles", description: "Can add, edit, and delete roles" },
-  { id: "view_detections", name: "View Detections", description: "Can view security detections" },
-  { id: "manage_detections", name: "Manage Detections", description: "Can manage security detections" },
-  { id: "view_emails", name: "View Emails", description: "Can view emails" },
-  { id: "manage_allow_block_list", name: "Manage Allow/Block List", description: "Can manage the allow/block list" },
-  { id: "manage_cloud_services", name: "Manage Cloud Services", description: "Can manage cloud service connections" },
-]
+// Empty array for production use
+const mockPermissions: any[] = []
 
-// Mock data for connected services
-const mockConnectedServices = [
-  {
-    id: "aws-cognito",
-    name: "AWS Cognito",
-    status: "connected",
-    lastSynced: "2024-01-31T15:20:00Z",
-    userCount: 24,
-  },
-]
+// Empty array for production use
+const mockConnectedServices: any[] = []
 
 export default function RolesPage() {
   const router = useRouter()
@@ -119,8 +46,8 @@ export default function RolesPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [roles, setRoles] = useState(mockRoles)
   const [users, setUsers] = useState(mockUsers)
-  const [permissions, setPermissions] = useState(mockPermissions)
-  const [connectedServices, setConnectedServices] = useState(mockConnectedServices)
+  const [permissions] = useState(mockPermissions)
+  const [connectedServices] = useState(mockConnectedServices)
   const [isAddRoleDialogOpen, setIsAddRoleDialogOpen] = useState(false)
   const [isEditUserRoleDialogOpen, setIsEditUserRoleDialogOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<(typeof mockUsers)[0] | null>(null)
@@ -407,7 +334,7 @@ export default function RolesPage() {
                                 <div className="flex flex-wrap gap-1">
                                   {role.permissions.length > 3 ? (
                                     <>
-                                      {role.permissions.slice(0, 2).map((permission) => (
+                                      {role.permissions.slice(0, 2).map((permission: string) => (
                                         <Badge key={permission} variant="outline" className="mr-1">
                                           {permissions.find((p) => p.id === permission)?.name || permission}
                                         </Badge>
@@ -415,7 +342,7 @@ export default function RolesPage() {
                                       <Badge variant="outline">+{role.permissions.length - 2} more</Badge>
                                     </>
                                   ) : (
-                                    role.permissions.map((permission) => (
+                                    role.permissions.map((permission: string) => (
                                       <Badge key={permission} variant="outline" className="mr-1">
                                         {permissions.find((p) => p.id === permission)?.name || permission}
                                       </Badge>

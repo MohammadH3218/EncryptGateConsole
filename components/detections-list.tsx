@@ -26,61 +26,7 @@ interface Detection {
   recommendations: string[]
 }
 
-// Add initial detections with sample data
-const initialDetections: Detection[] = [
-  {
-    id: 1,
-    uniqueId: "123e4567-e89b-12d3-a456-426614174000",
-    severity: "Flagged",
-    name: "Suspicious Invoice Request",
-    status: "New",
-    assignedTo: ["Alice Johnson", "Bob Smith"],
-    sentBy: "unknown.sender@external.com",
-    timestamp: "2024-01-31 09:15:00",
-    description: "Request for urgent invoice payment with suspicious attachment.",
-    indicators: ["Manually flagged from All Emails", "External sender", "Urgent payment request"],
-    recommendations: ["Review attachment in sandbox", "Verify sender identity", "Check payment details"],
-  },
-  {
-    id: 2,
-    uniqueId: "123e4567-e89b-12d3-a456-426614174001",
-    severity: "Critical",
-    name: "Multiple Failed Login Attempts",
-    status: "In Progress",
-    assignedTo: ["Charlie Brown"],
-    sentBy: "security@company.com",
-    timestamp: "2024-01-31 10:30:00",
-    description: "Multiple failed login attempts detected from various IP addresses.",
-    indicators: ["Failed login attempts", "Multiple IPs", "Account lockout triggered"],
-    recommendations: ["Review login logs", "Check for compromised credentials", "Enable 2FA"],
-  },
-  {
-    id: 3,
-    uniqueId: "123e4567-e89b-12d3-a456-426614174002",
-    severity: "High",
-    name: "Potential Data Exfiltration",
-    status: "New",
-    assignedTo: ["Diana Prince"],
-    sentBy: "dlp@company.com",
-    timestamp: "2024-01-31 11:45:00",
-    description: "Large amount of sensitive data being transferred to external storage.",
-    indicators: ["Large data transfer", "Sensitive content detected", "Unusual timing"],
-    recommendations: ["Block transfer", "Investigate user activity", "Review DLP policies"],
-  },
-  {
-    id: 4,
-    uniqueId: "123e4567-e89b-12d3-a456-426614174003",
-    severity: "Flagged",
-    name: "Vendor Payment Change Request",
-    status: "New",
-    assignedTo: [],
-    sentBy: "accounting@partner.com",
-    timestamp: "2024-01-31 13:20:00",
-    description: "Request to update vendor payment details without proper verification.",
-    indicators: ["Manually flagged from All Emails", "Payment information change", "Verification bypass attempt"],
-    recommendations: ["Verify with vendor through established channels", "Review payment processes"],
-  },
-]
+const initialDetections: Detection[] = []
 
 interface DetectionsListProps {
   searchQuery: string
