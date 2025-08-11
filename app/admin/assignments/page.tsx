@@ -35,7 +35,7 @@ interface InvestigationWithSeverity extends Investigation {
 }
 
 export default function AssignmentsPage() {
-  const [searchQuery, setSearchQuery] = useState("")
+  const [searchQuery] = useState("")
   const [assignments] = useState<Assignment[]>(mockAssignments)
   const [inProgressInvestigations, setInProgressInvestigations] = useState<InvestigationWithSeverity[]>([])
   const [activeTab, setActiveTab] = useState("continue")
@@ -83,7 +83,7 @@ export default function AssignmentsPage() {
   }
 
   return (
-    <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={1}>
+    <AppLayout username="John Doe" notificationsCount={1}>
       <FadeInSection>
         <h2 className="text-2xl font-bold mb-4">Assignments</h2>
 

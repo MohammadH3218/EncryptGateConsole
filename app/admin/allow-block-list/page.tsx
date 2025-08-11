@@ -13,12 +13,12 @@ const mockBlockedSenders: any[] = []
 const mockAllowedSenders: any[] = []
 
 export default function AllowBlockListPage() {
-  const [searchQuery, setSearchQuery] = useState("")
+  const [searchQuery] = useState("")
   const [blockedSenders] = useState(mockBlockedSenders)
   const [allowedSenders] = useState(mockAllowedSenders)
 
   return (
-    <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={0}>
+    <AppLayout username="John Doe" notificationsCount={0}>
       <FadeInSection>
         <h2 className="text-2xl font-bold mb-4">Allow/Block List</h2>
         <Tabs defaultValue="blocked" className="w-full">

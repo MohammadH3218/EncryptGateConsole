@@ -1,39 +1,52 @@
-"use client"
-
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { useCountAnimation } from "@/hooks/use-count-animation"
-import { motion } from "framer-motion"
+import type React from "react"
+import { Card, CardContent } from "@/components/ui/card"
 
 interface StatCardProps {
   title: string
   value: number
   description: string
+  previousValue?: number
+  icon?: React.ReactNode
 }
 
-export function StatCard({ title, value, description }: StatCardProps) {
-  const animatedValue = useCountAnimation(value)
+export function StatCard({ title, value, description, previousValue, icon }: StatCardProps) {
+  const percentageChange = previousValue ? ((value - previousValue) / previousValue) * 100 : 0
+  const isPositive = percentageChange > 0
+  const isNegative = percentageChange < 0
 
   return (
-    <Card className="h-full bg-card">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 pt-6">
-        <CardTitle className="text-base font-medium">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="pb-6">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="relative"
-        >
-          <div className="text-3xl font-bold">{animatedValue.toLocaleString()}</div>
-          <motion.div
-            initial={{ scaleX: 0 }}
-            animate={{ scaleX: 1 }}
-            transition={{ duration: 1.5, ease: "easeOut" }}
-            className="absolute bottom-0 left-0 h-[2px] bg-gradient-to-r from-primary to-transparent w-full origin-left"
-          />
-        </motion.div>
-        <p className="text-sm text-muted-foreground mt-2">{description}</p>
+    <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+      <CardContent className="p-6">
+        <div className="text-center">
+          {icon && <div className="flex justify-center mb-3 text-white/70">{icon}</div>}
+
+          <h3 className="text-white/70 text-sm font-medium mb-2 uppercase tracking-wider">{title}</h3>
+
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <div className="text-3xl font-bold text-white">{value.toLocaleString()}</div>
+
+            {previousValue && (
+              <div
+                className={`text-sm font-medium px-2 py-1 rounded ${
+                  isPositive
+                    ? "text-green-400 bg-green-400/10"
+                    : isNegative
+                      ? "text-red-400 bg-red-400/10"
+                      : "text-white/60"
+                }`}
+              >
+                {isPositive ? "+" : ""}
+                {percentageChange.toFixed(0)}%
+              </div>
+            )}
+          </div>
+
+          <p className="text-white/60 text-sm">{description}</p>
+
+          {previousValue && (
+            <p className="text-white/40 text-xs mt-1">Previous week: {previousValue.toLocaleString()}</p>
+          )}
+        </div>
       </CardContent>
     </Card>
   )

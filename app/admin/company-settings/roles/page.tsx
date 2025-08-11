@@ -166,7 +166,7 @@ export default function RolesPage() {
   }
 
   return (
-    <AppLayout username="John Doe" onSearch={setSearchQuery} notificationsCount={0}>
+    <AppLayout username="John Doe" notificationsCount={0}>
       <FadeInSection>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold">Roles & Permissions</h2>
