@@ -77,19 +77,19 @@ export function AssignmentsList({ searchQuery, assignments }: AssignmentsListPro
           variant="outline"
           role="combobox"
           aria-expanded={openPopover[filterType]}
-          className="h-6 w-6 p-0 border-none bg-transparent"
+          className="h-6 w-6 p-0 border-none bg-transparent text-white hover:bg-[#2a2a2a]"
         >
           <ChevronDown className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[200px] p-0" align={align}>
-        <Command>
-          <CommandInput placeholder={`Search`} />
-          <CommandList>
-            <CommandEmpty>No option found.</CommandEmpty>
+      <PopoverContent className="w-[200px] p-0 bg-[#1f1f1f] border-[#1f1f1f]" align={align}>
+        <Command className="bg-[#1f1f1f]">
+          <CommandInput placeholder={`Search`} className="bg-[#1f1f1f] text-white border-[#1f1f1f]" />
+          <CommandList className="bg-[#1f1f1f]">
+            <CommandEmpty className="text-white">No option found.</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (
-                <CommandItem key={option} value={option} onSelect={() => handleFilterChange(filterType, option)}>
+                <CommandItem key={option} value={option} onSelect={() => handleFilterChange(filterType, option)} className="text-white hover:bg-[#2a2a2a] focus:bg-[#2a2a2a] focus:text-white">
                   <Check className={cn("mr-2 h-4 w-4", filters[filterType] === option ? "opacity-100" : "opacity-0")} />
                   {option}
                 </CommandItem>
@@ -120,30 +120,30 @@ export function AssignmentsList({ searchQuery, assignments }: AssignmentsListPro
 
   return (
     <>
-      <Card className="border shadow-sm">
+      <Card className="border-none bg-[#0f0f0f] shadow-sm">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead className="w-[100px]">
+            <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+              <TableHead className="w-[100px] text-white">
                 <div className="flex items-center space-x-2">
                   <span>ID</span>
                 </div>
               </TableHead>
-              <TableHead className="w-[150px]">
+              <TableHead className="w-[150px] text-white">
                 <div className="flex items-center space-x-2">
                   <span>Severity</span>
                   {renderFilterPopover("severity", ["All", "Critical", "High", "Medium", "Low", "Flagged"])}
                 </div>
               </TableHead>
-              <TableHead>Subject</TableHead>
-              <TableHead className="w-[150px]">
+              <TableHead className="text-white">Subject</TableHead>
+              <TableHead className="w-[150px] text-white">
                 <div className="flex items-center space-x-2">
                   <span>Status</span>
                   {renderFilterPopover("status", ["All", "New", "In Progress", "Resolved", "Closed"])}
                 </div>
               </TableHead>
-              <TableHead>Sent by</TableHead>
-              <TableHead className="text-right w-[200px]">
+              <TableHead className="text-white">Sent by</TableHead>
+              <TableHead className="text-right w-[200px] text-white">
                 <div className="flex items-center justify-end space-x-2">
                   <span>Timestamp</span>
                   {renderFilterPopover(
@@ -159,19 +159,19 @@ export function AssignmentsList({ searchQuery, assignments }: AssignmentsListPro
             {filteredAssignments.map((assignment) => (
               <TableRow
                 key={assignment.id}
-                className="cursor-pointer hover:bg-muted/50"
+                className="cursor-pointer hover:bg-[#1f1f1f] border-[#1f1f1f]"
                 onClick={() => setSelectedDetection(assignment)}
               >
-                <TableCell>{assignment.uniqueId}</TableCell>
+                <TableCell className="text-white">{assignment.uniqueId}</TableCell>
                 <TableCell>
                   <Badge className={cn("w-20", getSeverityBadgeClass(assignment.severity))}>
                     {assignment.severity}
                   </Badge>
                 </TableCell>
-                <TableCell className="font-medium">{assignment.name}</TableCell>
-                <TableCell>{assignment.status}</TableCell>
-                <TableCell>{assignment.sentBy}</TableCell>
-                <TableCell className="text-right">{assignment.timestamp}</TableCell>
+                <TableCell className="font-medium text-white">{assignment.name}</TableCell>
+                <TableCell className="text-white">{assignment.status}</TableCell>
+                <TableCell className="text-white">{assignment.sentBy}</TableCell>
+                <TableCell className="text-right text-white">{assignment.timestamp}</TableCell>
               </TableRow>
             ))}
           </TableBody>

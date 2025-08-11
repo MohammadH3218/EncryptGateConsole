@@ -111,19 +111,19 @@ export default function ProfilePage() {
     <AppLayout username={profile.name} notificationsCount={3}>
       <FadeInSection>
         <div className="max-w-3xl mx-auto">
-          <h2 className="text-2xl font-bold mb-6">Your Profile</h2>
+          <h2 className="text-2xl font-bold mb-6 text-white">Your Profile</h2>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="mb-6">
-              <TabsTrigger value="profile">Profile Information</TabsTrigger>
-              <TabsTrigger value="password">Change Password</TabsTrigger>
+            <TabsList className="mb-6 bg-[#1f1f1f] border-[#1f1f1f]">
+              <TabsTrigger value="profile" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Profile Information</TabsTrigger>
+              <TabsTrigger value="password" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Change Password</TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile">
-              <Card>
+              <Card className="bg-[#0f0f0f] border-none text-white">
                 <CardHeader>
-                  <CardTitle>Personal Information</CardTitle>
-                  <CardDescription>Update your personal information and profile settings</CardDescription>
+                  <CardTitle className="text-white">Personal Information</CardTitle>
+                  <CardDescription className="text-gray-400">Update your personal information and profile settings</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="flex flex-col sm:flex-row gap-6 items-start sm:items-center">
@@ -208,13 +208,13 @@ export default function ProfilePage() {
             </TabsContent>
 
             <TabsContent value="password">
-              <Card>
+              <Card className="bg-[#0f0f0f] border-none text-white">
                 <CardHeader>
                   <div className="flex items-center gap-2">
-                    <KeyRound className="h-5 w-5 text-primary" />
-                    <CardTitle>Update Your Password</CardTitle>
+                    <KeyRound className="h-5 w-5 text-blue-400" />
+                    <CardTitle className="text-white">Update Your Password</CardTitle>
                   </div>
-                  <CardDescription>
+                  <CardDescription className="text-gray-400">
                     Choose a strong, unique password that you don't use for other accounts
                   </CardDescription>
                 </CardHeader>

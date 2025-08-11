@@ -66,20 +66,20 @@ export function AllowedSendersList({ searchQuery, allowedSenders }: AllowedSende
           variant="outline"
           role="combobox"
           aria-expanded={openPopover[filterType]}
-          className="h-8 w-[200px] justify-between"
+          className="h-8 w-[200px] justify-between bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
         >
           {filters[filterType]}
           <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[200px] p-0" align={align}>
-        <Command>
-          <CommandInput placeholder={`Search ${filterType}`} />
-          <CommandList>
-            <CommandEmpty>No option found.</CommandEmpty>
+      <PopoverContent className="w-[200px] p-0 bg-[#1f1f1f] border-[#1f1f1f]" align={align}>
+        <Command className="bg-[#1f1f1f]">
+          <CommandInput placeholder={`Search ${filterType}`} className="bg-[#1f1f1f] text-white border-[#1f1f1f]" />
+          <CommandList className="bg-[#1f1f1f]">
+            <CommandEmpty className="text-white">No option found.</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (
-                <CommandItem key={option} value={option} onSelect={() => handleFilterChange(filterType, option)}>
+                <CommandItem key={option} value={option} onSelect={() => handleFilterChange(filterType, option)} className="text-white hover:bg-[#2a2a2a] focus:bg-[#2a2a2a] focus:text-white">
                   <Check className={cn("mr-2 h-4 w-4", filters[filterType] === option ? "opacity-100" : "opacity-0")} />
                   {option}
                 </CommandItem>
@@ -93,18 +93,18 @@ export function AllowedSendersList({ searchQuery, allowedSenders }: AllowedSende
 
   return (
     <>
-      <Card className="border shadow-sm">
+      <Card className="border-none bg-[#0f0f0f] shadow-sm">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Email</TableHead>
-              <TableHead className="w-[200px]">
+            <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+              <TableHead className="text-white">Email</TableHead>
+              <TableHead className="w-[200px] text-white">
                 <div className="flex items-center space-x-2">
                   <span>Allowed By</span>
                   {renderFilterPopover("allowedBy", ["All", ...new Set(allowedSenders.map((s) => s.allowedBy))])}
                 </div>
               </TableHead>
-              <TableHead className="text-right w-[200px]">
+              <TableHead className="text-right w-[200px] text-white">
                 <div className="flex items-center justify-end space-x-2">
                   <span>Timestamp</span>
                   {renderFilterPopover(
@@ -120,12 +120,12 @@ export function AllowedSendersList({ searchQuery, allowedSenders }: AllowedSende
             {filteredSenders.map((sender) => (
               <TableRow
                 key={sender.id}
-                className="cursor-pointer hover:bg-muted/50"
+                className="cursor-pointer hover:bg-[#1f1f1f] border-[#1f1f1f]"
                 onClick={() => setSelectedSender(sender)}
               >
-                <TableCell>{sender.email}</TableCell>
-                <TableCell>{sender.allowedBy}</TableCell>
-                <TableCell className="text-right">{sender.timestamp}</TableCell>
+                <TableCell className="text-white">{sender.email}</TableCell>
+                <TableCell className="text-white">{sender.allowedBy}</TableCell>
+                <TableCell className="text-right text-white">{sender.timestamp}</TableCell>
               </TableRow>
             ))}
           </TableBody>

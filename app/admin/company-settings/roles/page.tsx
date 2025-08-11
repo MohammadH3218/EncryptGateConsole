@@ -169,20 +169,20 @@ export default function RolesPage() {
     <AppLayout username="John Doe" notificationsCount={0}>
       <FadeInSection>
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold">Roles & Permissions</h2>
+          <h2 className="text-2xl font-bold text-white">Roles & Permissions</h2>
           <div className="flex gap-2">
             <div className="relative w-64">
-              <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <Input
                 placeholder="Search roles..."
-                className="pl-8"
+                className="pl-8 bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
             <Dialog open={isAddRoleDialogOpen} onOpenChange={setIsAddRoleDialogOpen}>
               <DialogTrigger asChild>
-                <Button>
+                <Button className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                   <Plus className="mr-2 h-4 w-4" />
                   Add Role
                 </Button>
@@ -280,47 +280,47 @@ export default function RolesPage() {
         </div>
 
         {connectedServices.length === 0 ? (
-          <Card className="border-dashed border-2">
+          <Card className="border-dashed border-2 border-[#1f1f1f] bg-[#0f0f0f]">
             <CardContent className="pt-6 flex flex-col items-center justify-center min-h-[300px] text-center">
-              <Cloud className="h-16 w-16 text-muted-foreground mb-4" />
-              <h3 className="text-xl font-medium mb-2">No Cloud Services Connected</h3>
-              <p className="text-muted-foreground mb-6 max-w-md">
+              <Cloud className="h-16 w-16 text-gray-400 mb-4" />
+              <h3 className="text-xl font-medium mb-2 text-white">No Cloud Services Connected</h3>
+              <p className="text-gray-400 mb-6 max-w-md">
                 You need to connect a cloud service before you can manage roles and permissions.
               </p>
-              <Button onClick={() => router.push("/admin/company-settings/cloud-services")}>Connect Service</Button>
+              <Button onClick={() => router.push("/admin/company-settings/cloud-services")} className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">Connect Service</Button>
             </CardContent>
           </Card>
         ) : (
           <div className="space-y-6">
-            <Alert>
-              <Shield className="h-4 w-4" />
-              <AlertTitle>Role Management</AlertTitle>
-              <AlertDescription>
+            <Alert className="bg-blue-900/20 border-blue-500/20 text-white">
+              <Shield className="h-4 w-4 text-blue-400" />
+              <AlertTitle className="text-white">Role Management</AlertTitle>
+              <AlertDescription className="text-gray-300">
                 Roles define what users can do in the system. Assign permissions carefully.
               </AlertDescription>
             </Alert>
 
             <Tabs defaultValue="roles">
-              <TabsList className="mb-4">
-                <TabsTrigger value="roles">Roles</TabsTrigger>
-                <TabsTrigger value="users">Users & Assignments</TabsTrigger>
+              <TabsList className="mb-4 bg-[#1f1f1f] border-[#1f1f1f]">
+                <TabsTrigger value="roles" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Roles</TabsTrigger>
+                <TabsTrigger value="users" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Users & Assignments</TabsTrigger>
               </TabsList>
 
               <TabsContent value="roles">
-                <Card>
+                <Card className="bg-[#0f0f0f] border-none text-white">
                   <CardHeader>
-                    <CardTitle>Roles</CardTitle>
-                    <CardDescription>Manage roles and their permissions.</CardDescription>
+                    <CardTitle className="text-white">Roles</CardTitle>
+                    <CardDescription className="text-gray-400">Manage roles and their permissions.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     <Table>
                       <TableHeader>
-                        <TableRow>
-                          <TableHead>Role Name</TableHead>
-                          <TableHead>Description</TableHead>
-                          <TableHead>Users</TableHead>
-                          <TableHead>Permissions</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
+                        <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                          <TableHead className="text-white">Role Name</TableHead>
+                          <TableHead className="text-white">Description</TableHead>
+                          <TableHead className="text-white">Users</TableHead>
+                          <TableHead className="text-white">Permissions</TableHead>
+                          <TableHead className="text-right text-white">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>

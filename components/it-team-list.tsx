@@ -62,34 +62,34 @@ export function ITTeamList({ searchQuery }: ITTeamListProps) {
   }
 
   if (isLoading) {
-    return <div>Loading IT team members...</div>
+    return <div className="text-white">Loading IT team members...</div>
   }
 
   return (
     <>
-      <Card className="border shadow-sm">
+      <Card className="border-none bg-[#0f0f0f] shadow-sm">
         <Table>
           <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>ID</TableHead>
-              <TableHead>Username</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Roles</TableHead>
+            <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+              <TableHead className="text-white">Name</TableHead>
+              <TableHead className="text-white">ID</TableHead>
+              <TableHead className="text-white">Username</TableHead>
+              <TableHead className="text-white">Email</TableHead>
+              <TableHead className="text-white">Roles</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredEmployees.map((employee) => (
               <TableRow
                 key={employee.id}
-                className="cursor-pointer hover:bg-muted/50"
+                className="cursor-pointer hover:bg-[#1f1f1f] border-[#1f1f1f]"
                 onClick={() => handleEmployeeClick(employee)}
               >
-                <TableCell className="font-medium">{employee.name}</TableCell>
-                <TableCell>{employee.id}</TableCell>
-                <TableCell>{employee.username}</TableCell>
-                <TableCell>{employee.email}</TableCell>
-                <TableCell>{employee.roles.join(", ")}</TableCell>
+                <TableCell className="font-medium text-white">{employee.name}</TableCell>
+                <TableCell className="text-white">{employee.id}</TableCell>
+                <TableCell className="text-white">{employee.username}</TableCell>
+                <TableCell className="text-white">{employee.email}</TableCell>
+                <TableCell className="text-white">{employee.roles.join(", ")}</TableCell>
               </TableRow>
             ))}
           </TableBody>

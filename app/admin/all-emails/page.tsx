@@ -312,49 +312,49 @@ export default function AdminAllEmailsPage() {
         notificationsCount={2}
       >
         <FadeInSection>
-          <Alert variant="destructive" className="mb-6">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Error Loading Emails</AlertTitle>
-            <AlertDescription>
+          <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20 text-white">
+            <AlertTriangle className="h-4 w-4 text-red-400" />
+            <AlertTitle className="text-white">Error Loading Emails</AlertTitle>
+            <AlertDescription className="text-gray-300">
               {error}
             </AlertDescription>
           </Alert>
           
           {debugInfo && (
-            <Card className="mb-6">
+            <Card className="mb-6 bg-[#0f0f0f] border-none text-white">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Database className="h-4 w-4" />
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <Database className="h-4 w-4 text-white" />
                   Debug Information
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 text-sm">
-                  <div><strong>Organization ID:</strong> {debugInfo.orgId || 'Not set'}</div>
-                  <div><strong>Table Name:</strong> {debugInfo.tableName}</div>
-                  <div><strong>Region:</strong> {debugInfo.region || 'Not specified'}</div>
+                  <div><strong className="text-white">Organization ID:</strong> <span className="text-gray-400">{debugInfo.orgId || 'Not set'}</span></div>
+                  <div><strong className="text-white">Table Name:</strong> <span className="text-gray-400">{debugInfo.tableName}</span></div>
+                  <div><strong className="text-white">Region:</strong> <span className="text-gray-400">{debugInfo.region || 'Not specified'}</span></div>
                 </div>
               </CardContent>
             </Card>
           )}
 
-          <Card className="border-destructive">
+          <Card className="border-red-500/20 bg-[#0f0f0f]">
             <CardContent className="pt-6">
               <div className="flex flex-col items-center gap-4">
-                <AlertTriangle className="h-12 w-12 text-destructive" />
+                <AlertTriangle className="h-12 w-12 text-red-400" />
                 <div className="text-center">
-                  <h3 className="text-lg font-semibold">Failed to Load Emails</h3>
-                  <p className="text-muted-foreground mt-2">
+                  <h3 className="text-lg font-semibold text-white">Failed to Load Emails</h3>
+                  <p className="text-gray-400 mt-2">
                     There was an error connecting to the email database. This could be due to:
                   </p>
-                  <ul className="text-sm text-muted-foreground mt-2 text-left max-w-md">
+                  <ul className="text-sm text-gray-400 mt-2 text-left max-w-md">
                     <li>• WorkMail webhook not configured</li>
                     <li>• Database connection issues</li>
                     <li>• Missing environment variables</li>
                     <li>• AWS permissions issues</li>
                   </ul>
                 </div>
-                <Button onClick={refreshEmails} className="mt-4">
+                <Button onClick={refreshEmails} className="mt-4 bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Retry
                 </Button>
@@ -375,10 +375,10 @@ export default function AdminAllEmailsPage() {
       <FadeInSection>
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold flex items-center gap-2">
-            <Mail /> All Emails
+          <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
+            <Mail className="text-white" /> All Emails
             {employeeFilter && (
-              <Badge variant="outline">Filter: {employeeFilter}</Badge>
+              <Badge variant="outline" className="bg-white/20 text-white border-white/20">Filter: {employeeFilter}</Badge>
             )}
           </h2>
           <Button
@@ -386,6 +386,7 @@ export default function AdminAllEmailsPage() {
             size="sm"
             onClick={refreshEmails}
             disabled={loading}
+            className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
           >
             <RefreshCw className={`mr-2 ${loading ? "animate-spin" : ""}`} />
             Refresh
@@ -394,30 +395,30 @@ export default function AdminAllEmailsPage() {
 
         {/* Debug Info */}
         {debugInfo && (
-          <Card className="mb-6 bg-muted/30">
+          <Card className="mb-6 bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader className="pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Database className="h-4 w-4" />
+              <CardTitle className="flex items-center gap-2 text-sm text-white">
+                <Database className="h-4 w-4 text-white" />
                 Database Connection Status
               </CardTitle>
             </CardHeader>
             <CardContent className="pt-0">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                 <div>
-                  <div className="font-medium">Organization</div>
-                  <div className="text-muted-foreground">{debugInfo.orgId || 'Not set'}</div>
+                  <div className="font-medium text-white">Organization</div>
+                  <div className="text-gray-400">{debugInfo.orgId || 'Not set'}</div>
                 </div>
                 <div>
-                  <div className="font-medium">Table</div>
-                  <div className="text-muted-foreground">{debugInfo.tableName}</div>
+                  <div className="font-medium text-white">Table</div>
+                  <div className="text-gray-400">{debugInfo.tableName}</div>
                 </div>
                 <div>
-                  <div className="font-medium">Items Found</div>
-                  <div className="text-muted-foreground">{debugInfo.totalItems || 0}</div>
+                  <div className="font-medium text-white">Items Found</div>
+                  <div className="text-gray-400">{debugInfo.totalItems || 0}</div>
                 </div>
                 <div>
-                  <div className="font-medium">Connection</div>
-                  <div className="flex items-center gap-1 text-green-600">
+                  <div className="font-medium text-white">Connection</div>
+                  <div className="flex items-center gap-1 text-green-400">
                     <Wifi className="h-3 w-3" />
                     Active
                   </div>
@@ -429,124 +430,124 @@ export default function AdminAllEmailsPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total</p>
-                  <p className="text-2xl font-bold">{emails.length}</p>
+                  <p className="text-sm text-gray-400">Total</p>
+                  <p className="text-2xl font-bold text-white">{emails.length}</p>
                 </div>
-                <Mail className="text-muted-foreground" />
+                <Mail className="text-gray-400" />
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Threats</p>
-                  <p className="text-2xl font-bold text-red-600">
+                  <p className="text-sm text-gray-400">Threats</p>
+                  <p className="text-2xl font-bold text-red-400">
                     {emails.filter(e => e.threatLevel !== "none").length}
                   </p>
                 </div>
-                <AlertTriangle className="text-red-600" />
+                <AlertTriangle className="text-red-400" />
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Phishing</p>
-                  <p className="text-2xl font-bold text-orange-600">
+                  <p className="text-sm text-gray-400">Phishing</p>
+                  <p className="text-2xl font-bold text-orange-400">
                     {emails.filter(e => e.isPhishing).length}
                   </p>
                 </div>
-                <Shield className="text-orange-600" />
+                <Shield className="text-orange-400" />
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Clean</p>
-                  <p className="text-2xl font-bold text-green-600">
+                  <p className="text-sm text-gray-400">Clean</p>
+                  <p className="text-2xl font-bold text-green-400">
                     {emails.filter(e => e.threatLevel === "none").length}
                   </p>
                 </div>
-                <Activity className="text-green-600" />
+                <Activity className="text-green-400" />
               </div>
             </CardContent>
           </Card>
         </div>
 
         {/* Filters */}
-        <Card className="mb-6">
+        <Card className="mb-6 bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Filter /> Filters & Search
+            <CardTitle className="flex items-center gap-2 text-white">
+              <Filter className="text-white" /> Filters & Search
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-2">Search</label>
+                <label className="block text-sm font-medium mb-2 text-white">Search</label>
                 <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                   <Input
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     placeholder="Search emails..."
-                    className="pl-10"
+                    className="pl-10 bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">Direction</label>
+                <label className="block text-sm font-medium mb-2 text-white">Direction</label>
                 <Select
                   value={directionFilter}
                   onValueChange={setDirectionFilter}
                 >
-                  <SelectTrigger><SelectValue/></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="inbound">Inbound</SelectItem>
-                    <SelectItem value="outbound">Outbound</SelectItem>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"><SelectValue/></SelectTrigger>
+                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                    <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
+                    <SelectItem value="inbound" className="text-white focus:bg-[#2a2a2a] focus:text-white">Inbound</SelectItem>
+                    <SelectItem value="outbound" className="text-white focus:bg-[#2a2a2a] focus:text-white">Outbound</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">Threat Level</label>
+                <label className="block text-sm font-medium mb-2 text-white">Threat Level</label>
                 <Select
                   value={threatFilter}
                   onValueChange={setThreatFilter}
                 >
-                  <SelectTrigger><SelectValue/></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="threats">Any Threat</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="none">Clean</SelectItem>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"><SelectValue/></SelectTrigger>
+                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                    <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
+                    <SelectItem value="threats" className="text-white focus:bg-[#2a2a2a] focus:text-white">Any Threat</SelectItem>
+                    <SelectItem value="critical" className="text-white focus:bg-[#2a2a2a] focus:text-white">Critical</SelectItem>
+                    <SelectItem value="high" className="text-white focus:bg-[#2a2a2a] focus:text-white">High</SelectItem>
+                    <SelectItem value="medium" className="text-white focus:bg-[#2a2a2a] focus:text-white">Medium</SelectItem>
+                    <SelectItem value="low" className="text-white focus:bg-[#2a2a2a] focus:text-white">Low</SelectItem>
+                    <SelectItem value="none" className="text-white focus:bg-[#2a2a2a] focus:text-white">Clean</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">Status</label>
+                <label className="block text-sm font-medium mb-2 text-white">Status</label>
                 <Select
                   value={statusFilter}
                   onValueChange={setStatusFilter}
                 >
-                  <SelectTrigger><SelectValue/></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All</SelectItem>
-                    <SelectItem value="received">Received</SelectItem>
-                    <SelectItem value="analyzed">Analyzed</SelectItem>
-                    <SelectItem value="quarantined">Quarantined</SelectItem>
-                    <SelectItem value="blocked">Blocked</SelectItem>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"><SelectValue/></SelectTrigger>
+                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                    <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
+                    <SelectItem value="received" className="text-white focus:bg-[#2a2a2a] focus:text-white">Received</SelectItem>
+                    <SelectItem value="analyzed" className="text-white focus:bg-[#2a2a2a] focus:text-white">Analyzed</SelectItem>
+                    <SelectItem value="quarantined" className="text-white focus:bg-[#2a2a2a] focus:text-white">Quarantined</SelectItem>
+                    <SelectItem value="blocked" className="text-white focus:bg-[#2a2a2a] focus:text-white">Blocked</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -555,27 +556,27 @@ export default function AdminAllEmailsPage() {
         </Card>
 
         {/* Email Table */}
-        <Card>
+        <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
-            <CardTitle>Email List</CardTitle>
+            <CardTitle className="text-white">Email List</CardTitle>
           </CardHeader>
           <CardContent>
             {(loading && emails.length === 0) ? (
               <div className="text-center py-8">
-                <RefreshCw className="animate-spin mx-auto h-8 w-8 mb-4" />
-                <p>Loading emails...</p>
-                <p className="text-sm text-muted-foreground mt-2">
+                <RefreshCw className="animate-spin mx-auto h-8 w-8 mb-4 text-white" />
+                <p className="text-white">Loading emails...</p>
+                <p className="text-sm text-gray-400 mt-2">
                   Connecting to database and fetching email data...
                 </p>
               </div>
             ) : filteredEmails.length === 0 && emails.length === 0 ? (
               <div className="text-center py-12">
-                <Mail className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-lg font-medium mb-2">No Emails Found</h3>
-                <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                <Mail className="h-16 w-16 mx-auto mb-4 text-gray-400" />
+                <h3 className="text-lg font-medium mb-2 text-white">No Emails Found</h3>
+                <p className="text-gray-400 mb-6 max-w-md mx-auto">
                   No emails are currently available. This might be because:
                 </p>
-                <ul className="text-sm text-muted-foreground mb-6 text-left max-w-md mx-auto space-y-1">
+                <ul className="text-sm text-gray-400 mb-6 text-left max-w-md mx-auto space-y-1">
                   <li>• No monitored employees have received emails yet</li>
                   <li>• WorkMail webhook is not configured</li>
                   <li>• Emails are not being processed by the system</li>
@@ -584,60 +585,61 @@ export default function AdminAllEmailsPage() {
                   <Button 
                     variant="outline" 
                     onClick={() => router.push('/admin/company-settings/user-management')}
+                    className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                   >
                     <Users className="mr-2 h-4 w-4" />
                     Manage Employees
                   </Button>
-                  <Button onClick={refreshEmails}>
+                  <Button onClick={refreshEmails} className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                     <RefreshCw className="mr-2 h-4 w-4" />
                     Refresh
                   </Button>
                 </div>
               </div>
             ) : filteredEmails.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <Search className="h-12 w-12 mx-auto mb-4" />
-                <p>No emails match your current filters.</p>
-                <p className="text-sm mt-2">Try adjusting your search criteria.</p>
+              <div className="text-center py-8 text-gray-400">
+                <Search className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                <p className="text-white">No emails match your current filters.</p>
+                <p className="text-sm mt-2 text-gray-400">Try adjusting your search criteria.</p>
               </div>
             ) : (
               <>
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Subject</TableHead>
-                      <TableHead>Sender</TableHead>
-                      <TableHead>Recipients</TableHead>
-                      <TableHead>Received</TableHead>
-                      <TableHead>Direction</TableHead>
-                      <TableHead>Threat</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
+                    <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                      <TableHead className="text-white">Subject</TableHead>
+                      <TableHead className="text-white">Sender</TableHead>
+                      <TableHead className="text-white">Recipients</TableHead>
+                      <TableHead className="text-white">Received</TableHead>
+                      <TableHead className="text-white">Direction</TableHead>
+                      <TableHead className="text-white">Threat</TableHead>
+                      <TableHead className="text-white">Status</TableHead>
+                      <TableHead className="text-white">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredEmails.map(email => (
-                      <TableRow key={email.id} className="hover:bg-muted/50">
-                        <TableCell className="font-medium">
+                      <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                        <TableCell className="font-medium text-white">
                           <div className="max-w-xs">
                             <div className="truncate">{email.subject || 'No Subject'}</div>
                             {email.urls?.length ? (
-                              <div className="text-xs text-muted-foreground">
+                              <div className="text-xs text-gray-400">
                                 {email.urls.length} URL{email.urls.length > 1 ? "s" : ""}
                               </div>
                             ) : null}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-white">
                           <div className="max-w-xs truncate">{email.sender}</div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-white">
                           <div className="max-w-sm truncate">
                             {email.recipients.slice(0, 2).join(", ")}
                             {email.recipients.length > 2 && ` +${email.recipients.length - 2}`}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-white">
                           <div className="text-sm">
                             {new Date(email.timestamp).toLocaleString()}
                           </div>
@@ -645,6 +647,7 @@ export default function AdminAllEmailsPage() {
                         <TableCell>
                           <Badge
                             variant={email.direction === "inbound" ? "secondary" : "outline"}
+                            className={email.direction === "inbound" ? "bg-blue-900/30 text-blue-300 border-blue-600/30" : "bg-gray-800/50 text-gray-300 border-gray-600/50"}
                           >
                             {email.direction}
                           </Badge>
@@ -661,6 +664,7 @@ export default function AdminAllEmailsPage() {
                             size="sm"
                             onClick={() => viewEmail(email.id)}
                             title="View Email Details"
+                            className="text-white hover:bg-[#2a2a2a] hover:text-white"
                           >
                             <Eye className="h-4 w-4" />
                           </Button>
@@ -673,12 +677,12 @@ export default function AdminAllEmailsPage() {
                 {/* Load more indicator */}
                 {loadingMore && (
                   <div className="text-center py-4">
-                    <RefreshCw className="animate-spin mx-auto h-5 w-5 mb-2" />
-                    <p className="text-sm text-muted-foreground">Loading more emails...</p>
+                    <RefreshCw className="animate-spin mx-auto h-5 w-5 mb-2 text-white" />
+                    <p className="text-sm text-gray-400">Loading more emails...</p>
                   </div>
                 )}
                 {!hasMore && !loadingMore && emails.length > 0 && (
-                  <div className="text-center py-4 text-muted-foreground">
+                  <div className="text-center py-4 text-gray-400">
                     <div className="text-sm">All emails loaded ({emails.length} total)</div>
                   </div>
                 )}
