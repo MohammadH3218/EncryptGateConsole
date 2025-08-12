@@ -364,14 +364,17 @@ Date: ${headers.date || mail.timestamp}
       await ddb.send(new PutItemCommand({
         TableName: EMAILS_TABLE,
         Item:      dbItem,
-        ConditionExpression: 'attribute_not_exists(messageId)',
-        ExpressionAttributeNames: {
-          'messageId': 'messageId"'
-        }
+        ConditionExpression: 'attribute_not_exists(messageId)'
       }))
       console.log('✅ DynamoDB write succeeded')
-    } catch(err) {
-      console.error('❌ DynamoDB write failed', err)
+    } catch(err: any) {
+      if (err.name === 'ConditionalCheckFailedException') {
+        console.log('ℹ️ Email already exists, skipping duplicate:', emailItem.messageId)
+        // Continue processing without error - email already stored
+      } else {
+        console.error('❌ DynamoDB write failed', err)
+        throw err // Re-throw other errors
+      }
     }
 
 
