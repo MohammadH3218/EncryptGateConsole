@@ -130,6 +130,7 @@ export async function POST(request: Request) {
       sentBy: { S: body.sentBy || '' },
       timestamp: { S: timestamp },
       createdAt: { S: timestamp },
+      receivedAt: { S: timestamp }, // Add missing receivedAt field required by DynamoDB schema
       description: { S: body.description || 'This email was manually flagged as suspicious.' },
       indicators: { S: JSON.stringify(body.indicators || ['Manual review required']) },
       recommendations: { S: JSON.stringify(body.recommendations || ['Investigate email content']) },
