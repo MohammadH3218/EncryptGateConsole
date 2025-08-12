@@ -303,17 +303,20 @@ export default function AdminDetectionsPage() {
 
       console.log('✅ Detection unflagged successfully')
       
+      // Immediately remove the detection from local state for instant UI update
+      setDetections(prev => prev.filter(d => d.id !== detection.id))
+      
       // Show success message
       setSuccessMessage(`Detection "${detection.name}" has been successfully unflagged and removed.`)
       
       // Close confirmation dialog immediately
       setUnflagConfirm({ show: false, detection: null })
       
-      // Refresh the entire detections list from the server to ensure consistency
-      // This is the key fix - we reload fresh data from the server
+      // Optional: Refresh from server in the background to ensure consistency
+      // This happens silently without affecting the UI
       setTimeout(() => {
         loadDetections(true)
-      }, 500) // Small delay to let the server process the deletion
+      }, 2000) // Longer delay since we already updated the UI
       
     } catch (err: any) {
       console.error('❌ Failed to unflag detection:', err)
