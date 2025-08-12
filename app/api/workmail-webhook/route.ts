@@ -182,31 +182,7 @@ export async function POST(req: Request) {
     const isSes = !!raw?.Records?.[0]?.ses?.mail;
     const isWorkMail = !!raw?.summaryVersion && !!raw?.messageId && !!raw?.envelope;
 
-    // Skip SES webhooks - only process WorkMail events
-    if (isSes) {
-      console.log('⏭️ SKIPPING SES webhook - only processing WorkMail INBOUND events');
-      return NextResponse.json({
-        status: 'skipped',
-        reason: 'ses_webhook_ignored',
-        message: 'Only processing WorkMail INBOUND webhooks to avoid duplicates',
-        webhookType: 'SES',
-        messageId: raw?.Records?.[0]?.ses?.mail?.messageId
-      });
-    }
-
-    // Skip OUTBOUND WorkMail events - only process INBOUND emails
-    if (isWorkMail && raw.flowDirection === 'OUTBOUND') {
-      console.log('⏭️ SKIPPING OUTBOUND WorkMail event - only processing INBOUND emails');
-      return NextResponse.json({
-        status: 'skipped',
-        reason: 'outbound_ignored', 
-        message: 'Only processing inbound emails to avoid duplicates',
-        webhookType: 'WorkMail-OUTBOUND',
-        messageId: raw?.messageId
-      });
-    }
-
-    console.log('✅ Processing WorkMail INBOUND webhook - passed duplicate filters');
+    console.log('🔍 Webhook type detection:', { isSes, isWorkMail, flowDirection: raw.flowDirection });
     
     const safeFirst = (arr: any) => Array.isArray(arr) && arr.length ? arr[0] : undefined
 
@@ -337,8 +313,23 @@ Date: ${headers.date || mail.timestamp}
       messageBody = parsed.messageBody
     }
 
-    const isOutbound = false // Always false since we only process INBOUND events
-    const userId = recipients[toMons.findIndex(Boolean)] ?? recipients[0] // Always use recipient for INBOUND
+    // Determine email direction based on webhook type and monitored user involvement
+    const isOutbound = isWorkMail 
+      ? raw.flowDirection === 'OUTBOUND'
+      : fromMon && !toMons.some(Boolean) // SES: outbound if sender is monitored but no recipients are
+
+    // Set userId based on email direction
+    const userId = isOutbound 
+      ? sender // For outbound emails, track under sender
+      : recipients[toMons.findIndex(Boolean)] ?? recipients[0] // For inbound, track under recipient
+      
+    console.log('📧 Email direction analysis:', {
+      isOutbound,
+      fromMon,
+      toMons,
+      userId,
+      webhookType: isSes ? 'SES' : isWorkMail ? `WorkMail-${raw.flowDirection}` : 'Unknown'
+    })
 
     const urls      = extractUrls(messageBody)
     const hasThreat = urls.length > 0 || containsSuspiciousKeywords(messageBody)
@@ -353,7 +344,7 @@ Date: ${headers.date || mail.timestamp}
       bodyHtml:  messageBody,
       headers,
       attachments: [] as string[],
-      direction:   'inbound', // Always inbound since we only process INBOUND events
+      direction:   isOutbound ? 'outbound' : 'inbound',
       size:        messageBody.length,
       urls,
       hasThreat
@@ -426,8 +417,8 @@ Date: ${headers.date || mail.timestamp}
       messageId:        emailItem.messageId,
       direction:        emailItem.direction,
       threatsTriggered: hasThreat,
-      webhookType:      'WorkMail-INBOUND',
-      processingNote:   'Duplicate prevention active - only processing INBOUND emails'
+      webhookType:      isSes ? 'SES' : isWorkMail ? `WorkMail-${raw.flowDirection}` : 'Unknown',
+      processingNote:   'Smart processing - direction determined by monitored user involvement'
     })
 
   } catch(err:any) {
@@ -451,7 +442,7 @@ export async function GET() {
     return NextResponse.json({ 
       status: 'webhook_ready',
       duplicatePreventionActive: true,
-      message: 'Only processing WorkMail INBOUND events - SES and OUTBOUND webhooks filtered out'
+      message: 'Smart webhook processing - handles all webhook types with intelligent direction detection'
     })
   } catch(err) {
     console.error('❌ Health check failed', err)
