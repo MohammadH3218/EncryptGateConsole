@@ -37,7 +37,9 @@ import {
   Database,
   Wifi,
   Users,
-  Flag
+  Flag,
+  CheckCircle,
+  Info
 } from "lucide-react"
 
 interface Email {
@@ -98,6 +100,10 @@ export default function AdminAllEmailsPage() {
   // Email viewing & flagging
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
   const [flaggingEmail, setFlaggingEmail] = useState<string | null>(null)
+  
+  // Success/info messages
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [infoMessage, setInfoMessage] = useState<string | null>(null)
 
   // Handle keyboard shortcuts for email viewer
   useEffect(() => {
@@ -120,6 +126,21 @@ export default function AdminAllEmailsPage() {
       document.body.style.overflow = 'unset';
     };
   }, [selectedEmail]);
+
+  // Clear messages after some time
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [successMessage])
+
+  useEffect(() => {
+    if (infoMessage) {
+      const timer = setTimeout(() => setInfoMessage(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [infoMessage])
 
   // Fetch emails
   const loadEmails = useCallback(
@@ -334,6 +355,9 @@ export default function AdminAllEmailsPage() {
   const flagEmail = async (email: Email) => {
     console.log('🚩 Flagging email as suspicious:', email.id);
     setFlaggingEmail(email.id);
+    setError(null);
+    setSuccessMessage(null);
+    setInfoMessage(null);
 
     try {
       // Check if email is already flagged
@@ -346,10 +370,11 @@ export default function AdminAllEmailsPage() {
         );
         
         if (alreadyFlagged) {
-          setError('This email is already flagged as a detection');
+          setInfoMessage('This email is already flagged as a detection. You can view it in the Detections page.');
           return;
         }
       }
+      
       const flagPayload = {
         emailMessageId: email.messageId,
         emailId: email.id,
@@ -379,11 +404,16 @@ export default function AdminAllEmailsPage() {
       const result = await response.json();
       console.log('✅ Email flagged successfully:', result);
 
+      setSuccessMessage('Email flagged successfully! Detection has been created.');
+
       // Refresh emails to update the UI
       await loadEmails(true);
 
-      // Navigate to the detections page
-      router.push('/admin/detections');
+      // Navigate to the detections page after a short delay
+      setTimeout(() => {
+        router.push('/admin/detections');
+      }, 1500);
+      
     } catch (err: any) {
       console.error('❌ Failed to flag email:', err);
       setError(`Failed to flag email: ${err.message}`);
@@ -461,6 +491,28 @@ export default function AdminAllEmailsPage() {
       notificationsCount={2}
     >
       <FadeInSection>
+        {/* Success Message */}
+        {successMessage && (
+          <Alert className="mb-6 bg-green-900/20 border-green-500/20 text-white">
+            <CheckCircle className="h-4 w-4 text-green-400" />
+            <AlertTitle className="text-white">Success</AlertTitle>
+            <AlertDescription className="text-gray-300">
+              {successMessage}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Info Message */}
+        {infoMessage && (
+          <Alert className="mb-6 bg-blue-900/20 border-blue-500/20 text-white">
+            <Info className="h-4 w-4 text-blue-400" />
+            <AlertTitle className="text-white">Information</AlertTitle>
+            <AlertDescription className="text-gray-300">
+              {infoMessage}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
