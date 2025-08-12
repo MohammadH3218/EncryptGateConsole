@@ -363,7 +363,11 @@ Date: ${headers.date || mail.timestamp}
 
       await ddb.send(new PutItemCommand({
         TableName: EMAILS_TABLE,
-        Item:      dbItem
+        Item:      dbItem,
+        ConditionExpression: 'attribute_not_exists(messageId)',
+        ExpressionAttributeNames: {
+          'messageId': 'messageId"'
+        }
       }))
       console.log('✅ DynamoDB write succeeded')
     } catch(err) {
