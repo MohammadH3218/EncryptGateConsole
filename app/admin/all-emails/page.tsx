@@ -36,7 +36,8 @@ import {
   Activity,
   Database,
   Wifi,
-  Users
+  Users,
+  Flag
 } from "lucide-react"
 
 interface Email {
@@ -93,6 +94,32 @@ export default function AdminAllEmailsPage() {
   const [lastKey, setLastKey] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const ITEMS_PER_PAGE = 25
+
+  // Email viewing & flagging
+  const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
+  const [flaggingEmail, setFlaggingEmail] = useState<string | null>(null)
+
+  // Handle keyboard shortcuts for email viewer
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && selectedEmail) {
+        setSelectedEmail(null);
+      }
+    };
+
+    if (selectedEmail) {
+      document.addEventListener('keydown', handleKeyDown);
+      // Prevent background scrolling
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = 'unset';
+    };
+  }, [selectedEmail]);
 
   // Fetch emails
   const loadEmails = useCallback(
@@ -299,9 +326,56 @@ export default function AdminAllEmailsPage() {
     loadEmails(true);
   };
 
-  const viewEmail = (id: string) => {
-    console.log('👁️ Viewing email:', id);
-    router.push(`/admin/investigate/${id}`);
+  const viewEmail = (email: Email) => {
+    console.log('👁️ Viewing email:', email.id);
+    setSelectedEmail(email);
+  };
+
+  const flagEmail = async (email: Email) => {
+    console.log('🚩 Flagging email as suspicious:', email.id);
+    setFlaggingEmail(email.id);
+
+    try {
+      const flagPayload = {
+        emailMessageId: email.messageId,
+        emailId: email.id,
+        severity: 'medium',
+        name: 'Manually Flagged Email',
+        description: 'This email was manually flagged as suspicious by a security analyst.',
+        indicators: ['Manual review required', 'Flagged by analyst'],
+        recommendations: ['Investigate email content', 'Check sender reputation', 'Verify with recipient'],
+        threatScore: 75,
+        confidence: 90,
+        sentBy: email.sender,
+        manualFlag: true
+      };
+
+      const response = await fetch('/api/detections', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(flagPayload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to flag email: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Email flagged successfully:', result);
+
+      // Refresh emails to update the UI
+      await loadEmails(true);
+
+      // Navigate to the new detection
+      router.push(`/admin/investigate/${result.detectionId || result.id}`);
+    } catch (err: any) {
+      console.error('❌ Failed to flag email:', err);
+      setError(`Failed to flag email: ${err.message}`);
+    } finally {
+      setFlaggingEmail(null);
+    }
   };
 
   // Error state
@@ -659,15 +733,33 @@ export default function AdminAllEmailsPage() {
                           {getStatusBadge(email.status)}
                         </TableCell>
                         <TableCell>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => viewEmail(email.id)}
-                            title="View Email Details"
-                            className="text-white hover:bg-[#2a2a2a] hover:text-white"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => viewEmail(email)}
+                              title="View Email"
+                              className="text-white hover:bg-[#2a2a2a] hover:text-white"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {email.threatLevel === 'none' && !email.isPhishing && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => flagEmail(email)}
+                                disabled={flaggingEmail === email.id}
+                                title="Flag as Suspicious"
+                                className="text-orange-400 hover:bg-[#2a2a2a] hover:text-orange-300"
+                              >
+                                {flaggingEmail === email.id ? (
+                                  <RefreshCw className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Flag className="h-4 w-4" />
+                                )}
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -690,6 +782,173 @@ export default function AdminAllEmailsPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* Email Viewer Dialog */}
+        {selectedEmail && (
+          <div 
+            className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                setSelectedEmail(null);
+              }
+            }}
+          >
+            <div 
+              className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 bg-[#0f0f0f] border-b border-[#1f1f1f] p-4 flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-white">Email Details</h3>
+                <div className="flex items-center gap-2">
+                  {selectedEmail.threatLevel === 'none' && !selectedEmail.isPhishing && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => flagEmail(selectedEmail)}
+                      disabled={flaggingEmail === selectedEmail.id}
+                      className="bg-orange-900/20 border-orange-600/30 text-orange-300 hover:bg-orange-900/40"
+                    >
+                      {flaggingEmail === selectedEmail.id ? (
+                        <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Flag className="h-4 w-4 mr-2" />
+                      )}
+                      Flag as Suspicious
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelectedEmail(null)}
+                    className="text-white hover:bg-[#2a2a2a]"
+                  >
+                    ✕
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="p-4 space-y-4">
+                {/* Email Header Info */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                    <CardContent className="p-4">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Subject</label>
+                          <p className="font-medium text-white">{selectedEmail.subject || 'No Subject'}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">From</label>
+                          <p className="font-mono text-sm text-white">{selectedEmail.sender}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">To</label>
+                          <p className="font-mono text-sm text-white">{selectedEmail.recipients?.join(', ') || 'No recipients'}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Received</label>
+                          <p className="text-sm text-white">
+                            {selectedEmail.timestamp ? 
+                              (() => {
+                                try {
+                                  return new Date(selectedEmail.timestamp).toLocaleString();
+                                } catch (error) {
+                                  return selectedEmail.timestamp;
+                                }
+                              })() 
+                              : 'Unknown'
+                            }
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                    <CardContent className="p-4">
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Direction</label>
+                          <Badge
+                            variant={selectedEmail.direction === "inbound" ? "secondary" : "outline"}
+                            className={selectedEmail.direction === "inbound" ? "bg-blue-900/30 text-blue-300 border-blue-600/30" : "bg-gray-800/50 text-gray-300 border-gray-600/50"}
+                          >
+                            {selectedEmail.direction}
+                          </Badge>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Threat Level</label>
+                          <div>{getThreatBadge(selectedEmail.threatLevel, selectedEmail.isPhishing)}</div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Status</label>
+                          <div>{getStatusBadge(selectedEmail.status)}</div>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Size</label>
+                          <p className="text-sm text-white">{selectedEmail.size ? (selectedEmail.size / 1024).toFixed(1) : '0.0'} KB</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Email Body */}
+                <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                  <CardHeader>
+                    <CardTitle className="text-white">Message Content</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="bg-[#0f0f0f] p-4 rounded-lg max-h-96 overflow-y-auto">
+                      <pre className="text-sm text-white whitespace-pre-wrap font-mono">{selectedEmail.body}</pre>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Attachments & URLs */}
+                {(selectedEmail.attachments?.length > 0 || (selectedEmail.urls && selectedEmail.urls.length > 0)) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {selectedEmail.attachments?.length > 0 && (
+                      <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                        <CardHeader>
+                          <CardTitle className="text-white text-sm">Attachments ({selectedEmail.attachments?.length || 0})</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {selectedEmail.attachments?.map((attachment, index) => (
+                              <div key={index} className="p-2 bg-[#0f0f0f] rounded">
+                                <p className="text-sm text-white font-mono">{attachment}</p>
+                              </div>
+                            )) || (
+                              <p className="text-sm text-gray-400">No attachments</p>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+
+                    {(selectedEmail.urls?.length ?? 0) > 0 && (
+                      <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                        <CardHeader>
+                          <CardTitle className="text-white text-sm">URLs Found ({selectedEmail.urls?.length ?? 0})</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="space-y-2">
+                            {(selectedEmail.urls ?? []).map((url, index) => (
+                              <div key={index} className="p-2 bg-[#0f0f0f] rounded">
+                                <p className="text-sm text-blue-400 font-mono break-all">{url}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </FadeInSection>
     </AppLayout>
   );

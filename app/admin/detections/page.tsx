@@ -23,7 +23,9 @@ import {
   TrendingUp,
   CheckCircle,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  Flag,
+  FlagOff
 } from "lucide-react"
 
 interface Detection {
@@ -78,6 +80,13 @@ export default function AdminDetectionsPage() {
   const [lastKey, setLastKey] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const itemsPerPage = 25
+
+  // Unflag functionality
+  const [unflagConfirm, setUnflagConfirm] = useState<{show: boolean, detection: Detection | null}>({
+    show: false, 
+    detection: null
+  })
+  const [unflaggingId, setUnflaggingId] = useState<string | null>(null)
 
   // Load detections on component mount
   useEffect(() => {
@@ -245,6 +254,50 @@ export default function AdminDetectionsPage() {
 
   const refreshDetections = () => {
     loadDetections(true)
+  }
+
+  const handleUnflagClick = (detection: Detection) => {
+    setUnflagConfirm({ show: true, detection })
+  }
+
+  const handleUnflagConfirm = async () => {
+    if (!unflagConfirm.detection) return
+
+    const detection = unflagConfirm.detection
+    setUnflaggingId(detection.id)
+    
+    try {
+      console.log('🚩 Unflagging detection:', detection.detectionId)
+      
+      const response = await fetch(`/api/detections/${detection.detectionId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to unflag detection: ${response.status}`)
+      }
+
+      console.log('✅ Detection unflagged successfully')
+      
+      // Remove the detection from the list
+      setDetections(prev => prev.filter(d => d.id !== detection.id))
+      
+      // Close confirmation dialog
+      setUnflagConfirm({ show: false, detection: null })
+      
+    } catch (err: any) {
+      console.error('❌ Failed to unflag detection:', err)
+      setError(`Failed to unflag detection: ${err.message}`)
+    } finally {
+      setUnflaggingId(null)
+    }
+  }
+
+  const handleUnflagCancel = () => {
+    setUnflagConfirm({ show: false, detection: null })
   }
 
   // Infinite scroll handler
@@ -562,6 +615,22 @@ export default function AdminDetectionsPage() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
+                              {detection.detectionId.startsWith('manual-') && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleUnflagClick(detection)}
+                                  disabled={unflaggingId === detection.id}
+                                  title="Unflag Email"
+                                  className="text-orange-400 hover:bg-[#2a2a2a] hover:text-orange-300"
+                                >
+                                  {unflaggingId === detection.id ? (
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <FlagOff className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -587,6 +656,76 @@ export default function AdminDetectionsPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Unflag Confirmation Dialog */}
+          {unflagConfirm.show && unflagConfirm.detection && (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+              <div className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-md">
+                <div className="p-6">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-orange-900/20 rounded-full">
+                      <FlagOff className="h-6 w-6 text-orange-400" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-semibold text-white">Unflag Email</h3>
+                      <p className="text-sm text-gray-400">Remove this detection and mark email as safe</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-4 mb-6">
+                    <div className="space-y-2">
+                      <div>
+                        <label className="text-sm font-medium text-gray-400">Detection</label>
+                        <p className="text-white">{unflagConfirm.detection.name}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-400">From</label>
+                        <p className="text-white">{unflagConfirm.detection.sentBy}</p>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-400">Severity</label>
+                        <div className="mt-1">{getSeverityBadge(unflagConfirm.detection.severity)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-yellow-900/20 border border-yellow-600/30 rounded-lg p-3 mb-6">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-yellow-400 mt-0.5" />
+                      <div>
+                        <p className="text-sm text-yellow-300 font-medium">Are you sure?</p>
+                        <p className="text-xs text-yellow-400 mt-1">
+                          This will permanently remove the detection and mark the email as safe. This action cannot be undone.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <Button
+                      variant="outline"
+                      onClick={handleUnflagCancel}
+                      className="flex-1 bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={handleUnflagConfirm}
+                      disabled={unflaggingId === unflagConfirm.detection.id}
+                      className="flex-1 bg-orange-600 hover:bg-orange-700 text-white"
+                    >
+                      {unflaggingId === unflagConfirm.detection.id ? (
+                        <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <FlagOff className="h-4 w-4 mr-2" />
+                      )}
+                      Unflag Email
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </FadeInSection>
     </AppLayout>
