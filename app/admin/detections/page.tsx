@@ -307,16 +307,15 @@ export default function AdminDetectionsPage() {
       setDetections(prev => prev.filter(d => d.id !== detection.id))
       
       // Show success message
-      setSuccessMessage(`Detection "${detection.name}" has been successfully unflagged and removed.`)
+      setSuccessMessage(`Detection "${detection.name}" has been successfully unflagged and removed. The email has been marked as clean.`)
       
       // Close confirmation dialog immediately
       setUnflagConfirm({ show: false, detection: null })
       
-      // Optional: Refresh from server in the background to ensure consistency
-      // This happens silently without affecting the UI
+      // Refresh data to ensure consistency with the email flagged status update
       setTimeout(() => {
         loadDetections(true)
-      }, 2000) // Longer delay since we already updated the UI
+      }, 1000) // Refresh to sync with email status changes
       
     } catch (err: any) {
       console.error('❌ Failed to unflag detection:', err)

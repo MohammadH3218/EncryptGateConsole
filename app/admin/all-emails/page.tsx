@@ -59,6 +59,7 @@ interface Email {
   direction: "inbound" | "outbound"
   size: number
   urls?: string[]
+  flaggedStatus?: "none" | "manual" | "ai" | "clean"
 }
 
 interface EmailsResponse {
@@ -809,7 +810,8 @@ export default function AdminAllEmailsPage() {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            {email.threatLevel === 'none' && !email.isPhishing && (
+                            {/* Show flag button only for emails that aren't already flagged */}
+                            {email.threatLevel === 'none' && !email.isPhishing && (!email.flaggedStatus || email.flaggedStatus === 'none' || email.flaggedStatus === 'clean') && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -824,6 +826,22 @@ export default function AdminAllEmailsPage() {
                                   <Flag className="h-4 w-4" />
                                 )}
                               </Button>
+                            )}
+                            {/* Show flagged status indicator */}
+                            {email.flaggedStatus === 'manual' && (
+                              <Badge variant="destructive" className="text-xs">
+                                Manually Flagged
+                              </Badge>
+                            )}
+                            {email.flaggedStatus === 'ai' && (
+                              <Badge variant="destructive" className="text-xs bg-purple-600">
+                                AI Flagged
+                              </Badge>
+                            )}
+                            {email.flaggedStatus === 'clean' && (
+                              <Badge variant="outline" className="text-xs text-green-400 border-green-400">
+                                Reviewed Clean
+                              </Badge>
                             )}
                           </div>
                         </TableCell>
