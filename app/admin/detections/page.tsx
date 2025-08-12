@@ -282,8 +282,9 @@ export default function AdminDetectionsPage() {
 
       console.log('✅ Detection unflagged successfully')
       
-      // Remove the detection from the list
+      // Remove the detection from both the main list and filtered list
       setDetections(prev => prev.filter(d => d.id !== detection.id))
+      setFilteredDetections(prev => prev.filter(d => d.id !== detection.id))
       
       // Close confirmation dialog
       setUnflagConfirm({ show: false, detection: null })
