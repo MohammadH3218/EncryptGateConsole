@@ -175,70 +175,71 @@ export async function POST(req: Request) {
   try {
     console.log('📥 WorkMail webhook received')
     const raw = await req.json()
-    console.log('📨 Raw webhook payload received')
     
-    // ═══════════════════════════════════════════════════════════════════
-    // 🚫 PRODUCTION DUPLICATE PREVENTION - IMMEDIATE FILTERING
-    // ═══════════════════════════════════════════════════════════════════
+    // ═════════════════════════════════════════════════════════════════
+    // 🚫 IMMEDIATE DUPLICATE PREVENTION - FILTER AT THE TOP
+    // ═════════════════════════════════════════════════════════════════
     
     const isSes = !!raw?.Records?.[0]?.ses?.mail;
     const isWorkMail = !!raw?.summaryVersion && !!raw?.messageId && !!raw?.envelope;
     
-    console.log('🔍 Webhook type detection:', { 
-      isSes, 
-      isWorkMail, 
-      flowDirection: raw?.flowDirection,
-      hasRecords: !!raw?.Records,
-      hasSummaryVersion: !!raw?.summaryVersion 
+    // Check if this is from our Lambda function (has 'workmail' property)
+    const isFromLambda = !!raw?.Records?.[0]?.ses?.workmail;
+    
+    console.log('🔍 Webhook source analysis:', {
+      isSes: isSes && !isFromLambda,
+      isWorkMailDirect: isWorkMail,
+      isFromLambda,
+      flowDirection: raw?.flowDirection || raw?.Records?.[0]?.ses?.workmail?.flowDirection,
+      messageId: raw?.messageId || raw?.Records?.[0]?.ses?.mail?.messageId
     });
 
-    // FILTER 1: Skip SES webhooks entirely
-    if (isSes) {
-      console.log('🚫 FILTERED: SES webhook detected - skipping to prevent duplicates');
+    // FILTER 1: Skip direct SES webhooks (but allow Lambda-processed ones)
+    if (isSes && !isFromLambda) {
+      console.log('🚫 FILTERED: Direct SES webhook - skipping to prevent duplicates');
       return NextResponse.json({
         status: 'filtered_out',
-        reason: 'ses_webhook_skipped',
-        message: 'SES webhooks are filtered to prevent duplicates',
-        filterApplied: 'SES_FILTER',
-        messageId: raw?.Records?.[0]?.ses?.mail?.messageId || 'unknown'
+        reason: 'direct_ses_webhook_skipped',
+        message: 'Direct SES webhooks are filtered - only Lambda-processed events allowed'
       });
     }
 
-    // FILTER 2: Skip OUTBOUND WorkMail events
+    // FILTER 2: Skip direct WorkMail OUTBOUND events
     if (isWorkMail && raw.flowDirection === 'OUTBOUND') {
-      console.log('🚫 FILTERED: OUTBOUND WorkMail event - skipping to prevent duplicates');
+      console.log('🚫 FILTERED: Direct WorkMail OUTBOUND - skipping to prevent duplicates');
       return NextResponse.json({
-        status: 'filtered_out',
-        reason: 'outbound_workmail_skipped',
-        message: 'OUTBOUND WorkMail events are filtered to prevent duplicates',
-        filterApplied: 'OUTBOUND_FILTER',
-        messageId: raw?.messageId || 'unknown',
-        flowDirection: raw?.flowDirection
+        status: 'filtered_out', 
+        reason: 'workmail_outbound_skipped',
+        message: 'WorkMail OUTBOUND events are filtered to prevent duplicates'
       });
     }
 
-    // FILTER 3: Process WorkMail INBOUND events OR unknown/legacy email formats
-    if (isWorkMail && raw.flowDirection !== 'INBOUND') {
-      console.log('🚫 FILTERED: OUTBOUND WorkMail event - skipping');
+    // FILTER 3: Skip direct WorkMail INBOUND events (only allow Lambda-processed)
+    if (isWorkMail && raw.flowDirection === 'INBOUND') {
+      console.log('🚫 FILTERED: Direct WorkMail INBOUND - skipping to prevent duplicates');
       return NextResponse.json({
         status: 'filtered_out',
-        reason: 'outbound_workmail_skipped',
-        message: 'OUTBOUND WorkMail events are filtered',
-        filterApplied: 'INBOUND_ONLY_FILTER',
-        webhookType: `WorkMail-${raw?.flowDirection}`
+        reason: 'workmail_inbound_skipped', 
+        message: 'Direct WorkMail INBOUND events are filtered - only Lambda-processed events allowed'
       });
     }
 
-    // Allow legacy email formats and INBOUND WorkMail events to continue
-    const webhookType = isSes ? 'SES' : 
-                       isWorkMail ? `WorkMail-${raw?.flowDirection}` : 
-                       'Legacy/Unknown';
-    console.log(`✅ FILTER PASSED: Processing ${webhookType} event`);
+    // ONLY ALLOW: Lambda-processed events (SES events with workmail property)
+    if (!isFromLambda) {
+      console.log('🚫 FILTERED: Not from Lambda - only Lambda-processed events allowed');
+      return NextResponse.json({
+        status: 'filtered_out',
+        reason: 'not_from_lambda',
+        message: 'Only Lambda-processed events are allowed to prevent duplicates'
+      });
+    }
+
+    console.log('✅ FILTER PASSED: Processing Lambda-processed email event');
     
-    // ═══════════════════════════════════════════════════════════════════
-    // CONTINUE WITH EMAIL PROCESSING (INBOUND WORKMAIL & LEGACY FORMATS)
-    // ═══════════════════════════════════════════════════════════════════
-    
+    // ═════════════════════════════════════════════════════════════════
+    // PROCESS THE LAMBDA-PROCESSED EMAIL EVENT
+    // ═════════════════════════════════════════════════════════════════
+
     const safeFirst = (arr: any) => Array.isArray(arr) && arr.length ? arr[0] : undefined
 
     const extractEmail = (s: string): string => {
@@ -247,34 +248,27 @@ export async function POST(req: Request) {
       return (m ? m[1] : s).trim()
     }
 
-    // Normalize payload (supports WorkMail and other formats)
+    // Process the Lambda-wrapped SES event
+    const sesRecord = raw.Records[0].ses;
     const normalized = {
       notificationType: 'Delivery',
       mail: {
-        messageId: raw.messageId || raw.mail?.messageId || `unknown-${Date.now()}`,
-        timestamp: raw.timestamp || raw.mail?.timestamp || new Date().toISOString(),
-        source: (Array.isArray(raw.headers?.from) && raw.headers.from[0]) ?? 
-                raw?.envelope?.mailFrom?.address ?? 
-                raw.mail?.source ?? "",
-        destination: (raw.envelope?.recipients || []).map((r: any) => r.address) ||
-                    raw.mail?.destination || [],
+        messageId: sesRecord.mail.messageId,
+        timestamp: sesRecord.mail.timestamp,
+        source: (Array.isArray(sesRecord.mail.commonHeaders?.from) && sesRecord.mail.commonHeaders.from[0]) || sesRecord.mail.source || "",
+        destination: sesRecord.mail.destination || [],
         commonHeaders: {
-          from: raw.headers?.from || 
-                (raw.envelope?.mailFrom ? [raw.envelope.mailFrom.address] : []) ||
-                raw.mail?.commonHeaders?.from || [],
-          to: raw.headers?.to || 
-              (raw.envelope?.recipients || []).map((r: any) => r.address) ||
-              raw.mail?.commonHeaders?.to || [],
-          subject: raw.subject || raw.mail?.commonHeaders?.subject || ""
+          from: sesRecord.mail.commonHeaders?.from || [],
+          to: sesRecord.mail.commonHeaders?.to || [],
+          subject: sesRecord.mail.commonHeaders?.subject || ""
         }
       }
     };
 
-    console.log('🔄 Normalized email payload:', {
+    console.log('🔄 Processing Lambda-wrapped event:', {
       messageId: normalized.mail.messageId,
       subject: normalized.mail.commonHeaders.subject,
-      from: normalized.mail.commonHeaders.from,
-      to: normalized.mail.commonHeaders.to
+      flowDirection: sesRecord.workmail?.flowDirection
     });
 
     try {
@@ -292,7 +286,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ status:'ignored', reason:'not-delivery' })
     }
 
-    console.log('📧 Processing email:', mail.messageId, `(${webhookType})`)
+    console.log('📧 Processing email:', mail.messageId)
     
     const rawSender = mail.commonHeaders.from[0] || mail.source
     const rawRecipients = mail.commonHeaders.to.length ? mail.commonHeaders.to : mail.destination
@@ -312,7 +306,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: 'skipped', reason: 'no-parties' })
     }
 
-    // Check for monitored employees
     const fromMon = await isMonitoredEmployee(sender)
     const toMons = await Promise.all(recipients.map(isMonitoredEmployee))
     
@@ -325,16 +318,75 @@ export async function POST(req: Request) {
       })
     }
 
-    // Get message content from WorkMail
-    const { region } = await getWorkMailConfig()
-    const mailClient = new WorkMailMessageFlowClient({ region })
-    const parsed = await parseRawMessage(mailClient, mail.messageId)
-    const headers = parsed.headers
-    const messageBody = parsed.messageBody
+    // Get message body from Lambda's raw data or fetch from WorkMail
+    let headers: Record<string, string> = {}
+    let messageBody = ''
+    
+    if (sesRecord.raw?.base64) {
+      // Lambda provided raw message content
+      try {
+        const rawBuffer = Buffer.from(sesRecord.raw.base64, 'base64');
+        const rawText = rawBuffer.toString('utf-8');
+        const lines = rawText.split('\n');
+        let inBody = false;
+        
+        for (const line of lines) {
+          if (!inBody) {
+            if (line.trim() === '') {
+              inBody = true;
+              continue;
+            }
+            const idx = line.indexOf(':');
+            if (idx > 0) {
+              headers[line.slice(0, idx).toLowerCase()] = line.slice(idx + 1).trim();
+            }
+          } else {
+            messageBody += line + '\n';
+          }
+        }
+        messageBody = messageBody.trim();
+        console.log('📧 Using Lambda-provided raw message content');
+      } catch (err) {
+        console.error('❌ Error parsing Lambda raw content:', err);
+        messageBody = `Email processed via Lambda function.
 
-    // Use recipient as userId (assuming inbound emails to monitored employees)
-    const userId = recipients[toMons.findIndex(Boolean)] ?? recipients[0]
-    console.log('📧 Using userId for email:', userId)
+Subject: ${mail.commonHeaders.subject || 'No Subject'}
+From: ${mail.commonHeaders.from.join(', ')}
+To: ${mail.commonHeaders.to.join(', ')}
+Date: ${mail.timestamp}
+
+[Email body content processed by Lambda function]`;
+      }
+    } else {
+      // Fallback to WorkMail API
+      try {
+        const { region } = await getWorkMailConfig()
+        const mailClient = new WorkMailMessageFlowClient({ region })
+        const parsed = await parseRawMessage(mailClient, mail.messageId)
+        headers = parsed.headers
+        messageBody = parsed.messageBody
+      } catch (err) {
+        console.error('❌ Error fetching from WorkMail:', err);
+        messageBody = `Email processed via WorkMail webhook.
+
+Subject: ${mail.commonHeaders.subject || 'No Subject'}
+From: ${mail.commonHeaders.from.join(', ')}
+To: ${mail.commonHeaders.to.join(', ')}
+Date: ${mail.timestamp}
+
+[Email body content not available]`;
+      }
+    }
+
+    // Determine direction from Lambda workmail metadata
+    const isOutbound = sesRecord.workmail?.flowDirection === 'OUTBOUND';
+    const userId = isOutbound ? sender : (recipients[toMons.findIndex(Boolean)] ?? recipients[0]);
+
+    console.log('📧 Email direction and userId:', {
+      isOutbound,
+      flowDirection: sesRecord.workmail?.flowDirection,
+      userId
+    });
 
     const urls = extractUrls(messageBody)
     const hasThreat = urls.length > 0 || containsSuspiciousKeywords(messageBody)
@@ -349,7 +401,7 @@ export async function POST(req: Request) {
       bodyHtml: messageBody,
       headers,
       attachments: [] as string[],
-      direction: 'inbound', // Assume inbound for monitored employee emails
+      direction: isOutbound ? 'outbound' : 'inbound',
       size: messageBody.length,
       urls,
       hasThreat
@@ -367,7 +419,7 @@ export async function POST(req: Request) {
         subject: { S: emailItem.subject || 'No Subject' },
         body: { S: emailItem.body || '' },
         bodyHtml: { S: emailItem.bodyHtml || '' },
-        direction: { S: 'inbound' },
+        direction: { S: emailItem.direction },
         size: { N: String(emailItem.size || 0) },
         status: { S: 'received' },
         threatLevel: { S: 'none' },
@@ -427,12 +479,12 @@ export async function POST(req: Request) {
     return NextResponse.json({
       status: 'processed',
       messageId: emailItem.messageId,
-      direction: 'inbound',
+      direction: emailItem.direction,
       threatsTriggered: hasThreat,
-      webhookType: webhookType,
+      webhookType: 'Lambda-Processed',
       userId: userId,
-      filtersApplied: ['SES_FILTER', 'OUTBOUND_FILTER', 'INBOUND_ONLY_FILTER'],
-      processingNote: 'INBOUND WorkMail events and legacy formats processed - duplicates filtered'
+      filtersApplied: ['DIRECT_SES_FILTER', 'DIRECT_WORKMAIL_FILTER', 'LAMBDA_ONLY_FILTER'],
+      processingNote: 'Only Lambda-processed events allowed - all direct webhooks filtered out'
     })
 
   } catch(err: any) {
@@ -460,8 +512,8 @@ export async function GET() {
     return NextResponse.json({ 
       status: 'webhook_ready',
       duplicatePreventionActive: true,
-      filtersActive: ['SES_FILTER', 'OUTBOUND_FILTER', 'INBOUND_ONLY_FILTER'],
-      message: 'Production webhook with duplicate prevention - supports WorkMail & legacy formats'
+      filtersActive: ['DIRECT_SES_FILTER', 'DIRECT_WORKMAIL_FILTER', 'LAMBDA_ONLY_FILTER'],
+      message: 'Production webhook with comprehensive filtering - only Lambda-processed events allowed'
     })
   } catch(err) {
     console.error('❌ Health check failed', err)
