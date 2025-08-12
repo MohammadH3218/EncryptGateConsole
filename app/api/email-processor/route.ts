@@ -181,11 +181,18 @@ async function storeEmail(email: EmailRequest) {
       new PutItemCommand({
         TableName: EMAILS_TABLE,
         Item: item,
+        ConditionExpression: 'attribute_not_exists(messageId)'
       })
     );
     
     // Email stored successfully
   } catch (err: any) {
+    if (err.name === 'ConditionalCheckFailedException') {
+      console.log('ℹ️ Email already exists, skipping duplicate:', email.messageId)
+      // Don't throw error - email already exists
+      return;
+    }
+    
     console.error('❌ DynamoDB storage failed:', {
       error: err.message,
       code: err.code,
