@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useRouter } from "next/navigation"
@@ -66,6 +67,7 @@ export default function AdminDetectionsPage() {
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [stats, setStats] = useState<DetectionsStats>({
     total: 0, new: 0, inProgress: 0, resolved: 0, falsePositives: 0,
     critical: 0, high: 0, medium: 0, low: 0
@@ -87,6 +89,21 @@ export default function AdminDetectionsPage() {
     detection: null
   })
   const [unflaggingId, setUnflaggingId] = useState<string | null>(null)
+
+  // Clear messages after some time
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [successMessage])
+
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 10000)
+      return () => clearTimeout(timer)
+    }
+  }, [error])
 
   // Load detections on component mount
   useEffect(() => {
@@ -253,6 +270,7 @@ export default function AdminDetectionsPage() {
   }
 
   const refreshDetections = () => {
+    console.log('🔄 Refreshing detections...')
     loadDetections(true)
   }
 
@@ -265,6 +283,8 @@ export default function AdminDetectionsPage() {
 
     const detection = unflagConfirm.detection
     setUnflaggingId(detection.id)
+    setError(null)
+    setSuccessMessage(null)
     
     try {
       console.log('🚩 Unflagging detection:', detection.detectionId)
@@ -277,21 +297,28 @@ export default function AdminDetectionsPage() {
       })
 
       if (!response.ok) {
-        throw new Error(`Failed to unflag detection: ${response.status}`)
+        const errorData = await response.json()
+        throw new Error(errorData.message || errorData.error || `Failed to unflag detection: ${response.status}`)
       }
 
       console.log('✅ Detection unflagged successfully')
       
-      // Remove the detection from both the main list and filtered list
-      setDetections(prev => prev.filter(d => d.id !== detection.id))
-      setFilteredDetections(prev => prev.filter(d => d.id !== detection.id))
+      // Show success message
+      setSuccessMessage(`Detection "${detection.name}" has been successfully unflagged and removed.`)
       
-      // Close confirmation dialog
+      // Close confirmation dialog immediately
       setUnflagConfirm({ show: false, detection: null })
+      
+      // Refresh the entire detections list from the server to ensure consistency
+      // This is the key fix - we reload fresh data from the server
+      setTimeout(() => {
+        loadDetections(true)
+      }, 500) // Small delay to let the server process the deletion
       
     } catch (err: any) {
       console.error('❌ Failed to unflag detection:', err)
       setError(`Failed to unflag detection: ${err.message}`)
+      // Keep the dialog open on error so user can retry
     } finally {
       setUnflaggingId(null)
     }
@@ -314,10 +341,17 @@ export default function AdminDetectionsPage() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [loadMoreDetections])
 
-  if (error) {
+  if (error && detections.length === 0) {
     return (
       <AppLayout username="John Doe" notificationsCount={3}>
         <FadeInSection>
+          <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20 text-white">
+            <AlertTriangle className="h-4 w-4 text-red-400" />
+            <AlertTitle className="text-white">Error Loading Detections</AlertTitle>
+            <AlertDescription className="text-gray-300">
+              {error}
+            </AlertDescription>
+          </Alert>
           <Card className="border-red-500/20 bg-[#0f0f0f]">
             <CardContent className="pt-6">
               <div className="flex items-center gap-2 text-red-400">
@@ -342,6 +376,28 @@ export default function AdminDetectionsPage() {
     <AppLayout username="John Doe" notificationsCount={stats.new}>
       <FadeInSection>
         <div className="space-y-6">
+          {/* Success Message */}
+          {successMessage && (
+            <Alert className="mb-6 bg-green-900/20 border-green-500/20 text-white">
+              <CheckCircle className="h-4 w-4 text-green-400" />
+              <AlertTitle className="text-white">Success</AlertTitle>
+              <AlertDescription className="text-gray-300">
+                {successMessage}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Error Message */}
+          {error && (
+            <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20 text-white">
+              <AlertTriangle className="h-4 w-4 text-red-400" />
+              <AlertTitle className="text-white">Error</AlertTitle>
+              <AlertDescription className="text-gray-300">
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
+
           {/* Header */}
           <div className="flex justify-between items-center">
             <div>
@@ -706,6 +762,7 @@ export default function AdminDetectionsPage() {
                     <Button
                       variant="outline"
                       onClick={handleUnflagCancel}
+                      disabled={unflaggingId === unflagConfirm.detection.id}
                       className="flex-1 bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                     >
                       Cancel
