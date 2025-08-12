@@ -50,7 +50,6 @@ const WorkMailWebhookSchema = z.object({
   })
 })
 
-
 async function getWorkMailConfig() {
   console.log('🔍 Fetching WorkMail configuration...')
   const resp = await ddb.send(new QueryCommand({
@@ -78,7 +77,6 @@ async function isMonitoredEmployee(email: string): Promise<boolean> {
   try {
     console.log(`🔍 Checking if ${email} is monitored...`)
     
-    // Direct key lookup instead of query with filter
     const resp = await ddb.send(new GetItemCommand({
       TableName: EMPLOYEES_TABLE,
       Key: {
@@ -177,12 +175,65 @@ export async function POST(req: Request) {
   try {
     console.log('📥 WorkMail webhook received')
     const raw = await req.json()
-    console.log('📨 Webhook payload:', JSON.stringify(raw, null,2))
+    console.log('📨 Raw webhook payload received')
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // 🚫 PRODUCTION DUPLICATE PREVENTION - IMMEDIATE FILTERING
+    // ═══════════════════════════════════════════════════════════════════
     
     const isSes = !!raw?.Records?.[0]?.ses?.mail;
     const isWorkMail = !!raw?.summaryVersion && !!raw?.messageId && !!raw?.envelope;
+    
+    console.log('🔍 Webhook type detection:', { 
+      isSes, 
+      isWorkMail, 
+      flowDirection: raw?.flowDirection,
+      hasRecords: !!raw?.Records,
+      hasSummaryVersion: !!raw?.summaryVersion 
+    });
 
-    console.log('🔍 Webhook type detection:', { isSes, isWorkMail, flowDirection: raw.flowDirection });
+    // FILTER 1: Skip SES webhooks entirely
+    if (isSes) {
+      console.log('🚫 FILTERED: SES webhook detected - skipping to prevent duplicates');
+      return NextResponse.json({
+        status: 'filtered_out',
+        reason: 'ses_webhook_skipped',
+        message: 'SES webhooks are filtered to prevent duplicates',
+        filterApplied: 'SES_FILTER',
+        messageId: raw?.Records?.[0]?.ses?.mail?.messageId || 'unknown'
+      });
+    }
+
+    // FILTER 2: Skip OUTBOUND WorkMail events
+    if (isWorkMail && raw.flowDirection === 'OUTBOUND') {
+      console.log('🚫 FILTERED: OUTBOUND WorkMail event - skipping to prevent duplicates');
+      return NextResponse.json({
+        status: 'filtered_out',
+        reason: 'outbound_workmail_skipped',
+        message: 'OUTBOUND WorkMail events are filtered to prevent duplicates',
+        filterApplied: 'OUTBOUND_FILTER',
+        messageId: raw?.messageId || 'unknown',
+        flowDirection: raw?.flowDirection
+      });
+    }
+
+    // FILTER 3: Only process INBOUND WorkMail events
+    if (!isWorkMail || raw.flowDirection !== 'INBOUND') {
+      console.log('🚫 FILTERED: Not an INBOUND WorkMail event - skipping');
+      return NextResponse.json({
+        status: 'filtered_out',
+        reason: 'not_inbound_workmail',
+        message: 'Only INBOUND WorkMail events are processed',
+        filterApplied: 'INBOUND_ONLY_FILTER',
+        webhookType: isSes ? 'SES' : isWorkMail ? `WorkMail-${raw?.flowDirection}` : 'Unknown'
+      });
+    }
+
+    console.log('✅ FILTER PASSED: Processing INBOUND WorkMail event');
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // CONTINUE WITH EMAIL PROCESSING (ONLY INBOUND WORKMAIL EVENTS)
+    // ═══════════════════════════════════════════════════════════════════
     
     const safeFirst = (arr: any) => Array.isArray(arr) && arr.length ? arr[0] : undefined
 
@@ -192,53 +243,34 @@ export async function POST(req: Request) {
       return (m ? m[1] : s).trim()
     }
 
-    const normalized = isSes
-      ? {
-          notificationType: 'Delivery',
-          mail: {
-            messageId: raw.Records[0].ses.mail.messageId,
-            timestamp: raw.Records[0].ses.mail.timestamp,
-            source:
-              (Array.isArray(raw.Records[0].ses.mail.commonHeaders?.from) &&
-               raw.Records[0].ses.mail.commonHeaders.from[0]) ||
-              raw.Records[0].ses.mail.source ||
-              "",
-            destination: raw.Records[0].ses.mail.destination || [],
-            commonHeaders: {
-              from: raw.Records[0].ses.mail.commonHeaders?.from || [],
-              to:   raw.Records[0].ses.mail.commonHeaders?.to   || [],
-              subject: raw.Records[0].ses.mail.commonHeaders?.subject || ""
-            }
-          }
+    // Normalize WorkMail payload
+    const normalized = {
+      notificationType: 'Delivery',
+      mail: {
+        messageId: raw.messageId,
+        timestamp: new Date().toISOString(),
+        source: (Array.isArray(raw.headers?.from) && raw.headers.from[0]) ?? raw?.envelope?.mailFrom?.address ?? "",
+        destination: (raw.envelope?.recipients || []).map((r: any) => r.address),
+        commonHeaders: {
+          from: raw.headers?.from || (raw.envelope?.mailFrom ? [raw.envelope.mailFrom.address] : []),
+          to: raw.headers?.to || (raw.envelope?.recipients || []).map((r: any) => r.address),
+          subject: raw.subject || ""
         }
-      : isWorkMail
-        ? {
-            notificationType: 'Delivery',
-            mail: {
-              messageId: raw.messageId,
-              timestamp: new Date().toISOString(),
-              source:
-                (Array.isArray(raw.headers?.from) && raw.headers.from[0]) ??
-                raw?.envelope?.mailFrom?.address ??
-                "",
-              destination: (raw.envelope?.recipients || []).map((r: any) => r.address),
-              commonHeaders: {
-                from: raw.headers?.from || (raw.envelope?.mailFrom ? [raw.envelope.mailFrom.address] : []),
-                to:   raw.headers?.to   || (raw.envelope?.recipients || []).map((r: any) => r.address),
-                subject: raw.subject || ""
-              }
-            }
-          }
-        : raw;
+      }
+    };
 
-    console.log('🔄 Normalized payload:', JSON.stringify(normalized, null, 2))
+    console.log('🔄 Normalized WorkMail payload:', {
+      messageId: normalized.mail.messageId,
+      subject: normalized.mail.commonHeaders.subject,
+      from: normalized.mail.commonHeaders.from,
+      to: normalized.mail.commonHeaders.to
+    });
 
     try {
       const { notificationType, mail } = WorkMailWebhookSchema.parse(normalized)
       console.log('✅ Schema validation passed')
     } catch (schemaError: any) {
       console.error('❌ Schema validation failed:', schemaError.message)
-      console.error('❌ Schema errors:', JSON.stringify(schemaError.errors || schemaError, null, 2))
       throw new Error(`Schema validation failed: ${schemaError.message}`)
     }
 
@@ -249,31 +281,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ status:'ignored', reason:'not-delivery' })
     }
 
-    console.log('📧 Processing email:', mail.messageId)
+    console.log('📧 Processing INBOUND email:', mail.messageId)
     
     const rawSender = mail.commonHeaders.from[0] || mail.source
-    const rawRecipients = mail.commonHeaders.to.length
-      ? mail.commonHeaders.to
-      : mail.destination
+    const rawRecipients = mail.commonHeaders.to.length ? mail.commonHeaders.to : mail.destination
     
     const sender = extractEmail(rawSender)
     const recipients = rawRecipients.map(extractEmail)
     
     console.log('📧 Extracted addresses:', {
-      rawSender,
-      extractedSender: sender,
-      rawRecipients,
-      extractedRecipients: recipients
+      sender,
+      recipients,
+      messageId: mail.messageId
     })
 
-    // Check if we have valid participants before proceeding
+    // Check if we have valid participants
     if (!sender && recipients.length === 0) {
       console.log('⚠️ No valid sender or recipients found')
       return NextResponse.json({ status: 'skipped', reason: 'no-parties' })
     }
 
+    // Check for monitored employees
     const fromMon = await isMonitoredEmployee(sender)
-    const toMons  = await Promise.all(recipients.map(isMonitoredEmployee))
+    const toMons = await Promise.all(recipients.map(isMonitoredEmployee))
+    
     if (!(fromMon || toMons.some(x=>x))) {
       console.log('ℹ️ No monitored participants, skipping')
       return NextResponse.json({
@@ -283,116 +314,85 @@ export async function POST(req: Request) {
       })
     }
 
-    let headers: Record<string, string> = {}
-    let messageBody = ''
-    
-    if (raw.Records?.[0]?.ses) {
-      const sesRecord = raw.Records[0].ses
-      
-      if (sesRecord.mail.headers) {
-        sesRecord.mail.headers.forEach((header: any) => {
-          headers[header.name.toLowerCase()] = header.value
-        })
-      }
-      
-      messageBody = `Email received via SES webhook processing.
-      
-Subject: ${mail.commonHeaders.subject || 'No Subject'}
-From: ${mail.commonHeaders.from.join(', ')}
-To: ${mail.commonHeaders.to.join(', ')}
-Date: ${headers.date || mail.timestamp}
+    // Get message content from WorkMail
+    const { region } = await getWorkMailConfig()
+    const mailClient = new WorkMailMessageFlowClient({ region })
+    const parsed = await parseRawMessage(mailClient, mail.messageId)
+    const headers = parsed.headers
+    const messageBody = parsed.messageBody
 
-[Email body content not available in SES webhook - email was processed through Amazon SES]`
-      
-      console.log('📧 Using SES webhook data (no raw message content available)')
-    } else {
-      const { region } = await getWorkMailConfig()
-      const mailClient = new WorkMailMessageFlowClient({ region })
-      const parsed = await parseRawMessage(mailClient, mail.messageId)
-      headers = parsed.headers
-      messageBody = parsed.messageBody
-    }
+    // For INBOUND emails, always use recipient as userId
+    const userId = recipients[toMons.findIndex(Boolean)] ?? recipients[0]
+    console.log('📧 Using userId for INBOUND email:', userId)
 
-    // Determine email direction based on webhook type and monitored user involvement
-    const isOutbound = isWorkMail 
-      ? raw.flowDirection === 'OUTBOUND'
-      : fromMon && !toMons.some(Boolean) // SES: outbound if sender is monitored but no recipients are
-
-    // Set userId based on email direction
-    const userId = isOutbound 
-      ? sender // For outbound emails, track under sender
-      : recipients[toMons.findIndex(Boolean)] ?? recipients[0] // For inbound, track under recipient
-      
-    console.log('📧 Email direction analysis:', {
-      isOutbound,
-      fromMon,
-      toMons,
-      userId,
-      webhookType: isSes ? 'SES' : isWorkMail ? `WorkMail-${raw.flowDirection}` : 'Unknown'
-    })
-
-    const urls      = extractUrls(messageBody)
+    const urls = extractUrls(messageBody)
     const hasThreat = urls.length > 0 || containsSuspiciousKeywords(messageBody)
 
     const emailItem = {
       messageId: mail.messageId,
       sender,
       recipients,
-      subject:   mail.commonHeaders.subject || 'No Subject',
+      subject: mail.commonHeaders.subject || 'No Subject',
       timestamp: mail.timestamp,
-      body:      messageBody,
-      bodyHtml:  messageBody,
+      body: messageBody,
+      bodyHtml: messageBody,
       headers,
       attachments: [] as string[],
-      direction:   isOutbound ? 'outbound' : 'inbound',
-      size:        messageBody.length,
+      direction: 'inbound', // Always inbound since we only process INBOUND events
+      size: messageBody.length,
       urls,
       hasThreat
     }
 
+    // Store in DynamoDB
     try {
-      console.log(`💾 Writing to DynamoDB table ${EMAILS_TABLE}`)
+      console.log(`💾 Writing INBOUND email to DynamoDB table ${EMAILS_TABLE}`)
       const dbItem: Record<string, any> = {
-        userId:     { S: userId },
+        userId: { S: userId },
         receivedAt: { S: emailItem.timestamp },
-        messageId:  { S: emailItem.messageId },
-        emailId:    { S: `email-${Date.now()}-${Math.random().toString(36).slice(2,8)}` },
-        sender:     { S: emailItem.sender || '' },
-        subject:    { S: emailItem.subject || 'No Subject' },
-        body:       { S: emailItem.body || '' },
-        bodyHtml:   { S: emailItem.bodyHtml || '' },
-        direction:  { S: emailItem.direction },
-        size:       { N: String(emailItem.size || 0) },
-        status:     { S: 'received' },
-        threatLevel:{ S: 'none' },
+        messageId: { S: emailItem.messageId },
+        emailId: { S: `email-${Date.now()}-${Math.random().toString(36).slice(2,8)}` },
+        sender: { S: emailItem.sender || '' },
+        subject: { S: emailItem.subject || 'No Subject' },
+        body: { S: emailItem.body || '' },
+        bodyHtml: { S: emailItem.bodyHtml || '' },
+        direction: { S: 'inbound' },
+        size: { N: String(emailItem.size || 0) },
+        status: { S: 'received' },
+        threatLevel: { S: 'none' },
         isPhishing: { BOOL: false },
-        createdAt:  { S: new Date().toISOString() }
+        createdAt: { S: new Date().toISOString() }
       }
 
-      if (recipients.length)              dbItem.recipients  = { SS: recipients }
-      if (emailItem.attachments?.length)  dbItem.attachments = { SS: emailItem.attachments }
-      if (emailItem.urls?.length)         dbItem.urls        = { SS: emailItem.urls }
+      if (recipients.length) dbItem.recipients = { SS: recipients }
+      if (emailItem.attachments?.length) dbItem.attachments = { SS: emailItem.attachments }
+      if (emailItem.urls?.length) dbItem.urls = { SS: emailItem.urls }
       if (headers && Object.keys(headers).length) {
         dbItem.headers = { S: JSON.stringify(headers) }
       }
 
       await ddb.send(new PutItemCommand({
         TableName: EMAILS_TABLE,
-        Item:      dbItem,
+        Item: dbItem,
         ConditionExpression: 'attribute_not_exists(messageId)'
       }))
-      console.log('✅ DynamoDB write succeeded')
+      console.log('✅ INBOUND email stored successfully in DynamoDB')
+      
     } catch(err: any) {
       if (err.name === 'ConditionalCheckFailedException') {
         console.log('ℹ️ Email already exists, skipping duplicate:', emailItem.messageId)
-        // Continue processing without error - email already stored
+        return NextResponse.json({
+          status: 'duplicate_skipped',
+          reason: 'email_already_exists',
+          messageId: emailItem.messageId
+        })
       } else {
         console.error('❌ DynamoDB write failed', err)
-        throw err // Re-throw other errors
+        throw err
       }
     }
 
-
+    // Trigger threat detection if needed
     if (hasThreat) {
       try {
         await fetch(`${BASE_URL}/api/threat-detection`, {
@@ -403,6 +403,7 @@ Date: ${headers.date || mail.timestamp}
       } catch{}
     }
 
+    // Update graph
     try {
       await fetch(`${BASE_URL}/api/graph`, {
         method:'POST',
@@ -411,21 +412,27 @@ Date: ${headers.date || mail.timestamp}
       })
     } catch{}
 
-    console.log('🎉 Processing complete')
+    console.log('🎉 INBOUND email processing complete')
     return NextResponse.json({
-      status:           'processed',
-      messageId:        emailItem.messageId,
-      direction:        emailItem.direction,
+      status: 'processed',
+      messageId: emailItem.messageId,
+      direction: 'inbound',
       threatsTriggered: hasThreat,
-      webhookType:      isSes ? 'SES' : isWorkMail ? `WorkMail-${raw.flowDirection}` : 'Unknown',
-      processingNote:   'Smart processing - direction determined by monitored user involvement'
+      webhookType: 'WorkMail-INBOUND',
+      userId: userId,
+      filtersApplied: ['SES_FILTER', 'OUTBOUND_FILTER', 'INBOUND_ONLY_FILTER'],
+      processingNote: 'Only INBOUND WorkMail events are processed - all duplicates filtered out'
     })
 
-  } catch(err:any) {
-    console.error('❌ Webhook failed:', err)
+  } catch(err: any) {
+    console.error('❌ Webhook processing failed:', err)
     return NextResponse.json(
-      { error:'Webhook processing failed', message:err.message },
-      { status:500 }
+      { 
+        error: 'Webhook processing failed', 
+        message: err.message,
+        stack: err.stack?.split('\n').slice(0, 3)
+      },
+      { status: 500 }
     )
   }
 }
@@ -435,14 +442,15 @@ export async function GET() {
   try {
     await ddb.send(new QueryCommand({
       TableName: CS_TABLE,
-      KeyConditionExpression:    'orgId = :orgId',
+      KeyConditionExpression: 'orgId = :orgId',
       ExpressionAttributeValues: { ':orgId': { S: ORG_ID } },
       Limit: 1
     }))
     return NextResponse.json({ 
       status: 'webhook_ready',
       duplicatePreventionActive: true,
-      message: 'Smart webhook processing - handles all webhook types with intelligent direction detection'
+      filtersActive: ['SES_FILTER', 'OUTBOUND_FILTER', 'INBOUND_ONLY_FILTER'],
+      message: 'Production-ready webhook with comprehensive duplicate prevention'
     })
   } catch(err) {
     console.error('❌ Health check failed', err)
