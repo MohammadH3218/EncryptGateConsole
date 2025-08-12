@@ -168,6 +168,7 @@ export async function GET(request: Request) {
         size: parseInt(item.size?.N || '0', 10),
         urls: item.urls?.SS || [],
         userId: item.userId?.S || '', // Include for debugging
+        flaggedStatus: item.flaggedStatus?.S || 'none', // none, manual, ai, clean
       };
     });
 

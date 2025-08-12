@@ -152,6 +152,26 @@ export async function POST(request: Request) {
 
     console.log('✅ Manual detection created successfully:', detectionId);
 
+    // Update the email's flagged status to 'manual'
+    try {
+      const emailUpdateResponse = await fetch(`${process.env.BASE_URL || ''}/api/email/${body.emailMessageId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          flaggedStatus: 'manual',
+          userId: body.sentBy || body.emailMessageId // We'll need to pass the proper userId
+        })
+      });
+      
+      if (!emailUpdateResponse.ok) {
+        console.warn('⚠️ Failed to update email flagged status, but detection was created');
+      } else {
+        console.log('✅ Email flagged status updated to manual');
+      }
+    } catch (emailUpdateError) {
+      console.warn('⚠️ Error updating email flagged status:', emailUpdateError);
+    }
+
     const responseData = {
       id: detectionId,
       detectionId: detectionId,

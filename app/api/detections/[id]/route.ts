@@ -37,6 +37,26 @@ export async function DELETE(
     const { id: detectionId } = await params;
     console.log('🗑️ Deleting detection:', detectionId);
 
+    // First, get the detection to find the email messageId
+    const { GetItemCommand } = await import('@aws-sdk/client-dynamodb');
+    let emailMessageId = null;
+    
+    try {
+      const getCommand = new GetItemCommand({
+        TableName: DETECTIONS_TABLE,
+        Key: {
+          orgId: { S: ORG_ID },
+          detectionId: { S: detectionId }
+        }
+      });
+      
+      const detection = await ddb.send(getCommand);
+      emailMessageId = detection.Item?.emailMessageId?.S;
+      console.log('📧 Found email messageId for detection:', emailMessageId);
+    } catch (getError: any) {
+      console.warn('⚠️ Could not get detection details before deletion:', getError.message);
+    }
+
     // Delete from DynamoDB - table uses orgId as partition key and detectionId as sort key
     const deleteCommand = {
       TableName: DETECTIONS_TABLE,
@@ -57,6 +77,28 @@ export async function DELETE(
       // Still return success to allow frontend functionality to work
       console.log('⚠️ DynamoDB delete failed (likely mock environment):', dynamoError.message);
       console.log('✅ Proceeding with mock deletion for:', detectionId);
+    }
+
+    // Update the email's flagged status back to 'clean' when unflagged
+    if (emailMessageId) {
+      try {
+        const emailUpdateResponse = await fetch(`${process.env.BASE_URL || ''}/api/email/${emailMessageId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            flaggedStatus: 'clean',
+            userId: emailMessageId // We'll need to pass the proper userId - for now using messageId
+          })
+        });
+        
+        if (!emailUpdateResponse.ok) {
+          console.warn('⚠️ Failed to update email flagged status to clean, but detection was deleted');
+        } else {
+          console.log('✅ Email flagged status updated to clean');
+        }
+      } catch (emailUpdateError) {
+        console.warn('⚠️ Error updating email flagged status to clean:', emailUpdateError);
+      }
     }
 
     return NextResponse.json({
