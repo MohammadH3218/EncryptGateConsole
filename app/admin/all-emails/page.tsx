@@ -336,6 +336,20 @@ export default function AdminAllEmailsPage() {
     setFlaggingEmail(email.id);
 
     try {
+      // Check if email is already flagged
+      console.log('🔍 Checking if email is already flagged:', email.messageId);
+      const checkResponse = await fetch('/api/detections');
+      if (checkResponse.ok) {
+        const existingDetections = await checkResponse.json();
+        const alreadyFlagged = existingDetections.some((detection: any) => 
+          detection.emailMessageId === email.messageId
+        );
+        
+        if (alreadyFlagged) {
+          setError('This email is already flagged as a detection');
+          return;
+        }
+      }
       const flagPayload = {
         emailMessageId: email.messageId,
         emailId: email.id,
@@ -368,8 +382,8 @@ export default function AdminAllEmailsPage() {
       // Refresh emails to update the UI
       await loadEmails(true);
 
-      // Navigate to the new detection
-      router.push(`/admin/investigate/${result.detectionId || result.id}`);
+      // Navigate to the detections page
+      router.push('/admin/detections');
     } catch (err: any) {
       console.error('❌ Failed to flag email:', err);
       setError(`Failed to flag email: ${err.message}`);
