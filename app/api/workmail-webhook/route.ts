@@ -217,22 +217,26 @@ export async function POST(req: Request) {
       });
     }
 
-    // FILTER 3: Only process INBOUND WorkMail events
-    if (!isWorkMail || raw.flowDirection !== 'INBOUND') {
-      console.log('🚫 FILTERED: Not an INBOUND WorkMail event - skipping');
+    // FILTER 3: Process WorkMail INBOUND events OR unknown/legacy email formats
+    if (isWorkMail && raw.flowDirection !== 'INBOUND') {
+      console.log('🚫 FILTERED: OUTBOUND WorkMail event - skipping');
       return NextResponse.json({
         status: 'filtered_out',
-        reason: 'not_inbound_workmail',
-        message: 'Only INBOUND WorkMail events are processed',
+        reason: 'outbound_workmail_skipped',
+        message: 'OUTBOUND WorkMail events are filtered',
         filterApplied: 'INBOUND_ONLY_FILTER',
-        webhookType: isSes ? 'SES' : isWorkMail ? `WorkMail-${raw?.flowDirection}` : 'Unknown'
+        webhookType: `WorkMail-${raw?.flowDirection}`
       });
     }
 
-    console.log('✅ FILTER PASSED: Processing INBOUND WorkMail event');
+    // Allow legacy email formats and INBOUND WorkMail events to continue
+    const webhookType = isSes ? 'SES' : 
+                       isWorkMail ? `WorkMail-${raw?.flowDirection}` : 
+                       'Legacy/Unknown';
+    console.log(`✅ FILTER PASSED: Processing ${webhookType} event`);
     
     // ═══════════════════════════════════════════════════════════════════
-    // CONTINUE WITH EMAIL PROCESSING (ONLY INBOUND WORKMAIL EVENTS)
+    // CONTINUE WITH EMAIL PROCESSING (INBOUND WORKMAIL & LEGACY FORMATS)
     // ═══════════════════════════════════════════════════════════════════
     
     const safeFirst = (arr: any) => Array.isArray(arr) && arr.length ? arr[0] : undefined
@@ -243,23 +247,30 @@ export async function POST(req: Request) {
       return (m ? m[1] : s).trim()
     }
 
-    // Normalize WorkMail payload
+    // Normalize payload (supports WorkMail and other formats)
     const normalized = {
       notificationType: 'Delivery',
       mail: {
-        messageId: raw.messageId,
-        timestamp: new Date().toISOString(),
-        source: (Array.isArray(raw.headers?.from) && raw.headers.from[0]) ?? raw?.envelope?.mailFrom?.address ?? "",
-        destination: (raw.envelope?.recipients || []).map((r: any) => r.address),
+        messageId: raw.messageId || raw.mail?.messageId || `unknown-${Date.now()}`,
+        timestamp: raw.timestamp || raw.mail?.timestamp || new Date().toISOString(),
+        source: (Array.isArray(raw.headers?.from) && raw.headers.from[0]) ?? 
+                raw?.envelope?.mailFrom?.address ?? 
+                raw.mail?.source ?? "",
+        destination: (raw.envelope?.recipients || []).map((r: any) => r.address) ||
+                    raw.mail?.destination || [],
         commonHeaders: {
-          from: raw.headers?.from || (raw.envelope?.mailFrom ? [raw.envelope.mailFrom.address] : []),
-          to: raw.headers?.to || (raw.envelope?.recipients || []).map((r: any) => r.address),
-          subject: raw.subject || ""
+          from: raw.headers?.from || 
+                (raw.envelope?.mailFrom ? [raw.envelope.mailFrom.address] : []) ||
+                raw.mail?.commonHeaders?.from || [],
+          to: raw.headers?.to || 
+              (raw.envelope?.recipients || []).map((r: any) => r.address) ||
+              raw.mail?.commonHeaders?.to || [],
+          subject: raw.subject || raw.mail?.commonHeaders?.subject || ""
         }
       }
     };
 
-    console.log('🔄 Normalized WorkMail payload:', {
+    console.log('🔄 Normalized email payload:', {
       messageId: normalized.mail.messageId,
       subject: normalized.mail.commonHeaders.subject,
       from: normalized.mail.commonHeaders.from,
@@ -281,7 +292,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ status:'ignored', reason:'not-delivery' })
     }
 
-    console.log('📧 Processing INBOUND email:', mail.messageId)
+    console.log('📧 Processing email:', mail.messageId, `(${webhookType})`)
     
     const rawSender = mail.commonHeaders.from[0] || mail.source
     const rawRecipients = mail.commonHeaders.to.length ? mail.commonHeaders.to : mail.destination
@@ -321,9 +332,9 @@ export async function POST(req: Request) {
     const headers = parsed.headers
     const messageBody = parsed.messageBody
 
-    // For INBOUND emails, always use recipient as userId
+    // Use recipient as userId (assuming inbound emails to monitored employees)
     const userId = recipients[toMons.findIndex(Boolean)] ?? recipients[0]
-    console.log('📧 Using userId for INBOUND email:', userId)
+    console.log('📧 Using userId for email:', userId)
 
     const urls = extractUrls(messageBody)
     const hasThreat = urls.length > 0 || containsSuspiciousKeywords(messageBody)
@@ -338,7 +349,7 @@ export async function POST(req: Request) {
       bodyHtml: messageBody,
       headers,
       attachments: [] as string[],
-      direction: 'inbound', // Always inbound since we only process INBOUND events
+      direction: 'inbound', // Assume inbound for monitored employee emails
       size: messageBody.length,
       urls,
       hasThreat
@@ -346,7 +357,7 @@ export async function POST(req: Request) {
 
     // Store in DynamoDB
     try {
-      console.log(`💾 Writing INBOUND email to DynamoDB table ${EMAILS_TABLE}`)
+      console.log(`💾 Writing email to DynamoDB table ${EMAILS_TABLE}`)
       const dbItem: Record<string, any> = {
         userId: { S: userId },
         receivedAt: { S: emailItem.timestamp },
@@ -376,7 +387,7 @@ export async function POST(req: Request) {
         Item: dbItem,
         ConditionExpression: 'attribute_not_exists(messageId)'
       }))
-      console.log('✅ INBOUND email stored successfully in DynamoDB')
+      console.log('✅ Email stored successfully in DynamoDB')
       
     } catch(err: any) {
       if (err.name === 'ConditionalCheckFailedException') {
@@ -412,16 +423,16 @@ export async function POST(req: Request) {
       })
     } catch{}
 
-    console.log('🎉 INBOUND email processing complete')
+    console.log('🎉 Email processing complete')
     return NextResponse.json({
       status: 'processed',
       messageId: emailItem.messageId,
       direction: 'inbound',
       threatsTriggered: hasThreat,
-      webhookType: 'WorkMail-INBOUND',
+      webhookType: webhookType,
       userId: userId,
       filtersApplied: ['SES_FILTER', 'OUTBOUND_FILTER', 'INBOUND_ONLY_FILTER'],
-      processingNote: 'Only INBOUND WorkMail events are processed - all duplicates filtered out'
+      processingNote: 'INBOUND WorkMail events and legacy formats processed - duplicates filtered'
     })
 
   } catch(err: any) {
@@ -450,7 +461,7 @@ export async function GET() {
       status: 'webhook_ready',
       duplicatePreventionActive: true,
       filtersActive: ['SES_FILTER', 'OUTBOUND_FILTER', 'INBOUND_ONLY_FILTER'],
-      message: 'Production-ready webhook with comprehensive duplicate prevention'
+      message: 'Production webhook with duplicate prevention - supports WorkMail & legacy formats'
     })
   } catch(err) {
     console.error('❌ Health check failed', err)
