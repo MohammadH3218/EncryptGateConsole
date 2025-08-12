@@ -4,6 +4,12 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
+import { StatCard } from "@/components/dashboard/stat-card"
+import { InteractiveLineChart } from "@/components/dashboard/interactive-line-chart"
+import { CompletedDetections } from "@/components/dashboard/completed-detections"
+import { AutoBlockedEmails } from "@/components/dashboard/auto-blocked-emails"
+import { AssignmentsOverview } from "@/components/dashboard/assignments-overview"
+import { AssignedDetections } from "@/components/dashboard/assigned-detections"
 import { FadeInSection } from "@/components/fade-in-section"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,6 +17,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot"
+import type { CompletedDetection } from "@/components/dashboard/completed-detections"
 import { 
   ArrowLeft,
   Bot,
@@ -27,7 +34,8 @@ import {
   Save,
   Share,
   Minimize2,
-  Maximize2
+  Maximize2,
+  Send
 } from "lucide-react"
 
 interface EmailDetails {
@@ -73,6 +81,83 @@ export default function InvestigationPage() {
   const [showCopilot, setShowCopilot] = useState(false)
   const [copilotMinimized, setCopilotMinimized] = useState(false)
   const [investigationStatus, setInvestigationStatus] = useState("in_progress")
+
+  // ——— Dashboard stats state ———
+  const [stats] = useState({
+    totalIncomingEmails: 1245,
+    totalOutgoingEmails: 876,
+    totalDetections: 32,
+    assignedDetections: 8,
+    previousWeek: {
+      totalIncomingEmails: 1003,
+      totalOutgoingEmails: 992,
+      totalDetections: 28,
+    },
+    severityBreakdown: {
+      critical: 5,
+      high: 12,
+      medium: 10,
+      low: 5,
+    },
+  })
+
+  // ——— Weekly detection trend data for line chart ———
+  const [detectionTrendData] = useState([
+    { day: "Mon", value: 8 },
+    { day: "Tue", value: 12 },
+    { day: "Wed", value: 15 },
+    { day: "Thu", value: 9 },
+    { day: "Fri", value: 18 },
+    { day: "Sat", value: 6 },
+    { day: "Sun", value: 4 },
+  ])
+
+  // ——— Completed detections table ———
+  const [completedDetections] = useState<CompletedDetection[]>([
+    {
+      id: "1",
+      name: "Phishing Attempt",
+      severity: "Critical",
+      resolvedBy: "John Doe",
+      completedAt: "2024-01-31T14:30:00Z",
+    },
+    {
+      id: "2",
+      name: "Suspicious Login",
+      severity: "High",
+      resolvedBy: "Jane Smith",
+      completedAt: "2024-01-31T12:15:00Z",
+    },
+    {
+      id: "3",
+      name: "Malware Detection",
+      severity: "Critical",
+      resolvedBy: "John Doe",
+      completedAt: "2024-01-31T10:45:00Z",
+    },
+  ])
+
+  // ——— Auto-blocked emails list ———
+  const [autoBlockedEmails] = useState({
+    total: 24,
+    data: [
+      {
+        sender: "malicious@phishing.com",
+        reason: "Known phishing domain",
+        timestamp: "2024-01-31T15:20:00Z",
+      },
+      {
+        sender: "suspicious@unknown.net",
+        reason: "Suspicious attachment",
+        timestamp: "2024-01-31T14:10:00Z",
+      },
+      {
+        sender: "spam@marketing.biz",
+        reason: "Spam content detected",
+        timestamp: "2024-01-31T12:30:00Z",
+      },
+    ],
+  })
 
   useEffect(() => {
     loadInvestigationData()
@@ -179,7 +264,7 @@ export default function InvestigationPage() {
 
   if (loading) {
     return (
-      <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={2}>
+      <AppLayout username="John Doe" notificationsCount={2}>
         <div className="flex items-center justify-center h-96">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           <span className="ml-2">Loading investigation...</span>
@@ -190,7 +275,7 @@ export default function InvestigationPage() {
 
   if (error || !emailDetails) {
     return (
-      <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={2}>
+      <AppLayout username="John Doe" notificationsCount={2}>
         <FadeInSection>
           <Card className="border-destructive">
             <CardContent className="pt-6">
@@ -213,291 +298,337 @@ export default function InvestigationPage() {
   const RiskIcon = riskLevel.icon
 
   return (
-    <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={2}>
+    <AppLayout username="John Doe" notificationsCount={5}>
       <div className="relative min-h-screen">
-        {/* Main Content - Full Width */}
-        <div className="w-full">
-          <FadeInSection>
-            <div className="space-y-6">
-              {/* Header */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <Button variant="ghost" onClick={() => router.back()}>
-                    <ArrowLeft className="h-4 w-4 mr-2" />
-                    Back to Detections
-                  </Button>
-                  <div>
-                    <h1 className="text-2xl font-bold">Investigation Details</h1>
-                    <Badge className={`${riskLevel.color} mt-2`}>
-                      <RiskIcon className="h-3 w-3 mr-1" />
-                      {riskLevel.label}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm">
-                    <Share className="h-4 w-4 mr-2" />
-                    Share
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={toggleCopilot}
-                    className={showCopilot && !copilotMinimized ? 'bg-primary/10' : ''}
-                  >
-                    <Bot className="h-4 w-4 mr-2" />
-                    {!showCopilot ? 'Security Copilot' : copilotMinimized ? 'Expand Copilot' : 'Minimize Copilot'}
-                  </Button>
-                </div>
-              </div>
+        {/* Header */}
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-4">
+            <Button variant="ghost" onClick={() => router.back()}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Detections
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold text-white">Investigation Dashboard</h1>
+              <Badge className={`${riskLevel.color} mt-2`}>
+                <RiskIcon className="h-3 w-3 mr-1" />
+                {riskLevel.label}
+              </Badge>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm">
+              <Share className="h-4 w-4 mr-2" />
+              Share
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleCopilot}
+              className={showCopilot && !copilotMinimized ? 'bg-primary/10' : ''}
+            >
+              <Bot className="h-4 w-4 mr-2" />
+              {!showCopilot ? 'Security Copilot' : copilotMinimized ? 'Expand Copilot' : 'Minimize Copilot'}
+            </Button>
+          </div>
+        </div>
 
-              {/* Investigation Progress */}
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+          <StatCard
+            title="Incoming Emails"
+            value={stats.totalIncomingEmails}
+            description="Total emails sent to employees"
+            previousValue={stats.previousWeek.totalIncomingEmails}
+            icon={<Mail className="w-6 h-6" />}
+          />
+          <StatCard
+            title="Outgoing Emails"
+            value={stats.totalOutgoingEmails}
+            description="Total emails sent by employees"
+            previousValue={stats.previousWeek.totalOutgoingEmails}
+            icon={<Send className="w-6 h-6" />}
+          />
+          <StatCard
+            title="Total Detections"
+            value={stats.totalDetections}
+            description="Suspicious emails detected"
+            previousValue={stats.previousWeek.totalDetections}
+            icon={<Shield className="w-6 h-6" />}
+          />
+        </div>
+
+        {/* Main Dashboard Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          {/* Assignments Overview - Takes 2 columns */}
+          <div className="lg:col-span-2">
+            <AssignmentsOverview username="John Doe" />
+          </div>
+
+          {/* Severity Chart */}
+          <div>
+            <InteractiveLineChart title="Detection Trends" data={detectionTrendData} color="#3b82f6" />
+          </div>
+
+          {/* Assigned Detections */}
+          <div>
+            <AssignedDetections count={15} />
+          </div>
+
+          {/* Completed Detections */}
+          <div>
+            <CompletedDetections detections={completedDetections} />
+          </div>
+
+          {/* Auto-blocked Emails */}
+          <div>
+            <AutoBlockedEmails data={autoBlockedEmails.data} total={autoBlockedEmails.total} />
+          </div>
+        </div>
+
+        {/* Investigation Details Section */}
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              Investigation Progress
+              <div className="flex gap-2">
+                <Button
+                  variant={investigationStatus === 'in_progress' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => handleStatusUpdate('in_progress')}
+                >
+                  <Clock className="h-4 w-4 mr-2" />
+                  In Progress
+                </Button>
+                <Button
+                  variant={investigationStatus === 'resolved' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => handleStatusUpdate('resolved')}
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Resolved
+                </Button>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div 
+                className="bg-primary h-2 rounded-full transition-all duration-300"
+                style={{ width: investigationStatus === 'resolved' ? '100%' : '60%' }}
+              />
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              {investigationStatus === 'resolved' ? 'Investigation completed' : 'Investigation in progress - 60% complete'}
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Investigation Details Tabs */}
+        <Tabs defaultValue="overview" className="space-y-4">
+          <TabsList className="grid w-full grid-cols-5">
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="technical">Technical Details</TabsTrigger>
+            <TabsTrigger value="threat">Threat Assessment</TabsTrigger>
+            <TabsTrigger value="content">Content Analysis</TabsTrigger>
+            <TabsTrigger value="reputation">Reputation</TabsTrigger>
+          </TabsList>
+
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    Investigation Progress
-                    <div className="flex gap-2">
-                      <Button
-                        variant={investigationStatus === 'in_progress' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => handleStatusUpdate('in_progress')}
-                      >
-                        <Clock className="h-4 w-4 mr-2" />
-                        In Progress
-                      </Button>
-                      <Button
-                        variant={investigationStatus === 'resolved' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => handleStatusUpdate('resolved')}
-                      >
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                        Resolved
-                      </Button>
-                    </div>
+                  <CardTitle className="flex items-center gap-2">
+                    <Mail className="h-5 w-5" />
+                    Email Details
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div 
-                      className="bg-primary h-2 rounded-full transition-all duration-300"
-                      style={{ width: investigationStatus === 'resolved' ? '100%' : '60%' }}
-                    />
+                <CardContent className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">From</label>
+                    <p className="font-mono text-sm">{emailDetails.sender}</p>
                   </div>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    {investigationStatus === 'resolved' ? 'Investigation completed' : 'Investigation in progress - 60% complete'}
-                  </p>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">To</label>
+                    <p className="font-mono text-sm">{emailDetails.recipients.join(', ')}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Subject</label>
+                    <p className="font-medium">{emailDetails.subject}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-muted-foreground">Received</label>
+                    <p className="text-sm">{new Date(emailDetails.timestamp).toLocaleString()}</p>
+                  </div>
                 </CardContent>
               </Card>
 
-              {/* Main Content Tabs */}
-              <Tabs defaultValue="overview" className="space-y-4">
-                <TabsList className="grid w-full grid-cols-5">
-                  <TabsTrigger value="overview">Overview</TabsTrigger>
-                  <TabsTrigger value="technical">Technical Details</TabsTrigger>
-                  <TabsTrigger value="threat">Threat Assessment</TabsTrigger>
-                  <TabsTrigger value="content">Content Analysis</TabsTrigger>
-                  <TabsTrigger value="reputation">Reputation</TabsTrigger>
-                </TabsList>
-
-                {/* Overview Tab */}
-                <TabsContent value="overview" className="space-y-4">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <Mail className="h-5 w-5" />
-                          Email Details
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div>
-                          <label className="text-sm font-medium text-muted-foreground">From</label>
-                          <p className="font-mono text-sm">{emailDetails.sender}</p>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium text-muted-foreground">To</label>
-                          <p className="font-mono text-sm">{emailDetails.recipients.join(', ')}</p>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium text-muted-foreground">Subject</label>
-                          <p className="font-medium">{emailDetails.subject}</p>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium text-muted-foreground">Received</label>
-                          <p className="text-sm">{new Date(emailDetails.timestamp).toLocaleString()}</p>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Message Body</CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="bg-muted p-4 rounded-lg">
-                          <p className="text-sm whitespace-pre-wrap">{emailDetails.body}</p>
-                        </div>
-                      </CardContent>
-                    </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Message Body</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="bg-muted p-4 rounded-lg">
+                    <p className="text-sm whitespace-pre-wrap">{emailDetails.body}</p>
                   </div>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <FileText className="h-5 w-5" />
-                        Investigation Notes
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <Textarea
-                        placeholder="Add your investigation notes here..."
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className="min-h-[100px]"
-                      />
-                      <Button onClick={handleSaveNotes} className="mt-2">
-                        <Save className="h-4 w-4 mr-2" />
-                        Save Notes
-                      </Button>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                {/* Technical Details Tab */}
-                <TabsContent value="technical" className="space-y-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Email Headers</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
-                        {Object.entries(emailDetails.headers).map(([key, value]) => (
-                          <div key={key}>
-                            <span className="text-blue-600">{key}:</span> {value}
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {emailDetails.urls && emailDetails.urls.length > 0 && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <Link className="h-5 w-5" />
-                          URLs Found
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="space-y-2">
-                          {emailDetails.urls.map((url, index) => (
-                            <div key={index} className="p-3 bg-muted rounded-lg">
-                              <p className="font-mono text-sm text-red-600">{url}</p>
-                              <Badge variant="destructive" className="mt-1">Suspicious</Badge>
-                            </div>
-                          ))}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </TabsContent>
-
-                {/* Threat Assessment Tab */}
-                <TabsContent value="threat" className="space-y-4">
-                  {detectionDetails && (
-                    <>
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Threat Indicators</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-2">
-                            {detectionDetails.indicators.map((indicator, index) => (
-                              <div key={index} className="flex items-center gap-2">
-                                <AlertTriangle className="h-4 w-4 text-red-500" />
-                                <span className="text-sm">{indicator}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Recommended Actions</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-2">
-                            {detectionDetails.recommendations.map((recommendation, index) => (
-                              <div key={index} className="flex items-center gap-2">
-                                <CheckCircle className="h-4 w-4 text-green-500" />
-                                <span className="text-sm">{recommendation}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </>
-                  )}
-                </TabsContent>
-
-                {/* Content Analysis Tab */}
-                <TabsContent value="content" className="space-y-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Content Analysis</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-sm font-medium">Language Analysis</label>
-                          <p className="text-sm text-muted-foreground">Urgent and threatening language detected</p>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium">Sentiment</label>
-                          <Badge variant="destructive">Threatening</Badge>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium">Phishing Indicators</label>
-                          <div className="mt-2 space-y-1">
-                            <Badge variant="outline" className="mr-2">Account suspension threat</Badge>
-                            <Badge variant="outline" className="mr-2">Urgent action required</Badge>
-                            <Badge variant="outline" className="mr-2">Credential request</Badge>
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                {/* Reputation Tab */}
-                <TabsContent value="reputation" className="space-y-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Sender Reputation</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        <div>
-                          <label className="text-sm font-medium">Domain Reputation</label>
-                          <Badge variant="destructive" className="ml-2">Malicious</Badge>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium">IP Reputation</label>
-                          <Badge variant="destructive" className="ml-2">Known Bad Actor</Badge>
-                        </div>
-                        <div>
-                          <label className="text-sm font-medium">Historical Activity</label>
-                          <p className="text-sm text-muted-foreground">First time sender - no historical data</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-              </Tabs>
+                </CardContent>
+              </Card>
             </div>
-          </FadeInSection>
-        </div>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Investigation Notes
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Textarea
+                  placeholder="Add your investigation notes here..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="min-h-[100px]"
+                />
+                <Button onClick={handleSaveNotes} className="mt-2">
+                  <Save className="h-4 w-4 mr-2" />
+                  Save Notes
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Technical Details Tab */}
+          <TabsContent value="technical" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Email Headers</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-muted p-4 rounded-lg font-mono text-sm space-y-2">
+                  {Object.entries(emailDetails.headers).map(([key, value]) => (
+                    <div key={key}>
+                      <span className="text-blue-600">{key}:</span> {value}
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {emailDetails.urls && emailDetails.urls.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Link className="h-5 w-5" />
+                    URLs Found
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {emailDetails.urls.map((url, index) => (
+                      <div key={index} className="p-3 bg-muted rounded-lg">
+                        <p className="font-mono text-sm text-red-600">{url}</p>
+                        <Badge variant="destructive" className="mt-1">Suspicious</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
+          {/* Threat Assessment Tab */}
+          <TabsContent value="threat" className="space-y-4">
+            {detectionDetails && (
+              <>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Threat Indicators</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {detectionDetails.indicators.map((indicator, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <AlertTriangle className="h-4 w-4 text-red-500" />
+                          <span className="text-sm">{indicator}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Recommended Actions</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      {detectionDetails.recommendations.map((recommendation, index) => (
+                        <div key={index} className="flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4 text-green-500" />
+                          <span className="text-sm">{recommendation}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </TabsContent>
+
+          {/* Content Analysis Tab */}
+          <TabsContent value="content" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Content Analysis</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium">Language Analysis</label>
+                    <p className="text-sm text-muted-foreground">Urgent and threatening language detected</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Sentiment</label>
+                    <Badge variant="destructive">Threatening</Badge>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Phishing Indicators</label>
+                    <div className="mt-2 space-y-1">
+                      <Badge variant="outline" className="mr-2">Account suspension threat</Badge>
+                      <Badge variant="outline" className="mr-2">Urgent action required</Badge>
+                      <Badge variant="outline" className="mr-2">Credential request</Badge>
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Reputation Tab */}
+          <TabsContent value="reputation" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Sender Reputation</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium">Domain Reputation</label>
+                    <Badge variant="destructive" className="ml-2">Malicious</Badge>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">IP Reputation</label>
+                    <Badge variant="destructive" className="ml-2">Known Bad Actor</Badge>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">Historical Activity</label>
+                    <p className="text-sm text-muted-foreground">First time sender - no historical data</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
 
         {/* Security Copilot - Bottom Corner Overlay */}
         {showCopilot && (
