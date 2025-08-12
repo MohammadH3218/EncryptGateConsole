@@ -179,6 +179,35 @@ export async function POST(req: Request) {
     const raw = await req.json()
     console.log('📨 Webhook payload:', JSON.stringify(raw, null,2))
     
+    const isSes = !!raw?.Records?.[0]?.ses?.mail;
+    const isWorkMail = !!raw?.summaryVersion && !!raw?.messageId && !!raw?.envelope;
+
+    // Skip SES webhooks - only process WorkMail events
+    if (isSes) {
+      console.log('⏭️ SKIPPING SES webhook - only processing WorkMail INBOUND events');
+      return NextResponse.json({
+        status: 'skipped',
+        reason: 'ses_webhook_ignored',
+        message: 'Only processing WorkMail INBOUND webhooks to avoid duplicates',
+        webhookType: 'SES',
+        messageId: raw?.Records?.[0]?.ses?.mail?.messageId
+      });
+    }
+
+    // Skip OUTBOUND WorkMail events - only process INBOUND emails
+    if (isWorkMail && raw.flowDirection === 'OUTBOUND') {
+      console.log('⏭️ SKIPPING OUTBOUND WorkMail event - only processing INBOUND emails');
+      return NextResponse.json({
+        status: 'skipped',
+        reason: 'outbound_ignored', 
+        message: 'Only processing inbound emails to avoid duplicates',
+        webhookType: 'WorkMail-OUTBOUND',
+        messageId: raw?.messageId
+      });
+    }
+
+    console.log('✅ Processing WorkMail INBOUND webhook - passed duplicate filters');
+    
     const safeFirst = (arr: any) => Array.isArray(arr) && arr.length ? arr[0] : undefined
 
     const extractEmail = (s: string): string => {
@@ -186,9 +215,6 @@ export async function POST(req: Request) {
       const m = s.match(/<([^>]+)>/)
       return (m ? m[1] : s).trim()
     }
-
-    const isSes = !!raw?.Records?.[0]?.ses?.mail;
-    const isWorkMail = !!raw?.summaryVersion && !!raw?.messageId && !!raw?.envelope;
 
     const normalized = isSes
       ? {
@@ -311,10 +337,8 @@ Date: ${headers.date || mail.timestamp}
       messageBody = parsed.messageBody
     }
 
-    const isOutbound = fromMon
-    const userId = isOutbound
-      ? sender
-      : recipients[toMons.findIndex(Boolean)] ?? recipients[0]
+    const isOutbound = false // Always false since we only process INBOUND events
+    const userId = recipients[toMons.findIndex(Boolean)] ?? recipients[0] // Always use recipient for INBOUND
 
     const urls      = extractUrls(messageBody)
     const hasThreat = urls.length > 0 || containsSuspiciousKeywords(messageBody)
@@ -329,7 +353,7 @@ Date: ${headers.date || mail.timestamp}
       bodyHtml:  messageBody,
       headers,
       attachments: [] as string[],
-      direction:   isOutbound ? 'outbound' : 'inbound',
+      direction:   'inbound', // Always inbound since we only process INBOUND events
       size:        messageBody.length,
       urls,
       hasThreat
@@ -401,7 +425,9 @@ Date: ${headers.date || mail.timestamp}
       status:           'processed',
       messageId:        emailItem.messageId,
       direction:        emailItem.direction,
-      threatsTriggered: hasThreat
+      threatsTriggered: hasThreat,
+      webhookType:      'WorkMail-INBOUND',
+      processingNote:   'Duplicate prevention active - only processing INBOUND emails'
     })
 
   } catch(err:any) {
@@ -422,7 +448,11 @@ export async function GET() {
       ExpressionAttributeValues: { ':orgId': { S: ORG_ID } },
       Limit: 1
     }))
-    return NextResponse.json({ status:'webhook_ready' })
+    return NextResponse.json({ 
+      status: 'webhook_ready',
+      duplicatePreventionActive: true,
+      message: 'Only processing WorkMail INBOUND events - SES and OUTBOUND webhooks filtered out'
+    })
   } catch(err) {
     console.error('❌ Health check failed', err)
     return NextResponse.json({ status:'unhealthy' }, { status:500 })
