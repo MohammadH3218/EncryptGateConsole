@@ -1,11 +1,10 @@
-// app/api/detections/route.ts
+// app/api/detections/[id]/route.ts
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import {
   DynamoDBClient,
-  ScanCommand,
-  ScanCommandInput,
+  DeleteItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -16,71 +15,49 @@ if (!ORG_ID) {
   console.error('❌ Missing ORGANIZATION_ID environment variable');
 }
 
-console.log('🚨 Detections API initialized with:', { REGION, ORG_ID, DETECTIONS_TABLE });
+console.log('🚨 Detection [id] API initialized with:', { REGION, ORG_ID, DETECTIONS_TABLE });
 
 const ddb = new DynamoDBClient({ region: REGION });
 
-// GET: list of detections
-export async function GET(request: Request) {
+// DELETE: remove a detection (unflag)
+export async function DELETE(
+  request: Request,
+  { params }: { params: { id: string } }
+) {
   try {
-    console.log('🚨 GET /api/detections - Loading detections...');
+    console.log('🚩 DELETE /api/detections/[id] - Unflagging detection...');
     
-    const url = new URL(request.url);
-    const limit = Math.min(1000, Math.max(1, parseInt(url.searchParams.get('limit') || '50')));
-    const lastKey = url.searchParams.get('lastKey');
+    if (!ORG_ID) {
+      return NextResponse.json(
+        { error: 'Organization ID is required' },
+        { status: 400 }
+      );
+    }
 
-    const params: ScanCommandInput = {
+    const detectionId = params.id;
+    console.log('🗑️ Deleting detection:', detectionId);
+
+    // Delete from DynamoDB
+    const deleteCommand = {
       TableName: DETECTIONS_TABLE,
-      FilterExpression: 'orgId = :orgId',
-      ExpressionAttributeValues: {
-        ':orgId': { S: ORG_ID },
-      },
-      Limit: limit,
+      Key: {
+        detectionId: { S: detectionId }
+      }
     };
 
-    if (lastKey) {
-      try {
-        params.ExclusiveStartKey = JSON.parse(decodeURIComponent(lastKey));
-      } catch (e) {
-        console.warn('Invalid lastKey, ignoring:', lastKey);
-      }
-    }
+    console.log('💾 Deleting detection from DynamoDB:', detectionId);
+    await ddb.send(new DeleteItemCommand(deleteCommand));
 
-    console.log('🔍 Scanning DynamoDB for detections...');
-    const resp = await ddb.send(new ScanCommand(params));
-    
-    console.log(`✅ DynamoDB scan returned ${resp.Items?.length || 0} detection items`);
+    console.log('✅ Detection deleted successfully:', detectionId);
 
-    if (!resp.Items || resp.Items.length === 0) {
-      console.log('ℹ️ No detections found, returning empty array');
-      
-      // Return empty array when no real data exists
-      const emptyDetections: any[] = [];
+    return NextResponse.json({
+      success: true,
+      message: 'Detection unflagged successfully',
+      detectionId: detectionId
+    });
 
-      return NextResponse.json(emptyDetections);
-    }
-
-    const detections = resp.Items.map((item) => ({
-      id: item.detectionId?.S!,
-      detectionId: item.detectionId?.S!,
-      emailMessageId: item.emailMessageId?.S!,
-      severity: item.severity?.S || 'low',
-      name: item.name?.S || 'Unknown Detection',
-      status: item.status?.S || 'new',
-      assignedTo: item.assignedTo?.S ? JSON.parse(item.assignedTo.S) : [],
-      sentBy: item.sentBy?.S || '',
-      timestamp: item.timestamp?.S!,
-      description: item.description?.S || '',
-      indicators: item.indicators?.S ? JSON.parse(item.indicators.S) : [],
-      recommendations: item.recommendations?.S ? JSON.parse(item.recommendations.S) : [],
-      threatScore: parseInt(item.threatScore?.N || '0'),
-      confidence: parseInt(item.confidence?.N || '50'),
-      createdAt: item.createdAt?.S!,
-    }));
-
-    return NextResponse.json(detections);
   } catch (err: any) {
-    console.error('❌ [GET /api/detections] error:', {
+    console.error('❌ [DELETE /api/detections/[id]] error:', {
       message: err.message,
       code: err.code,
       name: err.name,
@@ -89,7 +66,7 @@ export async function GET(request: Request) {
     
     return NextResponse.json(
       { 
-        error: 'Failed to fetch detections', 
+        error: 'Failed to unflag detection', 
         details: err.message,
         code: err.code || err.name,
         troubleshooting: 'Check your AWS credentials, table name, and organization ID'

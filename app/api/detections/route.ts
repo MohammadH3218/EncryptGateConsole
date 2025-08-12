@@ -98,3 +98,96 @@ export async function GET(request: Request) {
     );
   }
 }
+
+// POST: create a new detection (for manual flagging)
+export async function POST(request: Request) {
+  try {
+    console.log('🚩 POST /api/detections - Creating manual detection...');
+    
+    if (!ORG_ID) {
+      return NextResponse.json(
+        { error: 'Organization ID is required' },
+        { status: 400 }
+      );
+    }
+
+    const body = await request.json();
+    console.log('📨 Manual flagging request:', body);
+
+    // Generate unique detection ID
+    const detectionId = `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = new Date().toISOString();
+
+    // Prepare detection item for DynamoDB
+    const detectionItem = {
+      detectionId: { S: detectionId },
+      orgId: { S: ORG_ID },
+      emailMessageId: { S: body.emailMessageId || body.emailId },
+      severity: { S: body.severity || 'medium' },
+      name: { S: body.name || 'Manually Flagged Email' },
+      status: { S: 'new' },
+      assignedTo: { S: JSON.stringify(body.assignedTo || []) },
+      sentBy: { S: body.sentBy || '' },
+      timestamp: { S: timestamp },
+      createdAt: { S: timestamp },
+      description: { S: body.description || 'This email was manually flagged as suspicious.' },
+      indicators: { S: JSON.stringify(body.indicators || ['Manual review required']) },
+      recommendations: { S: JSON.stringify(body.recommendations || ['Investigate email content']) },
+      threatScore: { N: (body.threatScore || 75).toString() },
+      confidence: { N: (body.confidence || 90).toString() },
+      manualFlag: { BOOL: true }
+    };
+
+    // Insert into DynamoDB
+    const putCommand = {
+      TableName: DETECTIONS_TABLE,
+      Item: detectionItem
+    };
+
+    console.log('💾 Inserting detection into DynamoDB:', { detectionId, severity: body.severity, emailMessageId: body.emailMessageId });
+    
+    const { PutItemCommand } = await import('@aws-sdk/client-dynamodb');
+    await ddb.send(new PutItemCommand(putCommand));
+
+    console.log('✅ Manual detection created successfully:', detectionId);
+
+    const responseData = {
+      id: detectionId,
+      detectionId: detectionId,
+      emailMessageId: body.emailMessageId || body.emailId,
+      severity: body.severity || 'medium',
+      name: body.name || 'Manually Flagged Email',
+      status: 'new',
+      assignedTo: body.assignedTo || [],
+      sentBy: body.sentBy || '',
+      timestamp: timestamp,
+      createdAt: timestamp,
+      description: body.description || 'This email was manually flagged as suspicious.',
+      indicators: body.indicators || ['Manual review required'],
+      recommendations: body.recommendations || ['Investigate email content'],
+      threatScore: body.threatScore || 75,
+      confidence: body.confidence || 90,
+      manualFlag: true
+    };
+
+    return NextResponse.json(responseData);
+
+  } catch (err: any) {
+    console.error('❌ [POST /api/detections] error:', {
+      message: err.message,
+      code: err.code,
+      name: err.name,
+      stack: err.stack
+    });
+    
+    return NextResponse.json(
+      { 
+        error: 'Failed to create detection', 
+        details: err.message,
+        code: err.code || err.name,
+        troubleshooting: 'Check your AWS credentials, table name, and organization ID'
+      },
+      { status: 500 }
+    );
+  }
+}
