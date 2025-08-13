@@ -168,7 +168,14 @@ export async function GET(request: Request) {
         size: parseInt(item.size?.N || '0', 10),
         urls: item.urls?.SS || [],
         userId: item.userId?.S || '', // Include for debugging
-        flaggedStatus: item.flaggedStatus?.S || 'none', // none, manual, ai, clean
+        flaggedCategory: item.flaggedCategory?.S || item.flaggedStatus?.S || 'none', // none, manual, ai, clean
+        flaggedSeverity: item.flaggedSeverity?.S,
+        investigationStatus: item.investigationStatus?.S,
+        detectionId: item.detectionId?.S,
+        flaggedAt: item.flaggedAt?.S,
+        flaggedBy: item.flaggedBy?.S,
+        investigationNotes: item.investigationNotes?.S,
+        updatedAt: item.updatedAt?.S
       };
     });
 
