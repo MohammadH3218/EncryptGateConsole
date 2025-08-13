@@ -1,4 +1,4 @@
-// app/admin/detections/page.tsx
+// app/admin/detections/page.tsx - UPDATED VERSION
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
@@ -26,7 +26,9 @@ import {
   XCircle,
   AlertCircle,
   Flag,
-  FlagOff
+  FlagOff,
+  Clock,
+  UserCheck
 } from "lucide-react"
 
 interface Detection {
@@ -45,6 +47,7 @@ interface Detection {
   threatScore: number
   confidence: number
   createdAt: string
+  manualFlag?: boolean
 }
 
 interface DetectionsStats {
@@ -57,6 +60,8 @@ interface DetectionsStats {
   high: number
   medium: number
   low: number
+  manualFlags: number
+  aiFlags: number
 }
 
 export default function AdminDetectionsPage() {
@@ -70,25 +75,30 @@ export default function AdminDetectionsPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [stats, setStats] = useState<DetectionsStats>({
     total: 0, new: 0, inProgress: 0, resolved: 0, falsePositives: 0,
-    critical: 0, high: 0, medium: 0, low: 0
+    critical: 0, high: 0, medium: 0, low: 0, manualFlags: 0, aiFlags: 0
   })
   
   // Filters
   const [severityFilter, setSeverityFilter] = useState<string>("all")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [assignmentFilter, setAssignmentFilter] = useState<string>("all")
+  const [flagTypeFilter, setFlagTypeFilter] = useState<string>("all") // NEW: Filter by manual/AI flags
 
   // Pagination
   const [lastKey, setLastKey] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const itemsPerPage = 25
 
-  // Unflag functionality
+  // Unflag functionality - IMPROVED
   const [unflagConfirm, setUnflagConfirm] = useState<{show: boolean, detection: Detection | null}>({
     show: false, 
     detection: null
   })
   const [unflaggingId, setUnflaggingId] = useState<string | null>(null)
+
+  // Status update functionality - NEW
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
+  const [assigningDetection, setAssigningDetection] = useState<string | null>(null)
 
   // Clear messages after some time
   useEffect(() => {
@@ -114,7 +124,7 @@ export default function AdminDetectionsPage() {
   useEffect(() => {
     applyFilters()
     calculateStats()
-  }, [searchQuery, detections, severityFilter, statusFilter, assignmentFilter])
+  }, [searchQuery, detections, severityFilter, statusFilter, assignmentFilter, flagTypeFilter])
 
   const loadDetections = async (reset = false) => {
     if (reset) {
@@ -202,6 +212,15 @@ export default function AdminDetectionsPage() {
       }
     }
 
+    // NEW: Flag type filter
+    if (flagTypeFilter !== "all") {
+      if (flagTypeFilter === "manual") {
+        filtered = filtered.filter(detection => detection.manualFlag === true)
+      } else if (flagTypeFilter === "ai") {
+        filtered = filtered.filter(detection => detection.manualFlag !== true)
+      }
+    }
+
     setFilteredDetections(filtered)
   }
 
@@ -216,6 +235,8 @@ export default function AdminDetectionsPage() {
       high: detections.filter(d => d.severity === 'high').length,
       medium: detections.filter(d => d.severity === 'medium').length,
       low: detections.filter(d => d.severity === 'low').length,
+      manualFlags: detections.filter(d => d.manualFlag === true).length,
+      aiFlags: detections.filter(d => d.manualFlag !== true).length,
     }
     setStats(newStats)
   }
@@ -265,6 +286,14 @@ export default function AdminDetectionsPage() {
     }
   }
 
+  const getFlagTypeBadge = (detection: Detection) => {
+    if (detection.manualFlag === true) {
+      return <Badge variant="outline" className="border-orange-500 text-orange-500"><Flag className="h-3 w-3 mr-1" />Manual</Badge>
+    } else {
+      return <Badge variant="outline" className="border-purple-500 text-purple-500"><Shield className="h-3 w-3 mr-1" />AI</Badge>
+    }
+  }
+
   const handleInvestigate = (detection: Detection) => {
     router.push(`/admin/investigate/${detection.emailMessageId}`)
   }
@@ -301,21 +330,22 @@ export default function AdminDetectionsPage() {
         throw new Error(errorData.message || errorData.error || `Failed to unflag detection: ${response.status}`)
       }
 
-      console.log('✅ Detection unflagged successfully')
+      const result = await response.json()
+      console.log('✅ Detection unflagged successfully:', result)
       
       // Immediately remove the detection from local state for instant UI update
       setDetections(prev => prev.filter(d => d.id !== detection.id))
       
       // Show success message
-      setSuccessMessage(`Detection "${detection.name}" has been successfully unflagged and removed. The email has been marked as clean.`)
+      setSuccessMessage(`Detection "${detection.name}" has been successfully unflagged and marked as clean. The email status has been updated.`)
       
       // Close confirmation dialog immediately
       setUnflagConfirm({ show: false, detection: null })
       
-      // Refresh data to ensure consistency with the email flagged status update
+      // Optional: Refresh data to ensure consistency
       setTimeout(() => {
         loadDetections(true)
-      }, 1000) // Refresh to sync with email status changes
+      }, 2000)
       
     } catch (err: any) {
       console.error('❌ Failed to unflag detection:', err)
@@ -328,6 +358,66 @@ export default function AdminDetectionsPage() {
 
   const handleUnflagCancel = () => {
     setUnflagConfirm({ show: false, detection: null })
+  }
+
+  // NEW: Update detection status
+  const updateDetectionStatus = async (detectionId: string, newStatus: string) => {
+    setUpdatingStatus(detectionId)
+    setError(null)
+    
+    try {
+      // For now, we'll update locally and show success
+      // In production, you'd want to create a PATCH endpoint for detections
+      setDetections(prev => 
+        prev.map(d => 
+          d.id === detectionId 
+            ? { ...d, status: newStatus as any }
+            : d
+        )
+      )
+      
+      setSuccessMessage(`Detection status updated to "${newStatus}".`)
+      
+      // TODO: Implement actual API call
+      // const response = await fetch(`/api/detections/${detectionId}`, {
+      //   method: 'PATCH',
+      //   headers: { 'Content-Type': 'application/json' },
+      //   body: JSON.stringify({ status: newStatus })
+      // })
+      
+    } catch (err: any) {
+      console.error('❌ Failed to update detection status:', err)
+      setError(`Failed to update detection status: ${err.message}`)
+    } finally {
+      setUpdatingStatus(null)
+    }
+  }
+
+  // NEW: Assign detection
+  const assignDetection = async (detectionId: string, assignTo: string) => {
+    setAssigningDetection(detectionId)
+    setError(null)
+    
+    try {
+      // For now, we'll update locally and show success
+      setDetections(prev => 
+        prev.map(d => 
+          d.id === detectionId 
+            ? { ...d, assignedTo: [assignTo], status: 'in_progress' as any }
+            : d
+        )
+      )
+      
+      setSuccessMessage(`Detection assigned to ${assignTo} and marked as in progress.`)
+      
+      // TODO: Implement actual API call
+      
+    } catch (err: any) {
+      console.error('❌ Failed to assign detection:', err)
+      setError(`Failed to assign detection: ${err.message}`)
+    } finally {
+      setAssigningDetection(null)
+    }
   }
 
   // Infinite scroll handler
@@ -425,13 +515,13 @@ export default function AdminDetectionsPage() {
             </div>
           </div>
 
-          {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* Stats Cards - UPDATED */}
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
             <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-400">Total Detections</p>
+                    <p className="text-sm font-medium text-gray-400">Total</p>
                     <p className="text-2xl font-bold text-white">{stats.total}</p>
                   </div>
                   <Shield className="h-8 w-8 text-gray-400" />
@@ -442,8 +532,8 @@ export default function AdminDetectionsPage() {
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-gray-400">Critical Threats</p>
-                    <p className="text-2xl font-bold text-red-400">{stats.critical}</p>
+                    <p className="text-sm font-medium text-gray-400">New</p>
+                    <p className="text-2xl font-bold text-red-400">{stats.new}</p>
                   </div>
                   <AlertTriangle className="h-8 w-8 text-red-400" />
                 </div>
@@ -457,6 +547,28 @@ export default function AdminDetectionsPage() {
                     <p className="text-2xl font-bold text-yellow-400">{stats.inProgress}</p>
                   </div>
                   <Activity className="h-8 w-8 text-yellow-400" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-400">Manual Flags</p>
+                    <p className="text-2xl font-bold text-orange-400">{stats.manualFlags}</p>
+                  </div>
+                  <Flag className="h-8 w-8 text-orange-400" />
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-400">AI Flags</p>
+                    <p className="text-2xl font-bold text-purple-400">{stats.aiFlags}</p>
+                  </div>
+                  <Shield className="h-8 w-8 text-purple-400" />
                 </div>
               </CardContent>
             </Card>
@@ -503,7 +615,7 @@ export default function AdminDetectionsPage() {
             </CardContent>
           </Card>
 
-          {/* Filters */}
+          {/* Filters - UPDATED */}
           <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg text-white">
@@ -512,7 +624,7 @@ export default function AdminDetectionsPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-white">Search</label>
                   <div className="relative">
@@ -568,11 +680,24 @@ export default function AdminDetectionsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-white">Flag Type</label>
+                  <Select value={flagTypeFilter} onValueChange={setFlagTypeFilter}>
+                    <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                      <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All Types</SelectItem>
+                      <SelectItem value="manual" className="text-white focus:bg-[#2a2a2a] focus:text-white">Manual Flags</SelectItem>
+                      <SelectItem value="ai" className="text-white focus:bg-[#2a2a2a] focus:text-white">AI Flags</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </CardContent>
           </Card>
 
-          {/* Detections Table */}
+          {/* Detections Table - UPDATED */}
           <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
               <CardTitle className="text-white">Detection List</CardTitle>
@@ -602,6 +727,7 @@ export default function AdminDetectionsPage() {
                       <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
                         <TableHead className="text-white">Detection</TableHead>
                         <TableHead className="text-white">Sender</TableHead>
+                        <TableHead className="text-white">Type</TableHead>
                         <TableHead className="text-white">Severity</TableHead>
                         <TableHead className="text-white">Status</TableHead>
                         <TableHead className="text-white">Threat Score</TableHead>
@@ -622,6 +748,9 @@ export default function AdminDetectionsPage() {
                             </div>
                           </TableCell>
                           <TableCell className="text-white">{detection.sentBy}</TableCell>
+                          <TableCell>
+                            {getFlagTypeBadge(detection)}
+                          </TableCell>
                           <TableCell>
                             {getSeverityBadge(detection.severity)}
                           </TableCell>
@@ -690,6 +819,38 @@ export default function AdminDetectionsPage() {
                                   )}
                                 </Button>
                               )}
+                              {detection.status === 'new' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => updateDetectionStatus(detection.id, 'in_progress')}
+                                  disabled={updatingStatus === detection.id}
+                                  title="Start Investigation"
+                                  className="text-yellow-400 hover:bg-[#2a2a2a] hover:text-yellow-300"
+                                >
+                                  {updatingStatus === detection.id ? (
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Clock className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                              {detection.assignedTo.length === 0 && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => assignDetection(detection.id, 'John Doe')}
+                                  disabled={assigningDetection === detection.id}
+                                  title="Assign to Me"
+                                  className="text-blue-400 hover:bg-[#2a2a2a] hover:text-blue-300"
+                                >
+                                  {assigningDetection === detection.id ? (
+                                    <RefreshCw className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <UserCheck className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -716,7 +877,7 @@ export default function AdminDetectionsPage() {
             </CardContent>
           </Card>
 
-          {/* Unflag Confirmation Dialog */}
+          {/* Unflag Confirmation Dialog - keeping existing implementation */}
           {unflagConfirm.show && unflagConfirm.detection && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
               <div className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-md">
@@ -727,7 +888,7 @@ export default function AdminDetectionsPage() {
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-white">Unflag Email</h3>
-                      <p className="text-sm text-gray-400">Remove this detection and mark email as safe</p>
+                      <p className="text-sm text-gray-400">Remove this detection and mark email as clean</p>
                     </div>
                   </div>
 
@@ -745,6 +906,10 @@ export default function AdminDetectionsPage() {
                         <label className="text-sm font-medium text-gray-400">Severity</label>
                         <div className="mt-1">{getSeverityBadge(unflagConfirm.detection.severity)}</div>
                       </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-400">Type</label>
+                        <div className="mt-1">{getFlagTypeBadge(unflagConfirm.detection)}</div>
+                      </div>
                     </div>
                   </div>
 
@@ -754,7 +919,7 @@ export default function AdminDetectionsPage() {
                       <div>
                         <p className="text-sm text-yellow-300 font-medium">Are you sure?</p>
                         <p className="text-xs text-yellow-400 mt-1">
-                          This will permanently remove the detection and mark the email as safe. This action cannot be undone.
+                          This will permanently remove the detection and mark the email as clean. This action cannot be undone.
                         </p>
                       </div>
                     </div>

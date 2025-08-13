@@ -1,10 +1,11 @@
-// app/api/detections/[id]/route.ts
+// app/api/detections/[id]/route.ts - UPDATED VERSION
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import {
   DynamoDBClient,
   DeleteItemCommand,
+  GetItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -38,8 +39,8 @@ export async function DELETE(
     console.log('🗑️ Deleting detection:', detectionId);
 
     // First, get the detection to find the email messageId
-    const { GetItemCommand } = await import('@aws-sdk/client-dynamodb');
     let emailMessageId = null;
+    let detectionData = null;
     
     try {
       const getCommand = new GetItemCommand({
@@ -51,60 +52,91 @@ export async function DELETE(
       });
       
       const detection = await ddb.send(getCommand);
-      emailMessageId = detection.Item?.emailMessageId?.S;
-      console.log('📧 Found email messageId for detection:', emailMessageId);
+      
+      if (detection.Item) {
+        emailMessageId = detection.Item.emailMessageId?.S;
+        detectionData = {
+          emailMessageId: detection.Item.emailMessageId?.S,
+          severity: detection.Item.severity?.S,
+          name: detection.Item.name?.S,
+          manualFlag: detection.Item.manualFlag?.BOOL
+        };
+        console.log('📧 Found detection details:', detectionData);
+      } else {
+        console.warn('⚠️ Detection not found:', detectionId);
+        return NextResponse.json(
+          { error: 'Detection not found' },
+          { status: 404 }
+        );
+      }
     } catch (getError: any) {
-      console.warn('⚠️ Could not get detection details before deletion:', getError.message);
+      console.error('❌ Error getting detection details:', getError.message);
+      return NextResponse.json(
+        { error: 'Failed to get detection details' },
+        { status: 500 }
+      );
     }
 
-    // Delete from DynamoDB - table uses orgId as partition key and detectionId as sort key
-    const deleteCommand = {
+    // Delete from DynamoDB
+    const deleteCommand = new DeleteItemCommand({
       TableName: DETECTIONS_TABLE,
       Key: {
         orgId: { S: ORG_ID },
         detectionId: { S: detectionId }
       }
-    };
+    });
 
     console.log('💾 Deleting detection from DynamoDB:', detectionId);
     
-    // Try to delete from DynamoDB, but handle the case where it's a mock environment
     try {
-      await ddb.send(new DeleteItemCommand(deleteCommand));
+      await ddb.send(deleteCommand);
       console.log('✅ Detection deleted successfully from DynamoDB:', detectionId);
     } catch (dynamoError: any) {
-      // In development/mock environment, DynamoDB might not be properly configured
-      // Still return success to allow frontend functionality to work
-      console.log('⚠️ DynamoDB delete failed (likely mock environment):', dynamoError.message);
-      console.log('✅ Proceeding with mock deletion for:', detectionId);
+      console.error('❌ DynamoDB delete failed:', dynamoError.message);
+      return NextResponse.json(
+        { error: 'Failed to delete detection from database' },
+        { status: 500 }
+      );
     }
 
-    // Update the email's flagged status back to 'clean' when unflagged
+    // Update the email's status to 'clean' when unflagged
     if (emailMessageId) {
       try {
-        const emailUpdateResponse = await fetch(`${process.env.BASE_URL || ''}/api/email/${emailMessageId}`, {
+        console.log('📧 Updating email status to clean for:', emailMessageId);
+        
+        const emailUpdateResponse = await fetch(`${process.env.BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/email/${emailMessageId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            flaggedStatus: 'clean',
-            userId: emailMessageId // We'll need to pass the proper userId - for now using messageId
+            flaggedCategory: 'clean',
+            flaggedSeverity: undefined, // Remove severity
+            investigationStatus: 'resolved', // Mark as resolved
+            detectionId: undefined, // Remove detection link
+            flaggedBy: 'analyst', // Who unflagged it
+            investigationNotes: `Detection "${detectionData?.name}" was unflagged and marked as clean by analyst.`
           })
         });
         
-        if (!emailUpdateResponse.ok) {
-          console.warn('⚠️ Failed to update email flagged status to clean, but detection was deleted');
+        if (emailUpdateResponse.ok) {
+          const updateResult = await emailUpdateResponse.json();
+          console.log('✅ Email status updated to clean:', updateResult);
         } else {
-          console.log('✅ Email flagged status updated to clean');
+          const errorData = await emailUpdateResponse.json();
+          console.warn('⚠️ Failed to update email status:', errorData);
+          // Don't fail the whole operation if email update fails
         }
-      } catch (emailUpdateError) {
-        console.warn('⚠️ Error updating email flagged status to clean:', emailUpdateError);
+      } catch (emailUpdateError: any) {
+        console.warn('⚠️ Error updating email status:', emailUpdateError.message);
+        // Don't fail the whole operation if email update fails
       }
     }
 
     return NextResponse.json({
       success: true,
       message: 'Detection unflagged successfully',
-      detectionId: detectionId
+      detectionId: detectionId,
+      emailMessageId: emailMessageId,
+      action: 'unflagged'
     });
 
   } catch (err: any) {
@@ -122,6 +154,61 @@ export async function DELETE(
         code: err.code || err.name,
         troubleshooting: 'Check your AWS credentials, table name, and organization ID'
       },
+      { status: 500 }
+    );
+  }
+}
+
+// GET: get detection details
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: detectionId } = await params;
+    
+    const getCommand = new GetItemCommand({
+      TableName: DETECTIONS_TABLE,
+      Key: {
+        orgId: { S: ORG_ID },
+        detectionId: { S: detectionId }
+      }
+    });
+    
+    const result = await ddb.send(getCommand);
+    
+    if (!result.Item) {
+      return NextResponse.json(
+        { error: 'Detection not found' },
+        { status: 404 }
+      );
+    }
+    
+    const detection = {
+      id: result.Item.detectionId?.S,
+      detectionId: result.Item.detectionId?.S,
+      emailMessageId: result.Item.emailMessageId?.S,
+      severity: result.Item.severity?.S || 'low',
+      name: result.Item.name?.S || 'Unknown Detection',
+      status: result.Item.status?.S || 'new',
+      assignedTo: result.Item.assignedTo?.S ? JSON.parse(result.Item.assignedTo.S) : [],
+      sentBy: result.Item.sentBy?.S || '',
+      timestamp: result.Item.timestamp?.S,
+      description: result.Item.description?.S || '',
+      indicators: result.Item.indicators?.S ? JSON.parse(result.Item.indicators.S) : [],
+      recommendations: result.Item.recommendations?.S ? JSON.parse(result.Item.recommendations.S) : [],
+      threatScore: parseInt(result.Item.threatScore?.N || '0'),
+      confidence: parseInt(result.Item.confidence?.N || '50'),
+      createdAt: result.Item.createdAt?.S,
+      manualFlag: result.Item.manualFlag?.BOOL || false
+    };
+    
+    return NextResponse.json(detection);
+    
+  } catch (err: any) {
+    console.error('❌ [GET /api/detections/[id]] error:', err);
+    return NextResponse.json(
+      { error: 'Failed to get detection', details: err.message },
       { status: 500 }
     );
   }

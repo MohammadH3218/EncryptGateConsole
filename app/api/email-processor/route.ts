@@ -1,4 +1,4 @@
-// app/api/email-processor/route.ts - FIXED to match webhook schema
+// app/api/email-processor/route.ts - UPDATED to set default email attributes
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -11,8 +11,6 @@ import { z } from 'zod';
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
-
-// Email processor initialized
 
 if (!process.env.ORGANIZATION_ID) {
   console.warn('ORGANIZATION_ID not set, using default fallback');
@@ -70,8 +68,6 @@ export async function POST(req: Request) {
   let payload: EmailRequest;
   try {
     const rawPayload = await req.json();
-    // Process email payload
-    
     payload = EmailRequestSchema.parse(rawPayload);
   } catch (err: any) {
     console.error('❌ [email-processor] Invalid payload:', err);
@@ -82,12 +78,12 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Processing email
+    console.log('📧 Processing email payload:', payload.type);
     
     // Store email in DynamoDB
     await storeEmail(payload);
     
-    // Email processed successfully
+    console.log('✅ Email processed successfully');
     
     return NextResponse.json({
       status: 'processed',
@@ -116,7 +112,7 @@ export async function POST(req: Request) {
 }
 
 //
-// ─── STORE EMAIL IN DYNAMODB - FIXED TO MATCH WEBHOOK FORMAT ──────────────────
+// ─── STORE EMAIL IN DYNAMODB - UPDATED WITH NEW ATTRIBUTES ──────────────────
 //
 async function storeEmail(email: EmailRequest) {
   if (email.type === 'workmail_webhook') {
@@ -124,7 +120,7 @@ async function storeEmail(email: EmailRequest) {
     return;
   }
 
-  // Storing email in DynamoDB
+  console.log('💾 Storing email in DynamoDB with new attributes');
 
   // Generate a unique email ID if not present
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -137,10 +133,11 @@ async function storeEmail(email: EmailRequest) {
     userId = email.recipients[0]; // Use first recipient for inbound emails
   }
 
-  // Using userId for email storage
+  console.log('👤 Using userId for email storage:', userId);
 
-  // Match the webhook storage format exactly
+  // Match the webhook storage format exactly WITH NEW ATTRIBUTES
   const item: Record<string, any> = {
+    // Core email attributes
     userId: { S: userId },                    // HASH key (required)
     receivedAt: { S: email.timestamp },       // RANGE key (required)
     messageId: { S: email.messageId },
@@ -155,6 +152,16 @@ async function storeEmail(email: EmailRequest) {
     threatLevel: { S: 'none' },
     isPhishing: { BOOL: false },
     createdAt: { S: new Date().toISOString() },
+
+    // NEW ATTRIBUTES - Set defaults for new email attributes
+    flaggedCategory: { S: 'none' },          // Default: 'none' (not flagged)
+    // flaggedSeverity: undefined,           // Only set when flagged
+    // investigationStatus: undefined,       // Only set when flagged
+    // detectionId: undefined,               // Only set when linked to detection
+    // flaggedAt: undefined,                 // Only set when flagged
+    // flaggedBy: undefined,                 // Only set when flagged
+    // investigationNotes: undefined,        // Only set when investigation starts
+    updatedAt: { S: new Date().toISOString() }, // Track last update
   };
 
   // Add optional fields
@@ -174,7 +181,12 @@ async function storeEmail(email: EmailRequest) {
     item.urls = { SS: email.urls };
   }
 
-  // Email item prepared for DynamoDB
+  console.log('📧 Email item prepared for DynamoDB with attributes:', {
+    messageId: email.messageId,
+    userId,
+    flaggedCategory: 'none',
+    hasNewAttributes: true
+  });
 
   try {
     await ddb.send(
@@ -185,7 +197,7 @@ async function storeEmail(email: EmailRequest) {
       })
     );
     
-    // Email stored successfully
+    console.log('✅ Email stored successfully with new attributes');
   } catch (err: any) {
     if (err.name === 'ConditionalCheckFailedException') {
       console.log('ℹ️ Email already exists, skipping duplicate:', email.messageId)
@@ -212,9 +224,8 @@ export async function GET(req: Request) {
   const action = url.searchParams.get('action') || 'test';
 
   if (action === 'health') {
-    // Health check
     try {
-      // Health check
+      console.log('🏥 Health check requested');
       
       return NextResponse.json({
         status: 'healthy',
@@ -225,7 +236,13 @@ export async function GET(req: Request) {
           emailsTable: EMAILS_TABLE,
           hasOrgId: ORG_ID !== 'default-org'
         },
-        version: '1.0.0'
+        features: {
+          emailAttributes: true,
+          flaggedCategories: ['none', 'ai', 'manual', 'clean'],
+          investigationStatuses: ['new', 'in_progress', 'resolved'],
+          severityLevels: ['critical', 'high', 'medium', 'low']
+        },
+        version: '2.0.0'
       });
     } catch (err: any) {
       console.error('❌ Health check failed:', err);
@@ -240,46 +257,56 @@ export async function GET(req: Request) {
     }
   }
 
-  // Mock email test - FIXED to work with webhook schema
-  // Generating mock email for testing
+  // Mock email test - UPDATED with new attributes
+  console.log('🧪 Generating mock email for testing');
   
   const mockId = `mock-${Date.now()}`;
   const mock: EmailRequest = {
     type: 'mock_email',
     messageId: `<${mockId}@encryptgate-test.com>`,
-    subject: `Test Email - ${new Date().toLocaleString()}`,
+    subject: `Test Email with New Attributes - ${new Date().toLocaleString()}`,
     sender: 'test-sender@encryptgate-demo.com',
     recipients: ['contact@encryptgate.net'], // Use your monitored employee
     timestamp: new Date().toISOString(),
-    body: `This is a test email generated at ${new Date().toLocaleString()} for testing the email processing system.
+    body: `This is a test email generated at ${new Date().toLocaleString()} for testing the email processing system with new flagged attributes.
 
 This email contains:
 - A test subject line
 - Mock sender and recipient
 - Sample body content
 - Test timestamp
+- NEW: Default flagged category set to "none"
+- NEW: Support for investigation tracking
+- NEW: Email status attributes
 
-This helps verify that the email processing pipeline is working correctly.`,
-    bodyHtml: `<p>This is a test email generated at <strong>${new Date().toLocaleString()}</strong> for testing the email processing system.</p>
+This helps verify that the email processing pipeline is working correctly with the new email attributes for flagging and investigation tracking.`,
+    bodyHtml: `<p>This is a test email generated at <strong>${new Date().toLocaleString()}</strong> for testing the email processing system with new flagged attributes.</p>
 <p>This email contains:</p>
 <ul>
 <li>A test subject line</li>
 <li>Mock sender and recipient</li>
 <li>Sample body content</li>
 <li>Test timestamp</li>
+<li><strong>NEW:</strong> Default flagged category set to "none"</li>
+<li><strong>NEW:</strong> Support for investigation tracking</li>
+<li><strong>NEW:</strong> Email status attributes</li>
 </ul>
-<p>This helps verify that the email processing pipeline is working correctly.</p>`,
+<p>This helps verify that the email processing pipeline is working correctly with the new email attributes for flagging and investigation tracking.</p>`,
     attachments: [],
-    headers: { 'X-Test': 'true', 'X-Generated': new Date().toISOString() },
+    headers: { 
+      'X-Test': 'true', 
+      'X-Generated': new Date().toISOString(),
+      'X-Features': 'email-attributes-v2'
+    },
     direction: 'inbound',
-    size: 350,
+    size: 450,
     urls: []
   };
 
   try {
     await storeEmail(mock);
     
-    // Mock email test completed
+    console.log('✅ Mock email test completed with new attributes');
     
     return NextResponse.json({
       status: 'test-completed',
@@ -290,10 +317,15 @@ This helps verify that the email processing pipeline is working correctly.`,
         sender: mock.sender,
         recipients: mock.recipients,
         timestamp: mock.timestamp,
-        userId: mock.recipients[0] // Show which userId was used
+        userId: mock.recipients[0],
+        newAttributes: {
+          flaggedCategory: 'none',
+          hasInvestigationTracking: true,
+          hasEmailStatusAttributes: true
+        }
       },
-      message: 'Mock email processed and stored successfully',
-      instructions: 'Check the All Emails page to see if this test email appears'
+      message: 'Mock email processed and stored successfully with new email attributes',
+      instructions: 'Check the All Emails page to see if this test email appears with the new flagging system'
     });
   } catch (err: any) {
     console.error('❌ Mock email test failed:', err);
