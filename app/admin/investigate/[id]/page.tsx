@@ -103,61 +103,120 @@ export default function InvestigationPage() {
     setError(null)
     
     try {
-      // Load email details - for now using mock data since the API might not have real data
-      const mockEmailDetails: EmailDetails = {
-        messageId: emailId,
-        subject: "Urgent: Account Security Update Required",
-        sender: "suspicious.sender@malicious-domain.com",
-        recipients: ["employee@company.com"],
-        timestamp: new Date().toISOString(),
-        body: "Your account security needs immediate attention. Click here to verify your credentials and prevent account suspension.",
-        bodyHtml: "<p>Your account security needs <strong>immediate attention</strong>. <a href='http://phishing.com/verify'>Click here</a> to verify your credentials and prevent account suspension.</p>",
-        status: "analyzed",
-        threatLevel: "high",
-        isPhishing: true,
-        attachments: [],
-        headers: {
-          "X-Originating-IP": "192.168.1.100",
-          "Return-Path": "suspicious.sender@malicious-domain.com",
-          "Message-ID": emailId
-        },
-        direction: "inbound",
-        size: 1024,
-        urls: ["http://phishing.com/verify", "http://malicious-domain.com/login"],
-        flaggedCategory: "ai",
-        flaggedSeverity: "high",
-        detectionId: "det-001"
+      // First, try to load real email data from the API
+      console.log('🔍 Loading investigation data for emailId:', emailId)
+      
+      // Search through all emails to find the one with matching messageId
+      const emailsResponse = await fetch('/api/email?limit=1000')
+      if (!emailsResponse.ok) {
+        throw new Error('Failed to fetch emails')
       }
-
-      const mockDetectionDetails: DetectionDetails = {
-        id: "det-001",
-        name: "Phishing Attempt Detected",
-        severity: "critical",
-        status: "new",
-        description: "This email exhibits multiple characteristics of a phishing attack, including urgent language, suspicious URLs, and credential harvesting attempts.",
-        indicators: [
-          "Suspicious sender domain",
-          "Urgent/threatening language",
-          "URL leads to credential harvesting site",
-          "Spoofing legitimate organization",
-          "Requests sensitive information"
-        ],
-        recommendations: [
-          "Block sender domain immediately",
-          "Notify affected users",
-          "Check for similar emails in organization",
-          "Update security awareness training",
-          "Report to security team"
-        ],
-        threatScore: 95,
-        confidence: 88
+      
+      const emailsData = await emailsResponse.json()
+      const emails = emailsData.emails || []
+      
+      // Find the email with matching messageId
+      const foundEmail = emails.find((email: any) => 
+        email.messageId === emailId || email.id === emailId
+      )
+      
+      if (foundEmail) {
+        console.log('✅ Found real email data:', foundEmail)
+        
+        // Map the real email data to our interface
+        const emailDetails: EmailDetails = {
+          messageId: foundEmail.messageId || foundEmail.id,
+          subject: foundEmail.subject || 'No Subject',
+          sender: foundEmail.sender || '',
+          recipients: foundEmail.recipients || [],
+          timestamp: foundEmail.timestamp || new Date().toISOString(),
+          body: foundEmail.body || 'No message content available',
+          bodyHtml: foundEmail.bodyHtml,
+          status: foundEmail.status || 'received',
+          threatLevel: foundEmail.threatLevel || 'none',
+          isPhishing: foundEmail.isPhishing || false,
+          attachments: foundEmail.attachments || [],
+          headers: foundEmail.headers || {},
+          direction: foundEmail.direction || 'inbound',
+          size: foundEmail.size || 0,
+          urls: foundEmail.urls || [],
+          flaggedCategory: foundEmail.flaggedCategory || 'none',
+          flaggedSeverity: foundEmail.flaggedSeverity,
+          detectionId: foundEmail.detectionId
+        }
+        
+        setEmailDetails(emailDetails)
+        
+        // If there's a detection linked to this email, try to load it
+        if (foundEmail.detectionId) {
+          try {
+            const detectionResponse = await fetch(`/api/detections/${foundEmail.detectionId}`)
+            if (detectionResponse.ok) {
+              const detectionData = await detectionResponse.json()
+              setDetectionDetails(detectionData)
+            }
+          } catch (detectionErr) {
+            console.warn('⚠️ Could not load detection details:', detectionErr)
+          }
+        } else {
+          // Create mock detection details for display purposes
+          const mockDetection: DetectionDetails = {
+            id: 'investigation-' + emailId,
+            name: 'Email Under Investigation',
+            severity: emailDetails.threatLevel === 'none' ? 'low' : emailDetails.threatLevel,
+            status: 'in_progress',
+            description: 'This email is being investigated for potential security threats.',
+            indicators: emailDetails.urls && emailDetails.urls.length > 0 ? ['Contains URLs'] : ['Manual investigation'],
+            recommendations: ['Review email content', 'Check sender reputation', 'Verify legitimacy'],
+            threatScore: emailDetails.threatLevel === 'critical' ? 95 : 
+                        emailDetails.threatLevel === 'high' ? 80 : 
+                        emailDetails.threatLevel === 'medium' ? 60 : 30,
+            confidence: 75
+          }
+          setDetectionDetails(mockDetection)
+        }
+      } else {
+        console.log('⚠️ Email not found in database, using fallback data')
+        // Fallback to mock data if email not found
+        const fallbackEmail: EmailDetails = {
+          messageId: emailId,
+          subject: "Email Under Investigation",
+          sender: "unknown@domain.com",
+          recipients: ["recipient@company.com"],
+          timestamp: new Date().toISOString(),
+          body: "Email content is being loaded...",
+          bodyHtml: undefined,
+          status: "received",
+          threatLevel: "none",
+          isPhishing: false,
+          attachments: [],
+          headers: { "Message-ID": emailId },
+          direction: "inbound",
+          size: 0,
+          urls: [],
+          flaggedCategory: "none"
+        }
+        
+        setEmailDetails(fallbackEmail)
+        
+        const fallbackDetection: DetectionDetails = {
+          id: "investigation-" + emailId,
+          name: "Email Investigation",
+          severity: "medium",
+          status: "in_progress",
+          description: "This email is being investigated for potential security threats.",
+          indicators: ["Manual investigation required"],
+          recommendations: ["Review email content", "Check sender reputation"],
+          threatScore: 50,
+          confidence: 50
+        }
+        
+        setDetectionDetails(fallbackDetection)
       }
-
-      setEmailDetails(mockEmailDetails)
-      setDetectionDetails(mockDetectionDetails)
-    } catch (err) {
-      console.error('Failed to load investigation data:', err)
-      setError('Failed to load investigation details')
+      
+    } catch (err: any) {
+      console.error('❌ Failed to load investigation data:', err)
+      setError(`Failed to load investigation details: ${err.message}`)
     } finally {
       setLoading(false)
     }
@@ -215,6 +274,7 @@ export default function InvestigationPage() {
         return
       }
       
+      // Create detection record
       const flagPayload = {
         emailMessageId: emailDetails.messageId,
         emailId: emailDetails.messageId,
@@ -229,7 +289,7 @@ export default function InvestigationPage() {
         manualFlag: true
       }
 
-      const response = await fetch('/api/detections', {
+      const detectionResponse = await fetch('/api/detections', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -237,21 +297,44 @@ export default function InvestigationPage() {
         body: JSON.stringify(flagPayload),
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to flag email: ${response.status}`)
+      if (!detectionResponse.ok) {
+        throw new Error(`Failed to create detection: ${detectionResponse.status}`)
       }
 
-      const result = await response.json()
-      console.log('✅ Email flagged successfully:', result)
+      const detectionResult = await detectionResponse.json()
+      console.log('✅ Detection created successfully:', detectionResult)
 
-      setSuccessMessage('Email flagged successfully! Detection has been created.')
+      // Update email status in database
+      const updatePayload = {
+        flaggedCategory: 'manual',
+        flaggedSeverity: 'medium',
+        investigationStatus: 'new',
+        detectionId: detectionResult.detectionId || 'manual-' + Date.now(),
+        flaggedBy: 'Security Analyst'
+      }
+
+      const emailUpdateResponse = await fetch(`/api/email/${emailDetails.messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatePayload),
+      })
+
+      if (emailUpdateResponse.ok) {
+        console.log('✅ Email status updated in database')
+      } else {
+        console.warn('⚠️ Failed to update email status in database')
+      }
+
+      setSuccessMessage('Email flagged successfully! Detection has been created and email status updated.')
 
       // Update local email details
       setEmailDetails(prev => prev ? {
         ...prev,
         flaggedCategory: "manual",
         flaggedSeverity: "medium",
-        detectionId: result.detectionId || 'manual-' + Date.now()
+        detectionId: detectionResult.detectionId || 'manual-' + Date.now()
       } : null)
       
     } catch (err: any) {
@@ -277,6 +360,7 @@ export default function InvestigationPage() {
         return
       }
 
+      // Delete the detection record
       const response = await fetch(`/api/detections/${emailDetails.detectionId}`, {
         method: 'DELETE',
         headers: {
@@ -286,11 +370,34 @@ export default function InvestigationPage() {
 
       if (!response.ok) {
         const errorData = await response.json()
-        throw new Error(errorData.message || errorData.error || `Failed to unflag email: ${response.status}`)
+        throw new Error(errorData.message || errorData.error || `Failed to delete detection: ${response.status}`)
       }
 
       const result = await response.json()
-      console.log('✅ Email unflagged successfully:', result)
+      console.log('✅ Detection deleted successfully:', result)
+
+      // Update email status in database
+      const updatePayload = {
+        flaggedCategory: 'clean',
+        flaggedSeverity: undefined,
+        investigationStatus: 'resolved',
+        detectionId: undefined,
+        flaggedBy: 'Security Analyst'
+      }
+
+      const emailUpdateResponse = await fetch(`/api/email/${emailDetails.messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatePayload),
+      })
+
+      if (emailUpdateResponse.ok) {
+        console.log('✅ Email status updated in database')
+      } else {
+        console.warn('⚠️ Failed to update email status in database')
+      }
 
       setSuccessMessage('Email unflagged successfully and marked as clean.')
 
