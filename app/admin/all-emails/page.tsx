@@ -479,11 +479,13 @@ export default function AdminAllEmailsPage() {
 
       if (!emailUpdateResponse.ok) {
         const errorData = await emailUpdateResponse.json();
-        throw new Error(`Failed to update email status: ${errorData.message || emailUpdateResponse.status}`);
+        console.warn('⚠️ Failed to update email status in database:', errorData);
+        // Don't throw error here - the detection was created successfully
+        setSuccessMessage('Email flagged successfully! Detection has been created. Note: Email status update in database failed.');
+      } else {
+        console.log('✅ Email status updated in database');
+        setSuccessMessage('Email flagged successfully! Detection has been created and email status updated.');
       }
-
-      console.log('✅ Email status updated in database');
-      setSuccessMessage('Email flagged successfully! Detection has been created and email status updated.');
 
       // Refresh emails to update the UI
       await loadEmails(true);
@@ -544,11 +546,14 @@ export default function AdminAllEmailsPage() {
 
       if (!emailUpdateResponse.ok) {
         const errorData = await emailUpdateResponse.json();
-        throw new Error(`Failed to update email status: ${errorData.message || emailUpdateResponse.status}`);
+        console.warn('⚠️ Failed to update email status in database:', errorData);
+        // Don't throw error here - the detection was deleted successfully
+        // The email might not exist in the database or might have a different messageId format
+        setSuccessMessage('Email unflagged successfully. Note: Email status update in database failed, but detection was removed.');
+      } else {
+        console.log('✅ Email status updated in database');
+        setSuccessMessage('Email unflagged successfully and marked as clean.');
       }
-
-      console.log('✅ Email status updated in database');
-      setSuccessMessage('Email unflagged successfully and marked as clean.');
 
       // Refresh emails to update the UI
       await loadEmails(true);

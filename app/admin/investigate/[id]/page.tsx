@@ -396,11 +396,13 @@ export default function InvestigationPage() {
 
       if (!emailUpdateResponse.ok) {
         const errorData = await emailUpdateResponse.json()
-        throw new Error(`Failed to update email status: ${errorData.message || emailUpdateResponse.status}`)
+        console.warn('⚠️ Failed to update email status in database:', errorData)
+        // Don't throw error here - the detection was deleted successfully
+        setSuccessMessage('Email unflagged successfully. Note: Email status update in database failed, but detection was removed.')
+      } else {
+        console.log('✅ Email status updated in database')
+        setSuccessMessage('Email unflagged successfully and marked as clean.')
       }
-
-      console.log('✅ Email status updated in database')
-      setSuccessMessage('Email unflagged successfully and marked as clean.')
 
       // Update local email details to reflect the changes
       setEmailDetails(prev => prev ? {
