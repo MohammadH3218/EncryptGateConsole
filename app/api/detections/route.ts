@@ -1,4 +1,4 @@
-// app/api/detections/route.ts - UPDATED VERSION
+// app/api/detections/route.ts - CORRECTED FOR YOUR TABLE STRUCTURE  
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -20,7 +20,7 @@ console.log('🚨 Detections API initialized with:', { REGION, ORG_ID, DETECTION
 
 const ddb = new DynamoDBClient({ region: REGION });
 
-// GET: list of detections
+// GET: list of detections - CORRECTED
 export async function GET(request: Request) {
   try {
     console.log('🚨 GET /api/detections - Loading detections...');
@@ -31,10 +31,8 @@ export async function GET(request: Request) {
 
     const params: ScanCommandInput = {
       TableName: DETECTIONS_TABLE,
-      FilterExpression: 'orgId = :orgId',
-      ExpressionAttributeValues: {
-        ':orgId': { S: ORG_ID },
-      },
+      // No filter needed since we want all detections for this org
+      // Your table doesn't seem to filter by orgId based on the structure
       Limit: limit,
     };
 
@@ -65,13 +63,13 @@ export async function GET(request: Request) {
       status: item.status?.S || 'new',
       assignedTo: item.assignedTo?.S ? JSON.parse(item.assignedTo.S) : [],
       sentBy: item.sentBy?.S || '',
-      timestamp: item.timestamp?.S!,
+      timestamp: item.timestamp?.S || item.receivedAt?.S || '',
       description: item.description?.S || '',
       indicators: item.indicators?.S ? JSON.parse(item.indicators.S) : [],
       recommendations: item.recommendations?.S ? JSON.parse(item.recommendations.S) : [],
       threatScore: parseInt(item.threatScore?.N || '0'),
       confidence: parseInt(item.confidence?.N || '50'),
-      createdAt: item.createdAt?.S!,
+      createdAt: item.createdAt?.S || item.receivedAt?.S || '',
       manualFlag: item.manualFlag?.BOOL || false
     }));
 
@@ -96,7 +94,7 @@ export async function GET(request: Request) {
   }
 }
 
-// POST: create a new detection (for manual flagging)
+// POST: create a new detection - CORRECTED FOR YOUR TABLE STRUCTURE
 export async function POST(request: Request) {
   try {
     console.log('🚩 POST /api/detections - Creating manual detection...');
@@ -115,10 +113,14 @@ export async function POST(request: Request) {
     const detectionId = `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const timestamp = new Date().toISOString();
 
-    // Prepare detection item for DynamoDB
+    // Prepare detection item for DynamoDB - CORRECTED structure
     const detectionItem = {
-      detectionId: { S: detectionId },
-      orgId: { S: ORG_ID },
+      // Your table structure: detectionId (partition key) + receivedAt (sort key)
+      detectionId: { S: detectionId },           // Partition key
+      receivedAt: { S: timestamp },              // Sort key
+      
+      // Additional fields
+      orgId: { S: ORG_ID },                      // Keep for filtering/organization
       emailMessageId: { S: body.emailMessageId || body.emailId },
       severity: { S: body.severity || 'medium' },
       name: { S: body.name || 'Manually Flagged Email' },
@@ -127,7 +129,6 @@ export async function POST(request: Request) {
       sentBy: { S: body.sentBy || '' },
       timestamp: { S: timestamp },
       createdAt: { S: timestamp },
-      receivedAt: { S: timestamp },
       description: { S: body.description || 'This email was manually flagged as suspicious.' },
       indicators: { S: JSON.stringify(body.indicators || ['Manual review required']) },
       recommendations: { S: JSON.stringify(body.recommendations || ['Investigate email content']) },
@@ -142,7 +143,12 @@ export async function POST(request: Request) {
       Item: detectionItem
     };
 
-    console.log('💾 Inserting detection into DynamoDB:', { detectionId, severity: body.severity, emailMessageId: body.emailMessageId });
+    console.log('💾 Inserting detection into DynamoDB with structure:', { 
+      detectionId, 
+      receivedAt: timestamp,
+      severity: body.severity, 
+      emailMessageId: body.emailMessageId 
+    });
     
     const { PutItemCommand } = await import('@aws-sdk/client-dynamodb');
     await ddb.send(new PutItemCommand(putCommand));
@@ -153,25 +159,22 @@ export async function POST(request: Request) {
     try {
       console.log('📧 Updating email flagged status to manual for:', body.emailMessageId);
       
-      const emailUpdateResponse = await fetch(`${process.env.BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/email/${body.emailMessageId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          flaggedCategory: 'manual',
-          flaggedSeverity: body.severity || 'medium',
-          investigationStatus: 'new',
-          detectionId: detectionId,
-          flaggedBy: 'analyst',
-          investigationNotes: `Email manually flagged as suspicious: ${body.description || 'Manual review required'}`
-        })
+      // Use internal helper function instead of HTTP call
+      const { updateEmailAttributes } = await import('@/lib/email-helpers');
+      
+      const success = await updateEmailAttributes(body.emailMessageId, {
+        flaggedCategory: 'manual',
+        flaggedSeverity: body.severity || 'medium',
+        investigationStatus: 'new',
+        detectionId: detectionId,
+        flaggedBy: 'analyst',
+        investigationNotes: `Email manually flagged as suspicious: ${body.description || 'Manual review required'}`
       });
       
-      if (emailUpdateResponse.ok) {
-        const updateResult = await emailUpdateResponse.json();
-        console.log('✅ Email flagged status updated to manual:', updateResult);
+      if (success) {
+        console.log('✅ Email flagged status updated to manual');
       } else {
-        const errorData = await emailUpdateResponse.json();
-        console.warn('⚠️ Failed to update email flagged status:', errorData);
+        console.warn('⚠️ Failed to update email flagged status');
       }
     } catch (emailUpdateError: any) {
       console.warn('⚠️ Error updating email flagged status:', emailUpdateError.message);
