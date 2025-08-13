@@ -793,13 +793,13 @@ export default function AdminDetectionsPage() {
                             )}
                           </TableCell>
                           <TableCell>
-                            <div className="flex gap-1">
+                            <div className="flex items-center gap-1">
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleInvestigate(detection)}
                                 title="Investigate"
-                                className="text-white hover:bg-[#2a2a2a] hover:text-white"
+                                className="text-white hover:bg-[#2a2a2a] hover:text-white p-2"
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
@@ -810,7 +810,7 @@ export default function AdminDetectionsPage() {
                                   onClick={() => handleUnflagClick(detection)}
                                   disabled={unflaggingId === detection.id}
                                   title="Unflag Email"
-                                  className="text-orange-400 hover:bg-[#2a2a2a] hover:text-orange-300"
+                                  className="text-orange-400 hover:bg-orange-900/30 hover:text-orange-300 p-2"
                                 >
                                   {unflaggingId === detection.id ? (
                                     <RefreshCw className="h-4 w-4 animate-spin" />
@@ -826,7 +826,7 @@ export default function AdminDetectionsPage() {
                                   onClick={() => updateDetectionStatus(detection.id, 'in_progress')}
                                   disabled={updatingStatus === detection.id}
                                   title="Start Investigation"
-                                  className="text-yellow-400 hover:bg-[#2a2a2a] hover:text-yellow-300"
+                                  className="text-yellow-400 hover:bg-yellow-900/30 hover:text-yellow-300 p-2"
                                 >
                                   {updatingStatus === detection.id ? (
                                     <RefreshCw className="h-4 w-4 animate-spin" />
@@ -842,7 +842,7 @@ export default function AdminDetectionsPage() {
                                   onClick={() => assignDetection(detection.id, 'John Doe')}
                                   disabled={assigningDetection === detection.id}
                                   title="Assign to Me"
-                                  className="text-blue-400 hover:bg-[#2a2a2a] hover:text-blue-300"
+                                  className="text-blue-400 hover:bg-blue-900/30 hover:text-blue-300 p-2"
                                 >
                                   {assigningDetection === detection.id ? (
                                     <RefreshCw className="h-4 w-4 animate-spin" />
@@ -877,13 +877,13 @@ export default function AdminDetectionsPage() {
             </CardContent>
           </Card>
 
-          {/* Unflag Confirmation Dialog - keeping existing implementation */}
+          {/* Unflag Confirmation Dialog - IMPROVED STYLING */}
           {unflagConfirm.show && unflagConfirm.detection && (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
               <div className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-md">
                 <div className="p-6">
                   <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 bg-orange-900/20 rounded-full">
+                    <div className="p-3 bg-orange-900/20 rounded-full">
                       <FlagOff className="h-6 w-6 text-orange-400" />
                     </div>
                     <div>
@@ -893,14 +893,14 @@ export default function AdminDetectionsPage() {
                   </div>
 
                   <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-4 mb-6">
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div>
                         <label className="text-sm font-medium text-gray-400">Detection</label>
-                        <p className="text-white">{unflagConfirm.detection.name}</p>
+                        <p className="text-white mt-1">{unflagConfirm.detection.name}</p>
                       </div>
                       <div>
                         <label className="text-sm font-medium text-gray-400">From</label>
-                        <p className="text-white">{unflagConfirm.detection.sentBy}</p>
+                        <p className="text-white mt-1 break-all">{unflagConfirm.detection.sentBy}</p>
                       </div>
                       <div>
                         <label className="text-sm font-medium text-gray-400">Severity</label>
@@ -913,9 +913,9 @@ export default function AdminDetectionsPage() {
                     </div>
                   </div>
 
-                  <div className="bg-yellow-900/20 border border-yellow-600/30 rounded-lg p-3 mb-6">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="h-4 w-4 text-yellow-400 mt-0.5" />
+                  <div className="bg-yellow-900/20 border border-yellow-600/30 rounded-lg p-4 mb-6">
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="h-5 w-5 text-yellow-400 mt-0.5 flex-shrink-0" />
                       <div>
                         <p className="text-sm text-yellow-300 font-medium">Are you sure?</p>
                         <p className="text-xs text-yellow-400 mt-1">
