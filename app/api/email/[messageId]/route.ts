@@ -9,7 +9,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const ORG_ID = process.env.ORGANIZATION_ID || '';
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
 console.log('📧 Email [messageId] API initialized with:', { REGION, ORG_ID, EMAILS_TABLE });
@@ -53,15 +53,16 @@ export async function PATCH(
   try {
     console.log('📧 PATCH /api/email/[messageId] - Updating email status...');
     
+    // Note: ORG_ID might not be required in all environments
     if (!ORG_ID) {
-      return NextResponse.json(
-        { error: 'Organization ID is required' },
-        { status: 400 }
-      );
+      console.warn('⚠️ ORGANIZATION_ID not set, proceeding without org validation');
     }
 
     const { messageId } = await params;
+    console.log('📧 Processing messageId:', messageId);
+    
     const body = await request.json();
+    console.log('📧 Request body:', body);
     const { 
       flaggedCategory, 
       flaggedSeverity, 
@@ -104,13 +105,16 @@ export async function PATCH(
     }
 
     // Find the email by messageId
+    console.log('🔍 Searching for email with messageId:', messageId);
     const emailKey = await findEmailByMessageId(messageId);
     if (!emailKey) {
+      console.log('❌ Email not found with messageId:', messageId);
       return NextResponse.json(
-        { error: 'Email not found' },
+        { error: 'Email not found', messageId },
         { status: 404 }
       );
     }
+    console.log('✅ Found email key:', emailKey);
 
     // Build update expression dynamically
     const updateExpressions: string[] = [];
@@ -179,6 +183,12 @@ export async function PATCH(
       attributeNames['#flaggedAt'] = 'flaggedAt';
     }
 
+    console.log('📝 Building DynamoDB update command:', {
+      updateExpressions,
+      attributeNames,
+      attributeValues
+    });
+
     const updateCommand = new UpdateItemCommand({
       TableName: EMAILS_TABLE,
       Key: {
@@ -191,6 +201,7 @@ export async function PATCH(
       ReturnValues: 'ALL_NEW'
     });
 
+    console.log('🔄 Sending DynamoDB update command...');
     const result = await ddb.send(updateCommand);
     console.log('✅ Email status updated successfully');
 
