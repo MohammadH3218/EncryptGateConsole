@@ -268,8 +268,8 @@ export default function InvestigationPage() {
     setSuccessMessage(null)
 
     try {
-      // Check if email is already flagged
-      if (emailDetails.flaggedCategory !== 'none' && emailDetails.flaggedCategory !== 'clean') {
+      // Check if email is already flagged (excluding clean status)
+      if (emailDetails.flaggedCategory === 'manual' || emailDetails.flaggedCategory === 'ai') {
         setSuccessMessage(`This email is already flagged as "${emailDetails.flaggedCategory}".`)
         return
       }
@@ -334,8 +334,14 @@ export default function InvestigationPage() {
         ...prev,
         flaggedCategory: "manual",
         flaggedSeverity: "medium",
-        detectionId: detectionResult.detectionId || 'manual-' + Date.now()
+        detectionId: detectionResult.detectionId || 'manual-' + Date.now(),
+        investigationStatus: "new"
       } : null)
+
+      // Reload the investigation data to ensure consistency
+      setTimeout(() => {
+        loadInvestigationData()
+      }, 1000)
       
     } catch (err: any) {
       console.error('❌ Failed to flag email:', err)
@@ -354,29 +360,24 @@ export default function InvestigationPage() {
     setSuccessMessage(null)
 
     try {
-      // Check if email has a linked detection
-      if (!emailDetails.detectionId) {
-        setSuccessMessage('This email does not have a linked detection to unflag.')
-        return
+      // Delete the detection record if it exists
+      if (emailDetails.detectionId) {
+        const response = await fetch(`/api/detections/${emailDetails.detectionId}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.message || errorData.error || `Failed to delete detection: ${response.status}`)
+        }
+
+        console.log('✅ Detection deleted successfully')
       }
 
-      // Delete the detection record
-      const response = await fetch(`/api/detections/${emailDetails.detectionId}`, {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.message || errorData.error || `Failed to delete detection: ${response.status}`)
-      }
-
-      const result = await response.json()
-      console.log('✅ Detection deleted successfully:', result)
-
-      // Update email status in database
+      // Update email status in database using the same logic as All-Emails page
       const updatePayload = {
         flaggedCategory: 'clean',
         flaggedSeverity: undefined,
@@ -393,21 +394,27 @@ export default function InvestigationPage() {
         body: JSON.stringify(updatePayload),
       })
 
-      if (emailUpdateResponse.ok) {
-        console.log('✅ Email status updated in database')
-      } else {
-        console.warn('⚠️ Failed to update email status in database')
+      if (!emailUpdateResponse.ok) {
+        const errorData = await emailUpdateResponse.json()
+        throw new Error(`Failed to update email status: ${errorData.message || emailUpdateResponse.status}`)
       }
 
+      console.log('✅ Email status updated in database')
       setSuccessMessage('Email unflagged successfully and marked as clean.')
 
-      // Update local email details
+      // Update local email details to reflect the changes
       setEmailDetails(prev => prev ? {
         ...prev,
         flaggedCategory: "clean",
         flaggedSeverity: undefined,
-        detectionId: undefined
+        detectionId: undefined,
+        investigationStatus: "resolved"
       } : null)
+
+      // Reload the investigation data to ensure consistency
+      setTimeout(() => {
+        loadInvestigationData()
+      }, 1000)
       
     } catch (err: any) {
       console.error('❌ Failed to unflag email:', err)
@@ -521,9 +528,25 @@ export default function InvestigationPage() {
                 {unflaggingEmail ? (
                   <RefreshCw className="h-4 w-4 animate-spin mr-2" />
                 ) : (
-                  <FlagOff className="h-4 w-4 mr-2" />
+                  <CheckCircle className="h-4 w-4 mr-2" />
                 )}
                 Mark as Clean
+              </Button>
+            )}
+            {emailDetails && emailDetails.flaggedCategory === 'clean' && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={flagEmail}
+                disabled={flaggingEmail}
+                className="bg-orange-900/20 border-orange-600/30 text-orange-300 hover:bg-orange-900/40"
+              >
+                {flaggingEmail ? (
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Flag className="h-4 w-4 mr-2" />
+                )}
+                Flag as Suspicious
               </Button>
             )}
             <Button variant="outline" size="sm">
