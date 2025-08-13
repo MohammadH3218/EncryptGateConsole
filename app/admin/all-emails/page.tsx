@@ -1,4 +1,4 @@
-// app/admin/all-emails/page.tsx
+// app/admin/all-emails/page.tsx - UPDATED VERSION
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
@@ -39,7 +39,9 @@ import {
   Users,
   Flag,
   CheckCircle,
-  Info
+  Info,
+  Clock,
+  AlertCircle
 } from "lucide-react"
 
 interface Email {
@@ -59,7 +61,16 @@ interface Email {
   direction: "inbound" | "outbound"
   size: number
   urls?: string[]
-  flaggedStatus?: "none" | "manual" | "ai" | "clean"
+  
+  // NEW ATTRIBUTES
+  flaggedCategory: "none" | "ai" | "manual" | "clean"
+  flaggedSeverity?: "critical" | "high" | "medium" | "low"
+  investigationStatus?: "new" | "in_progress" | "resolved"
+  detectionId?: string
+  flaggedAt?: string
+  flaggedBy?: string
+  investigationNotes?: string
+  updatedAt?: string
 }
 
 interface EmailsResponse {
@@ -88,6 +99,8 @@ export default function AdminAllEmailsPage() {
   const [directionFilter, setDirectionFilter] = useState("all")
   const [threatFilter, setThreatFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [flaggedFilter, setFlaggedFilter] = useState("all") // NEW: Filter by flagged category
+  const [investigationFilter, setInvestigationFilter] = useState("all") // NEW: Filter by investigation status
 
   // Loading & pagination
   const [loading, setLoading] = useState(false)
@@ -116,7 +129,6 @@ export default function AdminAllEmailsPage() {
 
     if (selectedEmail) {
       document.addEventListener('keydown', handleKeyDown);
-      // Prevent background scrolling
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = 'unset';
@@ -183,16 +195,17 @@ export default function AdminAllEmailsPage() {
           debug: data.debug
         });
 
-        // Store debug info for display
         setDebugInfo(data.debug);
 
-        // Log detailed email info
         if (data.emails && data.emails.length > 0) {
           console.log('📋 Sample emails received:', data.emails.slice(0, 3).map(e => ({
             id: e.id,
             subject: e.subject,
             sender: e.sender,
-            timestamp: e.timestamp
+            timestamp: e.timestamp,
+            flaggedCategory: e.flaggedCategory,
+            flaggedSeverity: e.flaggedSeverity,
+            investigationStatus: e.investigationStatus
           })));
         } else {
           console.log('ℹ️ No emails in response');
@@ -244,7 +257,7 @@ export default function AdminAllEmailsPage() {
     return () => window.removeEventListener("scroll", onScroll);
   }, [hasMore, loading, loadingMore, loadEmails]);
 
-  // Apply filters
+  // Apply filters - UPDATED to include new filters
   useEffect(() => {
     console.log('🔍 Applying filters...', {
       searchQuery,
@@ -252,6 +265,8 @@ export default function AdminAllEmailsPage() {
       directionFilter,
       threatFilter,
       statusFilter,
+      flaggedFilter,
+      investigationFilter,
       totalEmails: emails.length
     });
 
@@ -296,6 +311,16 @@ export default function AdminAllEmailsPage() {
       list = list.filter(e => e.status === statusFilter);
     }
 
+    // NEW: Flagged category filter
+    if (flaggedFilter !== "all") {
+      list = list.filter(e => e.flaggedCategory === flaggedFilter);
+    }
+
+    // NEW: Investigation status filter
+    if (investigationFilter !== "all") {
+      list = list.filter(e => e.investigationStatus === investigationFilter);
+    }
+
     console.log('✅ Filters applied:', {
       originalCount: emails.length,
       filteredCount: list.length
@@ -308,10 +333,48 @@ export default function AdminAllEmailsPage() {
     employeeFilter,
     directionFilter,
     threatFilter,
-    statusFilter
+    statusFilter,
+    flaggedFilter,
+    investigationFilter
   ]);
 
-  // Badge renderers
+  // Badge renderers - UPDATED
+  const getFlaggedBadge = (category: string, severity?: string) => {
+    switch (category) {
+      case "manual":
+        return (
+          <Badge variant="destructive" className="bg-orange-600">
+            Manual {severity && `(${severity.charAt(0).toUpperCase()}${severity.slice(1)})`}
+          </Badge>
+        );
+      case "ai":
+        return (
+          <Badge variant="destructive" className="bg-purple-600">
+            AI {severity && `(${severity.charAt(0).toUpperCase()}${severity.slice(1)})`}
+          </Badge>
+        );
+      case "clean":
+        return <Badge variant="outline" className="border-green-500 text-green-500">Clean</Badge>;
+      default:
+        return <Badge variant="outline" className="border-gray-500 text-gray-500">None</Badge>;
+    }
+  };
+
+  const getInvestigationBadge = (status?: string) => {
+    if (!status) return null;
+    
+    switch (status) {
+      case "new":
+        return <Badge variant="destructive" className="bg-red-600"><AlertCircle className="h-3 w-3 mr-1" />New</Badge>;
+      case "in_progress":
+        return <Badge variant="secondary" className="bg-yellow-600"><Clock className="h-3 w-3 mr-1" />In Progress</Badge>;
+      case "resolved":
+        return <Badge variant="outline" className="border-green-500 text-green-500"><CheckCircle className="h-3 w-3 mr-1" />Resolved</Badge>;
+      default:
+        return null;
+    }
+  };
+
   const getThreatBadge = (lvl: string, phish: boolean) => {
     if (phish) {
       return <Badge variant="destructive">Phishing</Badge>;
@@ -362,18 +425,9 @@ export default function AdminAllEmailsPage() {
 
     try {
       // Check if email is already flagged
-      console.log('🔍 Checking if email is already flagged:', email.messageId);
-      const checkResponse = await fetch('/api/detections');
-      if (checkResponse.ok) {
-        const existingDetections = await checkResponse.json();
-        const alreadyFlagged = existingDetections.some((detection: any) => 
-          detection.emailMessageId === email.messageId
-        );
-        
-        if (alreadyFlagged) {
-          setInfoMessage('This email is already flagged as a detection. You can view it in the Detections page.');
-          return;
-        }
+      if (email.flaggedCategory !== 'none') {
+        setInfoMessage(`This email is already flagged as "${email.flaggedCategory}". You can view it in the Detections page.`);
+        return;
       }
       
       const flagPayload = {
@@ -423,7 +477,7 @@ export default function AdminAllEmailsPage() {
     }
   };
 
-  // Error state
+  // Error state (keeping existing error handling)
   if (error) {
     return (
       <AppLayout
@@ -485,7 +539,7 @@ export default function AdminAllEmailsPage() {
     );
   }
 
-  // Main UI
+  // Main UI continues...
   return (
     <AppLayout
       username="John Doe"
@@ -569,8 +623,8 @@ export default function AdminAllEmailsPage() {
           </Card>
         )}
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        {/* Stats - UPDATED to include flagged categories */}
+        <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
           <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
@@ -586,12 +640,12 @@ export default function AdminAllEmailsPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-400">Threats</p>
-                  <p className="text-2xl font-bold text-red-400">
-                    {emails.filter(e => e.threatLevel !== "none").length}
+                  <p className="text-sm text-gray-400">AI Flagged</p>
+                  <p className="text-2xl font-bold text-purple-400">
+                    {emails.filter(e => e.flaggedCategory === "ai").length}
                   </p>
                 </div>
-                <AlertTriangle className="text-red-400" />
+                <Shield className="text-purple-400" />
               </div>
             </CardContent>
           </Card>
@@ -599,12 +653,12 @@ export default function AdminAllEmailsPage() {
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-gray-400">Phishing</p>
+                  <p className="text-sm text-gray-400">Manual</p>
                   <p className="text-2xl font-bold text-orange-400">
-                    {emails.filter(e => e.isPhishing).length}
+                    {emails.filter(e => e.flaggedCategory === "manual").length}
                   </p>
                 </div>
-                <Shield className="text-orange-400" />
+                <Flag className="text-orange-400" />
               </div>
             </CardContent>
           </Card>
@@ -614,16 +668,42 @@ export default function AdminAllEmailsPage() {
                 <div>
                   <p className="text-sm text-gray-400">Clean</p>
                   <p className="text-2xl font-bold text-green-400">
-                    {emails.filter(e => e.threatLevel === "none").length}
+                    {emails.filter(e => e.flaggedCategory === "clean").length}
                   </p>
                 </div>
-                <Activity className="text-green-400" />
+                <CheckCircle className="text-green-400" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-400">In Progress</p>
+                  <p className="text-2xl font-bold text-yellow-400">
+                    {emails.filter(e => e.investigationStatus === "in_progress").length}
+                  </p>
+                </div>
+                <Activity className="text-yellow-400" />
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-400">Resolved</p>
+                  <p className="text-2xl font-bold text-blue-400">
+                    {emails.filter(e => e.investigationStatus === "resolved").length}
+                  </p>
+                </div>
+                <CheckCircle className="text-blue-400" />
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Filters */}
+        {/* Filters - UPDATED with new filter options */}
         <Card className="mb-6 bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-white">
@@ -631,7 +711,7 @@ export default function AdminAllEmailsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Search</label>
                 <div className="relative">
@@ -646,11 +726,10 @@ export default function AdminAllEmailsPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Direction</label>
-                <Select
-                  value={directionFilter}
-                  onValueChange={setDirectionFilter}
-                >
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"><SelectValue/></SelectTrigger>
+                <Select value={directionFilter} onValueChange={setDirectionFilter}>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                    <SelectValue/>
+                  </SelectTrigger>
                   <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
                     <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
                     <SelectItem value="inbound" className="text-white focus:bg-[#2a2a2a] focus:text-white">Inbound</SelectItem>
@@ -659,12 +738,59 @@ export default function AdminAllEmailsPage() {
                 </Select>
               </div>
               <div>
+                <label className="block text-sm font-medium mb-2 text-white">Status</label>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                    <SelectValue/>
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                    <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
+                    <SelectItem value="received" className="text-white focus:bg-[#2a2a2a] focus:text-white">Received</SelectItem>
+                    <SelectItem value="analyzed" className="text-white focus:bg-[#2a2a2a] focus:text-white">Analyzed</SelectItem>
+                    <SelectItem value="quarantined" className="text-white focus:bg-[#2a2a2a] focus:text-white">Quarantined</SelectItem>
+                    <SelectItem value="blocked" className="text-white focus:bg-[#2a2a2a] focus:text-white">Blocked</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* NEW: Second row of filters */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-2 text-white">Flagged Category</label>
+                <Select value={flaggedFilter} onValueChange={setFlaggedFilter}>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                    <SelectValue/>
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                    <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
+                    <SelectItem value="none" className="text-white focus:bg-[#2a2a2a] focus:text-white">None</SelectItem>
+                    <SelectItem value="ai" className="text-white focus:bg-[#2a2a2a] focus:text-white">AI Flagged</SelectItem>
+                    <SelectItem value="manual" className="text-white focus:bg-[#2a2a2a] focus:text-white">Manual Flagged</SelectItem>
+                    <SelectItem value="clean" className="text-white focus:bg-[#2a2a2a] focus:text-white">Clean</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2 text-white">Investigation Status</label>
+                <Select value={investigationFilter} onValueChange={setInvestigationFilter}>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                    <SelectValue/>
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                    <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
+                    <SelectItem value="new" className="text-white focus:bg-[#2a2a2a] focus:text-white">New</SelectItem>
+                    <SelectItem value="in_progress" className="text-white focus:bg-[#2a2a2a] focus:text-white">In Progress</SelectItem>
+                    <SelectItem value="resolved" className="text-white focus:bg-[#2a2a2a] focus:text-white">Resolved</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
                 <label className="block text-sm font-medium mb-2 text-white">Threat Level</label>
-                <Select
-                  value={threatFilter}
-                  onValueChange={setThreatFilter}
-                >
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"><SelectValue/></SelectTrigger>
+                <Select value={threatFilter} onValueChange={setThreatFilter}>
+                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                    <SelectValue/>
+                  </SelectTrigger>
                   <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
                     <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
                     <SelectItem value="threats" className="text-white focus:bg-[#2a2a2a] focus:text-white">Any Threat</SelectItem>
@@ -673,22 +799,6 @@ export default function AdminAllEmailsPage() {
                     <SelectItem value="medium" className="text-white focus:bg-[#2a2a2a] focus:text-white">Medium</SelectItem>
                     <SelectItem value="low" className="text-white focus:bg-[#2a2a2a] focus:text-white">Low</SelectItem>
                     <SelectItem value="none" className="text-white focus:bg-[#2a2a2a] focus:text-white">Clean</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2 text-white">Status</label>
-                <Select
-                  value={statusFilter}
-                  onValueChange={setStatusFilter}
-                >
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"><SelectValue/></SelectTrigger>
-                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
-                    <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
-                    <SelectItem value="received" className="text-white focus:bg-[#2a2a2a] focus:text-white">Received</SelectItem>
-                    <SelectItem value="analyzed" className="text-white focus:bg-[#2a2a2a] focus:text-white">Analyzed</SelectItem>
-                    <SelectItem value="quarantined" className="text-white focus:bg-[#2a2a2a] focus:text-white">Quarantined</SelectItem>
-                    <SelectItem value="blocked" className="text-white focus:bg-[#2a2a2a] focus:text-white">Blocked</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -753,7 +863,8 @@ export default function AdminAllEmailsPage() {
                       <TableHead className="text-white">Recipients</TableHead>
                       <TableHead className="text-white">Received</TableHead>
                       <TableHead className="text-white">Direction</TableHead>
-                      <TableHead className="text-white">Threat</TableHead>
+                      <TableHead className="text-white">Flagged</TableHead>
+                      <TableHead className="text-white">Investigation</TableHead>
                       <TableHead className="text-white">Status</TableHead>
                       <TableHead className="text-white">Actions</TableHead>
                     </TableRow>
@@ -794,7 +905,10 @@ export default function AdminAllEmailsPage() {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          {getThreatBadge(email.threatLevel, email.isPhishing)}
+                          {getFlaggedBadge(email.flaggedCategory, email.flaggedSeverity)}
+                        </TableCell>
+                        <TableCell>
+                          {getInvestigationBadge(email.investigationStatus)}
                         </TableCell>
                         <TableCell>
                           {getStatusBadge(email.status)}
@@ -811,7 +925,7 @@ export default function AdminAllEmailsPage() {
                               <Eye className="h-4 w-4" />
                             </Button>
                             {/* Show flag button only for emails that aren't already flagged */}
-                            {email.threatLevel === 'none' && !email.isPhishing && (!email.flaggedStatus || email.flaggedStatus === 'none' || email.flaggedStatus === 'clean') && (
+                            {email.flaggedCategory === 'none' && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -826,22 +940,6 @@ export default function AdminAllEmailsPage() {
                                   <Flag className="h-4 w-4" />
                                 )}
                               </Button>
-                            )}
-                            {/* Show flagged status indicator */}
-                            {email.flaggedStatus === 'manual' && (
-                              <Badge variant="destructive" className="text-xs">
-                                Manually Flagged
-                              </Badge>
-                            )}
-                            {email.flaggedStatus === 'ai' && (
-                              <Badge variant="destructive" className="text-xs bg-purple-600">
-                                AI Flagged
-                              </Badge>
-                            )}
-                            {email.flaggedStatus === 'clean' && (
-                              <Badge variant="outline" className="text-xs text-green-400 border-green-400">
-                                Reviewed Clean
-                              </Badge>
                             )}
                           </div>
                         </TableCell>
@@ -867,7 +965,7 @@ export default function AdminAllEmailsPage() {
           </CardContent>
         </Card>
 
-        {/* Email Viewer Dialog */}
+        {/* Email Viewer Dialog - keeping existing implementation */}
         {selectedEmail && (
           <div 
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -884,7 +982,7 @@ export default function AdminAllEmailsPage() {
               <div className="sticky top-0 bg-[#0f0f0f] border-b border-[#1f1f1f] p-4 flex justify-between items-center">
                 <h3 className="text-lg font-semibold text-white">Email Details</h3>
                 <div className="flex items-center gap-2">
-                  {selectedEmail.threatLevel === 'none' && !selectedEmail.isPhishing && (
+                  {selectedEmail.flaggedCategory === 'none' && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -961,9 +1059,15 @@ export default function AdminAllEmailsPage() {
                           </Badge>
                         </div>
                         <div>
-                          <label className="text-sm font-medium text-gray-400">Threat Level</label>
-                          <div>{getThreatBadge(selectedEmail.threatLevel, selectedEmail.isPhishing)}</div>
+                          <label className="text-sm font-medium text-gray-400">Flagged Status</label>
+                          <div>{getFlaggedBadge(selectedEmail.flaggedCategory, selectedEmail.flaggedSeverity)}</div>
                         </div>
+                        {selectedEmail.investigationStatus && (
+                          <div>
+                            <label className="text-sm font-medium text-gray-400">Investigation</label>
+                            <div>{getInvestigationBadge(selectedEmail.investigationStatus)}</div>
+                          </div>
+                        )}
                         <div>
                           <label className="text-sm font-medium text-gray-400">Status</label>
                           <div>{getStatusBadge(selectedEmail.status)}</div>
@@ -976,6 +1080,25 @@ export default function AdminAllEmailsPage() {
                     </CardContent>
                   </Card>
                 </div>
+
+                {/* Investigation Notes */}
+                {selectedEmail.investigationNotes && (
+                  <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                    <CardHeader>
+                      <CardTitle className="text-white text-sm">Investigation Notes</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="bg-[#0f0f0f] p-4 rounded-lg">
+                        <p className="text-sm text-white whitespace-pre-wrap">{selectedEmail.investigationNotes}</p>
+                        {selectedEmail.flaggedAt && (
+                          <p className="text-xs text-gray-400 mt-2">
+                            Flagged {selectedEmail.flaggedBy ? `by ${selectedEmail.flaggedBy}` : ''} on {new Date(selectedEmail.flaggedAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
                 {/* Email Body */}
                 <Card className="bg-[#1a1a1a] border-[#2a2a2a]">

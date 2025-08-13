@@ -1,11 +1,11 @@
-// app/api/email/[messageId]/route.ts
+// app/api/email/[messageId]/route.ts - FIXED VERSION
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import {
   DynamoDBClient,
   UpdateItemCommand,
-  GetItemCommand,
+  ScanCommand,
 } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -16,13 +16,42 @@ console.log('📧 Email [messageId] API initialized with:', { REGION, ORG_ID, EM
 
 const ddb = new DynamoDBClient({ region: REGION });
 
-// PATCH: update email flagged status
+// Helper function to find email by messageId
+async function findEmailByMessageId(messageId: string): Promise<{userId: string, receivedAt: string} | null> {
+  try {
+    const scanCommand = new ScanCommand({
+      TableName: EMAILS_TABLE,
+      FilterExpression: 'messageId = :messageId',
+      ExpressionAttributeValues: {
+        ':messageId': { S: messageId }
+      },
+      ProjectionExpression: 'userId, receivedAt'
+    });
+
+    const result = await ddb.send(scanCommand);
+    
+    if (result.Items && result.Items.length > 0) {
+      const item = result.Items[0];
+      return {
+        userId: item.userId?.S || '',
+        receivedAt: item.receivedAt?.S || ''
+      };
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('❌ Error finding email by messageId:', error);
+    return null;
+  }
+}
+
+// PATCH: update email flagged status and attributes
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ messageId: string }> }
 ) {
   try {
-    console.log('📧 PATCH /api/email/[messageId] - Updating email flagged status...');
+    console.log('📧 PATCH /api/email/[messageId] - Updating email status...');
     
     if (!ORG_ID) {
       return NextResponse.json(
@@ -33,78 +62,151 @@ export async function PATCH(
 
     const { messageId } = await params;
     const body = await request.json();
-    const { flaggedStatus, userId } = body;
+    const { 
+      flaggedCategory, 
+      flaggedSeverity, 
+      investigationStatus, 
+      detectionId,
+      flaggedBy,
+      investigationNotes
+    } = body;
     
-    console.log('📝 Updating email flagged status:', { messageId, flaggedStatus, userId });
-
-    if (!flaggedStatus || !['none', 'manual', 'ai', 'clean'].includes(flaggedStatus)) {
-      return NextResponse.json(
-        { error: 'Invalid flaggedStatus. Must be one of: none, manual, ai, clean' },
-        { status: 400 }
-      );
-    }
-
-    if (!userId) {
-      return NextResponse.json(
-        { error: 'userId is required to identify the email' },
-        { status: 400 }
-      );
-    }
-
-    // First, check if the email exists
-    const getCommand = new GetItemCommand({
-      TableName: EMAILS_TABLE,
-      Key: {
-        userId: { S: userId },
-        receivedAt: { S: messageId } // Assuming messageId is used as receivedAt or we need to find the email first
-      }
+    console.log('📝 Updating email status:', { 
+      messageId, 
+      flaggedCategory, 
+      flaggedSeverity, 
+      investigationStatus,
+      detectionId 
     });
 
-    try {
-      const existingEmail = await ddb.send(getCommand);
-      if (!existingEmail.Item) {
-        // If not found with messageId as receivedAt, we need to scan for the actual email
-        // For now, let's update using a different approach - update by messageId directly
-        const updateCommand = new UpdateItemCommand({
-          TableName: EMAILS_TABLE,
-          Key: {
-            userId: { S: userId },
-            receivedAt: { S: messageId }
-          },
-          UpdateExpression: 'SET flaggedStatus = :flaggedStatus, updatedAt = :updatedAt',
-          ExpressionAttributeValues: {
-            ':flaggedStatus': { S: flaggedStatus },
-            ':updatedAt': { S: new Date().toISOString() }
-          },
-          ReturnValues: 'ALL_NEW'
-        });
-
-        const result = await ddb.send(updateCommand);
-        console.log('✅ Email flagged status updated successfully');
-
-        return NextResponse.json({
-          success: true,
-          messageId,
-          flaggedStatus,
-          updatedAt: new Date().toISOString()
-        });
-      }
-    } catch (updateError: any) {
-      console.error('❌ Failed to update email flagged status:', updateError);
+    // Validate flaggedCategory
+    if (flaggedCategory && !['none', 'ai', 'manual', 'clean'].includes(flaggedCategory)) {
       return NextResponse.json(
-        { 
-          error: 'Failed to update email flagged status', 
-          details: updateError.message 
-        },
-        { status: 500 }
+        { error: 'Invalid flaggedCategory. Must be one of: none, ai, manual, clean' },
+        { status: 400 }
       );
     }
+
+    // Validate flaggedSeverity if provided
+    if (flaggedSeverity && !['critical', 'high', 'medium', 'low'].includes(flaggedSeverity)) {
+      return NextResponse.json(
+        { error: 'Invalid flaggedSeverity. Must be one of: critical, high, medium, low' },
+        { status: 400 }
+      );
+    }
+
+    // Validate investigationStatus if provided
+    if (investigationStatus && !['new', 'in_progress', 'resolved'].includes(investigationStatus)) {
+      return NextResponse.json(
+        { error: 'Invalid investigationStatus. Must be one of: new, in_progress, resolved' },
+        { status: 400 }
+      );
+    }
+
+    // Find the email by messageId
+    const emailKey = await findEmailByMessageId(messageId);
+    if (!emailKey) {
+      return NextResponse.json(
+        { error: 'Email not found' },
+        { status: 404 }
+      );
+    }
+
+    // Build update expression dynamically
+    const updateExpressions: string[] = [];
+    const attributeValues: Record<string, any> = {};
+    const attributeNames: Record<string, string> = {};
+
+    if (flaggedCategory !== undefined) {
+      updateExpressions.push('#flaggedCategory = :flaggedCategory');
+      attributeNames['#flaggedCategory'] = 'flaggedCategory';
+      attributeValues[':flaggedCategory'] = { S: flaggedCategory };
+
+      // If unflagging (setting to 'none' or 'clean'), remove severity and investigation status
+      if (flaggedCategory === 'none' || flaggedCategory === 'clean') {
+        updateExpressions.push('#flaggedSeverity = :null');
+        updateExpressions.push('#investigationStatus = :null');
+        updateExpressions.push('#detectionId = :null');
+        attributeNames['#flaggedSeverity'] = 'flaggedSeverity';
+        attributeNames['#investigationStatus'] = 'investigationStatus';
+        attributeNames['#detectionId'] = 'detectionId';
+        attributeValues[':null'] = { NULL: true };
+      }
+    }
+
+    if (flaggedSeverity !== undefined && (flaggedCategory === 'ai' || flaggedCategory === 'manual')) {
+      updateExpressions.push('#flaggedSeverity = :flaggedSeverity');
+      attributeNames['#flaggedSeverity'] = 'flaggedSeverity';
+      attributeValues[':flaggedSeverity'] = { S: flaggedSeverity };
+    }
+
+    if (investigationStatus !== undefined) {
+      updateExpressions.push('#investigationStatus = :investigationStatus');
+      attributeNames['#investigationStatus'] = 'investigationStatus';
+      attributeValues[':investigationStatus'] = { S: investigationStatus };
+    }
+
+    if (detectionId !== undefined) {
+      updateExpressions.push('#detectionId = :detectionId');
+      attributeNames['#detectionId'] = 'detectionId';
+      attributeValues[':detectionId'] = detectionId ? { S: detectionId } : { NULL: true };
+    }
+
+    if (flaggedBy !== undefined) {
+      updateExpressions.push('#flaggedBy = :flaggedBy');
+      attributeNames['#flaggedBy'] = 'flaggedBy';
+      attributeValues[':flaggedBy'] = { S: flaggedBy };
+    }
+
+    if (investigationNotes !== undefined) {
+      updateExpressions.push('#investigationNotes = :investigationNotes');
+      attributeNames['#investigationNotes'] = 'investigationNotes';
+      attributeValues[':investigationNotes'] = investigationNotes ? { S: investigationNotes } : { NULL: true };
+    }
+
+    // Always update the timestamp
+    updateExpressions.push('#updatedAt = :updatedAt');
+    attributeNames['#updatedAt'] = 'updatedAt';
+    attributeValues[':updatedAt'] = { S: new Date().toISOString() };
+
+    // Add flaggedAt timestamp if flagging
+    if (flaggedCategory === 'ai' || flaggedCategory === 'manual') {
+      updateExpressions.push('#flaggedAt = :flaggedAt');
+      attributeNames['#flaggedAt'] = 'flaggedAt';
+      attributeValues[':flaggedAt'] = { S: new Date().toISOString() };
+    } else if (flaggedCategory === 'none' || flaggedCategory === 'clean') {
+      updateExpressions.push('#flaggedAt = :null');
+      attributeNames['#flaggedAt'] = 'flaggedAt';
+    }
+
+    const updateCommand = new UpdateItemCommand({
+      TableName: EMAILS_TABLE,
+      Key: {
+        userId: { S: emailKey.userId },
+        receivedAt: { S: emailKey.receivedAt }
+      },
+      UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+      ExpressionAttributeNames: attributeNames,
+      ExpressionAttributeValues: attributeValues,
+      ReturnValues: 'ALL_NEW'
+    });
+
+    const result = await ddb.send(updateCommand);
+    console.log('✅ Email status updated successfully');
 
     return NextResponse.json({
       success: true,
       messageId,
-      flaggedStatus,
-      message: 'Email flagged status updated successfully'
+      emailKey,
+      updatedAttributes: {
+        flaggedCategory,
+        flaggedSeverity,
+        investigationStatus,
+        detectionId,
+        flaggedBy,
+        investigationNotes
+      },
+      updatedAt: new Date().toISOString()
     });
 
   } catch (err: any) {
@@ -117,7 +219,7 @@ export async function PATCH(
     
     return NextResponse.json(
       { 
-        error: 'Failed to update email flagged status', 
+        error: 'Failed to update email status', 
         details: err.message,
         code: err.code || err.name
       },

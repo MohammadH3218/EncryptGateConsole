@@ -1,4 +1,4 @@
-// app/api/detections/route.ts
+// app/api/detections/route.ts - UPDATED VERSION
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -53,11 +53,7 @@ export async function GET(request: Request) {
 
     if (!resp.Items || resp.Items.length === 0) {
       console.log('ℹ️ No detections found, returning empty array');
-      
-      // Return empty array when no real data exists
-      const emptyDetections: any[] = [];
-
-      return NextResponse.json(emptyDetections);
+      return NextResponse.json([]);
     }
 
     const detections = resp.Items.map((item) => ({
@@ -76,6 +72,7 @@ export async function GET(request: Request) {
       threatScore: parseInt(item.threatScore?.N || '0'),
       confidence: parseInt(item.confidence?.N || '50'),
       createdAt: item.createdAt?.S!,
+      manualFlag: item.manualFlag?.BOOL || false
     }));
 
     return NextResponse.json(detections);
@@ -130,7 +127,7 @@ export async function POST(request: Request) {
       sentBy: { S: body.sentBy || '' },
       timestamp: { S: timestamp },
       createdAt: { S: timestamp },
-      receivedAt: { S: timestamp }, // Add missing receivedAt field required by DynamoDB schema
+      receivedAt: { S: timestamp },
       description: { S: body.description || 'This email was manually flagged as suspicious.' },
       indicators: { S: JSON.stringify(body.indicators || ['Manual review required']) },
       recommendations: { S: JSON.stringify(body.recommendations || ['Investigate email content']) },
@@ -152,24 +149,32 @@ export async function POST(request: Request) {
 
     console.log('✅ Manual detection created successfully:', detectionId);
 
-    // Update the email's flagged status to 'manual'
+    // Update the email's flagged status to 'manual' with proper attributes
     try {
-      const emailUpdateResponse = await fetch(`${process.env.BASE_URL || ''}/api/email/${body.emailMessageId}`, {
+      console.log('📧 Updating email flagged status to manual for:', body.emailMessageId);
+      
+      const emailUpdateResponse = await fetch(`${process.env.BASE_URL || process.env.NEXTAUTH_URL || 'http://localhost:3000'}/api/email/${body.emailMessageId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          flaggedStatus: 'manual',
-          userId: body.sentBy || body.emailMessageId // We'll need to pass the proper userId
+          flaggedCategory: 'manual',
+          flaggedSeverity: body.severity || 'medium',
+          investigationStatus: 'new',
+          detectionId: detectionId,
+          flaggedBy: 'analyst',
+          investigationNotes: `Email manually flagged as suspicious: ${body.description || 'Manual review required'}`
         })
       });
       
-      if (!emailUpdateResponse.ok) {
-        console.warn('⚠️ Failed to update email flagged status, but detection was created');
+      if (emailUpdateResponse.ok) {
+        const updateResult = await emailUpdateResponse.json();
+        console.log('✅ Email flagged status updated to manual:', updateResult);
       } else {
-        console.log('✅ Email flagged status updated to manual');
+        const errorData = await emailUpdateResponse.json();
+        console.warn('⚠️ Failed to update email flagged status:', errorData);
       }
-    } catch (emailUpdateError) {
-      console.warn('⚠️ Error updating email flagged status:', emailUpdateError);
+    } catch (emailUpdateError: any) {
+      console.warn('⚠️ Error updating email flagged status:', emailUpdateError.message);
     }
 
     const responseData = {
