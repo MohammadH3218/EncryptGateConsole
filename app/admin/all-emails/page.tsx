@@ -114,6 +114,7 @@ export default function AdminAllEmailsPage() {
   // Email viewing & flagging
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
   const [flaggingEmail, setFlaggingEmail] = useState<string | null>(null)
+  const [unflaggingEmail, setUnflaggingEmail] = useState<string | null>(null)
   
   // Success/info messages
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
@@ -463,17 +464,54 @@ export default function AdminAllEmailsPage() {
 
       // Refresh emails to update the UI
       await loadEmails(true);
-
-      // Navigate to the detections page after a short delay
-      setTimeout(() => {
-        router.push('/admin/detections');
-      }, 1500);
       
     } catch (err: any) {
       console.error('❌ Failed to flag email:', err);
       setError(`Failed to flag email: ${err.message}`);
     } finally {
       setFlaggingEmail(null);
+    }
+  };
+
+  const unflagEmail = async (email: Email) => {
+    console.log('🚩 Unflagging email:', email.id);
+    setUnflaggingEmail(email.id);
+    setError(null);
+    setSuccessMessage(null);
+    setInfoMessage(null);
+
+    try {
+      // Check if email has a linked detection
+      if (!email.detectionId) {
+        setInfoMessage('This email does not have a linked detection to unflag.');
+        return;
+      }
+
+      const response = await fetch(`/api/detections/${email.detectionId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || errorData.error || `Failed to unflag email: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('✅ Email unflagged successfully:', result);
+
+      setSuccessMessage('Email unflagged successfully and marked as clean.');
+
+      // Refresh emails to update the UI
+      await loadEmails(true);
+      
+    } catch (err: any) {
+      console.error('❌ Failed to unflag email:', err);
+      setError(`Failed to unflag email: ${err.message}`);
+    } finally {
+      setUnflaggingEmail(null);
     }
   };
 
@@ -914,13 +952,13 @@ export default function AdminAllEmailsPage() {
                           {getStatusBadge(email.status)}
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => viewEmail(email)}
                               title="View Email"
-                              className="text-white hover:bg-[#2a2a2a] hover:text-white"
+                              className="text-white hover:bg-[#2a2a2a] hover:text-white p-2"
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
@@ -932,12 +970,29 @@ export default function AdminAllEmailsPage() {
                                 onClick={() => flagEmail(email)}
                                 disabled={flaggingEmail === email.id}
                                 title="Flag as Suspicious"
-                                className="text-orange-400 hover:bg-[#2a2a2a] hover:text-orange-300"
+                                className="text-orange-400 hover:bg-orange-900/30 hover:text-orange-300 p-2"
                               >
                                 {flaggingEmail === email.id ? (
                                   <RefreshCw className="h-4 w-4 animate-spin" />
                                 ) : (
                                   <Flag className="h-4 w-4" />
+                                )}
+                              </Button>
+                            )}
+                            {/* Show unflag button for flagged emails */}
+                            {(email.flaggedCategory === 'manual' || email.flaggedCategory === 'ai') && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => unflagEmail(email)}
+                                disabled={unflaggingEmail === email.id}
+                                title="Unflag Email"
+                                className="text-green-400 hover:bg-green-900/30 hover:text-green-300 p-2"
+                              >
+                                {unflaggingEmail === email.id ? (
+                                  <RefreshCw className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <CheckCircle className="h-4 w-4" />
                                 )}
                               </Button>
                             )}
@@ -965,7 +1020,7 @@ export default function AdminAllEmailsPage() {
           </CardContent>
         </Card>
 
-        {/* Email Viewer Dialog - keeping existing implementation */}
+        {/* Email Viewer Dialog - IMPROVED */}
         {selectedEmail && (
           <div 
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -976,12 +1031,13 @@ export default function AdminAllEmailsPage() {
             }}
           >
             <div 
-              className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+              className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="sticky top-0 bg-[#0f0f0f] border-b border-[#1f1f1f] p-4 flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-white">Email Details</h3>
-                <div className="flex items-center gap-2">
+              {/* Header */}
+              <div className="border-b border-[#1f1f1f] p-6 flex justify-between items-center">
+                <h3 className="text-xl font-semibold text-white">Email Details</h3>
+                <div className="flex items-center gap-3">
                   {selectedEmail.flaggedCategory === 'none' && (
                     <Button
                       variant="outline"
@@ -998,6 +1054,22 @@ export default function AdminAllEmailsPage() {
                       Flag as Suspicious
                     </Button>
                   )}
+                  {(selectedEmail.flaggedCategory === 'manual' || selectedEmail.flaggedCategory === 'ai') && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => unflagEmail(selectedEmail)}
+                      disabled={unflaggingEmail === selectedEmail.id}
+                      className="bg-green-900/20 border-green-600/30 text-green-300 hover:bg-green-900/40"
+                    >
+                      {unflaggingEmail === selectedEmail.id ? (
+                        <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                      )}
+                      Mark as Clean
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1009,27 +1081,41 @@ export default function AdminAllEmailsPage() {
                 </div>
               </div>
               
-              <div className="p-4 space-y-4">
-                {/* Email Header Info */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-                    <CardContent className="p-4">
-                      <div className="space-y-3">
+              {/* Content - Scrollable */}
+              <div className="flex-1 overflow-y-auto">
+                <div className="p-6 space-y-6">
+                  {/* Email Header Info */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">Email Information</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
                         <div>
                           <label className="text-sm font-medium text-gray-400">Subject</label>
-                          <p className="font-medium text-white">{selectedEmail.subject || 'No Subject'}</p>
+                          <p className="font-medium text-white mt-1">{selectedEmail.subject || 'No Subject'}</p>
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">From</label>
-                          <p className="font-mono text-sm text-white">{selectedEmail.sender}</p>
+                          <p className="font-mono text-sm text-white mt-1 break-all">{selectedEmail.sender}</p>
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">To</label>
-                          <p className="font-mono text-sm text-white">{selectedEmail.recipients?.join(', ') || 'No recipients'}</p>
+                          <div className="mt-1">
+                            {selectedEmail.recipients?.length > 0 ? (
+                              <div className="space-y-1">
+                                {selectedEmail.recipients.map((recipient, index) => (
+                                  <p key={index} className="font-mono text-sm text-white break-all">{recipient}</p>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-sm text-gray-400">No recipients</p>
+                            )}
+                          </div>
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">Received</label>
-                          <p className="text-sm text-white">
+                          <p className="text-sm text-white mt-1">
                             {selectedEmail.timestamp ? 
                               (() => {
                                 try {
@@ -1042,116 +1128,163 @@ export default function AdminAllEmailsPage() {
                             }
                           </p>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
 
-                  <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-                    <CardContent className="p-4">
-                      <div className="space-y-3">
+                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">Status & Security</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
                         <div>
                           <label className="text-sm font-medium text-gray-400">Direction</label>
-                          <Badge
-                            variant={selectedEmail.direction === "inbound" ? "secondary" : "outline"}
-                            className={selectedEmail.direction === "inbound" ? "bg-blue-900/30 text-blue-300 border-blue-600/30" : "bg-gray-800/50 text-gray-300 border-gray-600/50"}
-                          >
-                            {selectedEmail.direction}
-                          </Badge>
+                          <div className="mt-1">
+                            <Badge
+                              variant={selectedEmail.direction === "inbound" ? "secondary" : "outline"}
+                              className={selectedEmail.direction === "inbound" ? "bg-blue-900/30 text-blue-300 border-blue-600/30" : "bg-gray-800/50 text-gray-300 border-gray-600/50"}
+                            >
+                              {selectedEmail.direction}
+                            </Badge>
+                          </div>
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">Flagged Status</label>
-                          <div>{getFlaggedBadge(selectedEmail.flaggedCategory, selectedEmail.flaggedSeverity)}</div>
+                          <div className="mt-1">{getFlaggedBadge(selectedEmail.flaggedCategory, selectedEmail.flaggedSeverity)}</div>
                         </div>
                         {selectedEmail.investigationStatus && (
                           <div>
                             <label className="text-sm font-medium text-gray-400">Investigation</label>
-                            <div>{getInvestigationBadge(selectedEmail.investigationStatus)}</div>
+                            <div className="mt-1">{getInvestigationBadge(selectedEmail.investigationStatus)}</div>
                           </div>
                         )}
                         <div>
                           <label className="text-sm font-medium text-gray-400">Status</label>
-                          <div>{getStatusBadge(selectedEmail.status)}</div>
+                          <div className="mt-1">{getStatusBadge(selectedEmail.status)}</div>
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">Size</label>
-                          <p className="text-sm text-white">{selectedEmail.size ? (selectedEmail.size / 1024).toFixed(1) : '0.0'} KB</p>
+                          <p className="text-sm text-white mt-1">{selectedEmail.size ? (selectedEmail.size / 1024).toFixed(1) : '0.0'} KB</p>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Message ID</label>
+                          <p className="text-xs text-gray-400 mt-1 font-mono break-all">{selectedEmail.messageId}</p>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
 
-                {/* Investigation Notes */}
-                {selectedEmail.investigationNotes && (
+                  {/* Investigation Details */}
+                  {selectedEmail.investigationNotes && (
+                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">Investigation Notes</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="bg-[#0f0f0f] p-4 rounded-lg">
+                          <p className="text-sm text-white whitespace-pre-wrap">{selectedEmail.investigationNotes}</p>
+                          {selectedEmail.flaggedAt && (
+                            <div className="mt-3 pt-3 border-t border-[#2a2a2a]">
+                              <p className="text-xs text-gray-400">
+                                Flagged {selectedEmail.flaggedBy ? `by ${selectedEmail.flaggedBy}` : ''} on {new Date(selectedEmail.flaggedAt).toLocaleString()}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {/* Email Body */}
                   <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-                    <CardHeader>
-                      <CardTitle className="text-white text-sm">Investigation Notes</CardTitle>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-white text-base">Message Content</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="bg-[#0f0f0f] p-4 rounded-lg">
-                        <p className="text-sm text-white whitespace-pre-wrap">{selectedEmail.investigationNotes}</p>
-                        {selectedEmail.flaggedAt && (
-                          <p className="text-xs text-gray-400 mt-2">
-                            Flagged {selectedEmail.flaggedBy ? `by ${selectedEmail.flaggedBy}` : ''} on {new Date(selectedEmail.flaggedAt).toLocaleString()}
-                          </p>
+                        {selectedEmail.bodyHtml ? (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-sm text-gray-400">
+                              <span>HTML Content:</span>
+                              <Badge variant="outline" className="border-blue-500/30 text-blue-400">HTML</Badge>
+                            </div>
+                            <div 
+                              className="text-sm text-white prose prose-invert max-w-none"
+                              dangerouslySetInnerHTML={{ __html: selectedEmail.bodyHtml }}
+                            />
+                            {selectedEmail.body && selectedEmail.body !== selectedEmail.bodyHtml && (
+                              <>
+                                <div className="border-t border-[#2a2a2a] my-4"></div>
+                                <div className="text-sm text-gray-400 mb-2">Plain Text Version:</div>
+                                <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{selectedEmail.body}</pre>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-sm text-gray-400">
+                              <span>Plain Text Content:</span>
+                              <Badge variant="outline" className="border-gray-500/30 text-gray-400">TEXT</Badge>
+                            </div>
+                            <pre className="text-sm text-white whitespace-pre-wrap font-mono leading-relaxed">
+                              {selectedEmail.body || 'No message content'}
+                            </pre>
+                          </div>
                         )}
                       </div>
                     </CardContent>
                   </Card>
-                )}
 
-                {/* Email Body */}
-                <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-                  <CardHeader>
-                    <CardTitle className="text-white">Message Content</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="bg-[#0f0f0f] p-4 rounded-lg max-h-96 overflow-y-auto">
-                      <pre className="text-sm text-white whitespace-pre-wrap font-mono">{selectedEmail.body}</pre>
+                  {/* Attachments & URLs */}
+                  {(selectedEmail.attachments?.length > 0 || (selectedEmail.urls && selectedEmail.urls.length > 0)) && (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      {selectedEmail.attachments?.length > 0 && (
+                        <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-white text-base flex items-center gap-2">
+                              <span>Attachments</span>
+                              <Badge variant="outline" className="border-red-500/30 text-red-400">
+                                {selectedEmail.attachments?.length}
+                              </Badge>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="space-y-2">
+                              {selectedEmail.attachments?.map((attachment, index) => (
+                                <div key={index} className="p-3 bg-[#0f0f0f] rounded-lg border border-[#2a2a2a]">
+                                  <p className="text-sm text-white font-mono break-all">{attachment}</p>
+                                </div>
+                              )) || (
+                                <p className="text-sm text-gray-400">No attachments</p>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      {(selectedEmail.urls?.length ?? 0) > 0 && (
+                        <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-white text-base flex items-center gap-2">
+                              <span>URLs Found</span>
+                              <Badge variant="outline" className="border-yellow-500/30 text-yellow-400">
+                                {selectedEmail.urls?.length ?? 0}
+                              </Badge>
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="space-y-2">
+                              {(selectedEmail.urls ?? []).map((url, index) => (
+                                <div key={index} className="p-3 bg-[#0f0f0f] rounded-lg border border-[#2a2a2a]">
+                                  <p className="text-sm text-blue-400 font-mono break-all">{url}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      )}
                     </div>
-                  </CardContent>
-                </Card>
-
-                {/* Attachments & URLs */}
-                {(selectedEmail.attachments?.length > 0 || (selectedEmail.urls && selectedEmail.urls.length > 0)) && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {selectedEmail.attachments?.length > 0 && (
-                      <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-                        <CardHeader>
-                          <CardTitle className="text-white text-sm">Attachments ({selectedEmail.attachments?.length || 0})</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-2">
-                            {selectedEmail.attachments?.map((attachment, index) => (
-                              <div key={index} className="p-2 bg-[#0f0f0f] rounded">
-                                <p className="text-sm text-white font-mono">{attachment}</p>
-                              </div>
-                            )) || (
-                              <p className="text-sm text-gray-400">No attachments</p>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {(selectedEmail.urls?.length ?? 0) > 0 && (
-                      <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-                        <CardHeader>
-                          <CardTitle className="text-white text-sm">URLs Found ({selectedEmail.urls?.length ?? 0})</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="space-y-2">
-                            {(selectedEmail.urls ?? []).map((url, index) => (
-                              <div key={index} className="p-2 bg-[#0f0f0f] rounded">
-                                <p className="text-sm text-blue-400 font-mono break-all">{url}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
           </div>
