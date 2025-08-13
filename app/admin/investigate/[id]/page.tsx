@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot"
 import { 
   ArrowLeft,
@@ -28,7 +29,10 @@ import {
   Share,
   Minimize2,
   Maximize2,
-  Send
+  Send,
+  Flag,
+  FlagOff,
+  RefreshCw
 } from "lucide-react"
 
 interface EmailDetails {
@@ -47,6 +51,9 @@ interface EmailDetails {
   direction: string
   size: number
   urls?: string[]
+  flaggedCategory?: "none" | "ai" | "manual" | "clean"
+  flaggedSeverity?: "critical" | "high" | "medium" | "low"
+  detectionId?: string
 }
 
 interface DetectionDetails {
@@ -74,11 +81,22 @@ export default function InvestigationPage() {
   const [showCopilot, setShowCopilot] = useState(false)
   const [copilotMinimized, setCopilotMinimized] = useState(false)
   const [investigationStatus, setInvestigationStatus] = useState("in_progress")
+  const [flaggingEmail, setFlaggingEmail] = useState(false)
+  const [unflaggingEmail, setUnflaggingEmail] = useState(false)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
 
   useEffect(() => {
     loadInvestigationData()
   }, [emailId])
+
+  // Clear success message after some time
+  useEffect(() => {
+    if (successMessage) {
+      const timer = setTimeout(() => setSuccessMessage(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [successMessage])
 
   const loadInvestigationData = async () => {
     setLoading(true)
@@ -105,7 +123,10 @@ export default function InvestigationPage() {
         },
         direction: "inbound",
         size: 1024,
-        urls: ["http://phishing.com/verify", "http://malicious-domain.com/login"]
+        urls: ["http://phishing.com/verify", "http://malicious-domain.com/login"],
+        flaggedCategory: "ai",
+        flaggedSeverity: "high",
+        detectionId: "det-001"
       }
 
       const mockDetectionDetails: DetectionDetails = {
@@ -179,6 +200,116 @@ export default function InvestigationPage() {
     }
   }
 
+  const flagEmail = async () => {
+    if (!emailDetails) return
+    
+    console.log('🚩 Flagging email as suspicious:', emailDetails.messageId)
+    setFlaggingEmail(true)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      // Check if email is already flagged
+      if (emailDetails.flaggedCategory !== 'none' && emailDetails.flaggedCategory !== 'clean') {
+        setSuccessMessage(`This email is already flagged as "${emailDetails.flaggedCategory}".`)
+        return
+      }
+      
+      const flagPayload = {
+        emailMessageId: emailDetails.messageId,
+        emailId: emailDetails.messageId,
+        severity: 'medium',
+        name: 'Manually Flagged Email',
+        description: 'This email was manually flagged as suspicious by a security analyst during investigation.',
+        indicators: ['Manual review required', 'Flagged during investigation'],
+        recommendations: ['Investigate email content', 'Check sender reputation', 'Verify with recipient'],
+        threatScore: 75,
+        confidence: 90,
+        sentBy: emailDetails.sender,
+        manualFlag: true
+      }
+
+      const response = await fetch('/api/detections', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(flagPayload),
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to flag email: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ Email flagged successfully:', result)
+
+      setSuccessMessage('Email flagged successfully! Detection has been created.')
+
+      // Update local email details
+      setEmailDetails(prev => prev ? {
+        ...prev,
+        flaggedCategory: "manual",
+        flaggedSeverity: "medium",
+        detectionId: result.detectionId || 'manual-' + Date.now()
+      } : null)
+      
+    } catch (err: any) {
+      console.error('❌ Failed to flag email:', err)
+      setError(`Failed to flag email: ${err.message}`)
+    } finally {
+      setFlaggingEmail(false)
+    }
+  }
+
+  const unflagEmail = async () => {
+    if (!emailDetails) return
+    
+    console.log('🚩 Unflagging email:', emailDetails.messageId)
+    setUnflaggingEmail(true)
+    setError(null)
+    setSuccessMessage(null)
+
+    try {
+      // Check if email has a linked detection
+      if (!emailDetails.detectionId) {
+        setSuccessMessage('This email does not have a linked detection to unflag.')
+        return
+      }
+
+      const response = await fetch(`/api/detections/${emailDetails.detectionId}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.message || errorData.error || `Failed to unflag email: ${response.status}`)
+      }
+
+      const result = await response.json()
+      console.log('✅ Email unflagged successfully:', result)
+
+      setSuccessMessage('Email unflagged successfully and marked as clean.')
+
+      // Update local email details
+      setEmailDetails(prev => prev ? {
+        ...prev,
+        flaggedCategory: "clean",
+        flaggedSeverity: undefined,
+        detectionId: undefined
+      } : null)
+      
+    } catch (err: any) {
+      console.error('❌ Failed to unflag email:', err)
+      setError(`Failed to unflag email: ${err.message}`)
+    } finally {
+      setUnflaggingEmail(false)
+    }
+  }
+
   if (loading) {
     return (
       <AppLayout username="John Doe" notificationsCount={2}>
@@ -217,6 +348,28 @@ export default function InvestigationPage() {
   return (
     <AppLayout username="John Doe" notificationsCount={5}>
       <div className="relative min-h-screen">
+        {/* Success Message */}
+        {successMessage && (
+          <Alert className="mb-6 bg-green-900/20 border-green-500/20 text-white">
+            <CheckCircle className="h-4 w-4 text-green-400" />
+            <AlertTitle className="text-white">Success</AlertTitle>
+            <AlertDescription className="text-gray-300">
+              {successMessage}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20 text-white">
+            <AlertTriangle className="h-4 w-4 text-red-400" />
+            <AlertTitle className="text-white">Error</AlertTitle>
+            <AlertDescription className="text-gray-300">
+              {error}
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-4">
@@ -233,6 +386,39 @@ export default function InvestigationPage() {
             </div>
           </div>
           <div className="flex gap-2">
+            {/* Flag/Unflag buttons */}
+            {emailDetails && emailDetails.flaggedCategory === 'none' && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={flagEmail}
+                disabled={flaggingEmail}
+                className="bg-orange-900/20 border-orange-600/30 text-orange-300 hover:bg-orange-900/40"
+              >
+                {flaggingEmail ? (
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Flag className="h-4 w-4 mr-2" />
+                )}
+                Flag as Suspicious
+              </Button>
+            )}
+            {emailDetails && (emailDetails.flaggedCategory === 'manual' || emailDetails.flaggedCategory === 'ai') && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={unflagEmail}
+                disabled={unflaggingEmail}
+                className="bg-green-900/20 border-green-600/30 text-green-300 hover:bg-green-900/40"
+              >
+                {unflaggingEmail ? (
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <FlagOff className="h-4 w-4 mr-2" />
+                )}
+                Mark as Clean
+              </Button>
+            )}
             <Button variant="outline" size="sm">
               <Share className="h-4 w-4 mr-2" />
               Share
@@ -334,7 +520,35 @@ export default function InvestigationPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="bg-muted p-4 rounded-lg">
-                    <p className="text-sm whitespace-pre-wrap">{emailDetails.body}</p>
+                    {emailDetails.bodyHtml ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span>HTML Content:</span>
+                          <Badge variant="outline" className="border-blue-500/30 text-blue-400">HTML</Badge>
+                        </div>
+                        <div 
+                          className="text-sm prose prose-invert max-w-none"
+                          dangerouslySetInnerHTML={{ __html: emailDetails.bodyHtml }}
+                        />
+                        {emailDetails.body && emailDetails.body !== emailDetails.bodyHtml && (
+                          <>
+                            <div className="border-t border-muted my-4"></div>
+                            <div className="text-sm text-muted-foreground mb-2">Plain Text Version:</div>
+                            <pre className="text-sm text-muted-foreground whitespace-pre-wrap font-mono">{emailDetails.body}</pre>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span>Plain Text Content:</span>
+                          <Badge variant="outline" className="border-gray-500/30 text-gray-400">TEXT</Badge>
+                        </div>
+                        <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed">
+                          {emailDetails.body || 'No message content'}
+                        </pre>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
