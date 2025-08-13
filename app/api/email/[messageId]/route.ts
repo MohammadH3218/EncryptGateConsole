@@ -126,13 +126,11 @@ export async function PATCH(
       attributeNames['#flaggedCategory'] = 'flaggedCategory';
       attributeValues[':flaggedCategory'] = { S: flaggedCategory };
 
-      // If unflagging (setting to 'none' or 'clean'), remove severity and investigation status
+      // If unflagging (setting to 'none' or 'clean'), remove severity and detection ID
       if (flaggedCategory === 'none' || flaggedCategory === 'clean') {
         updateExpressions.push('#flaggedSeverity = :null');
-        updateExpressions.push('#investigationStatus = :null');
         updateExpressions.push('#detectionId = :null');
         attributeNames['#flaggedSeverity'] = 'flaggedSeverity';
-        attributeNames['#investigationStatus'] = 'investigationStatus';
         attributeNames['#detectionId'] = 'detectionId';
         attributeValues[':null'] = { NULL: true };
       }
