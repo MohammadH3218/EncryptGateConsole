@@ -425,8 +425,8 @@ export default function AdminAllEmailsPage() {
     setInfoMessage(null);
 
     try {
-      // Check if email is already flagged
-      if (email.flaggedCategory !== 'none') {
+      // Check if email is already flagged (excluding clean status)
+      if (email.flaggedCategory === 'manual' || email.flaggedCategory === 'ai') {
         setInfoMessage(`This email is already flagged as "${email.flaggedCategory}". You can view it in the Detections page.`);
         return;
       }
@@ -458,9 +458,32 @@ export default function AdminAllEmailsPage() {
       }
 
       const result = await response.json();
-      console.log('✅ Email flagged successfully:', result);
+      console.log('✅ Detection created successfully:', result);
 
-      setSuccessMessage('Email flagged successfully! Detection has been created.');
+      // Update email status in database
+      const updatePayload = {
+        flaggedCategory: 'manual',
+        flaggedSeverity: 'medium',
+        investigationStatus: 'new',
+        detectionId: result.detectionId || 'manual-' + Date.now(),
+        flaggedBy: 'Security Analyst'
+      };
+
+      const emailUpdateResponse = await fetch(`/api/email/${email.messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatePayload),
+      });
+
+      if (!emailUpdateResponse.ok) {
+        const errorData = await emailUpdateResponse.json();
+        throw new Error(`Failed to update email status: ${errorData.message || emailUpdateResponse.status}`);
+      }
+
+      console.log('✅ Email status updated in database');
+      setSuccessMessage('Email flagged successfully! Detection has been created and email status updated.');
 
       // Refresh emails to update the UI
       await loadEmails(true);
@@ -500,8 +523,31 @@ export default function AdminAllEmailsPage() {
       }
 
       const result = await response.json();
-      console.log('✅ Email unflagged successfully:', result);
+      console.log('✅ Detection deleted successfully:', result);
 
+      // Update email status in database
+      const updatePayload = {
+        flaggedCategory: 'clean',
+        flaggedSeverity: undefined,
+        investigationStatus: 'resolved',
+        detectionId: undefined,
+        flaggedBy: 'Security Analyst'
+      };
+
+      const emailUpdateResponse = await fetch(`/api/email/${email.messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updatePayload),
+      });
+
+      if (!emailUpdateResponse.ok) {
+        const errorData = await emailUpdateResponse.json();
+        throw new Error(`Failed to update email status: ${errorData.message || emailUpdateResponse.status}`);
+      }
+
+      console.log('✅ Email status updated in database');
       setSuccessMessage('Email unflagged successfully and marked as clean.');
 
       // Refresh emails to update the UI
@@ -962,8 +1008,8 @@ export default function AdminAllEmailsPage() {
                             >
                               <Eye className="h-4 w-4" />
                             </Button>
-                            {/* Show flag button only for emails that aren't already flagged */}
-                            {email.flaggedCategory === 'none' && (
+                            {/* Show flag button for emails that aren't flagged or are marked as clean */}
+                            {(email.flaggedCategory === 'none' || email.flaggedCategory === 'clean') && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1038,7 +1084,7 @@ export default function AdminAllEmailsPage() {
               <div className="border-b border-[#1f1f1f] p-6 flex justify-between items-center">
                 <h3 className="text-xl font-semibold text-white">Email Details</h3>
                 <div className="flex items-center gap-3">
-                  {selectedEmail.flaggedCategory === 'none' && (
+                  {(selectedEmail.flaggedCategory === 'none' || selectedEmail.flaggedCategory === 'clean') && (
                     <Button
                       variant="outline"
                       size="sm"
