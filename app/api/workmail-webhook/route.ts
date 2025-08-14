@@ -111,7 +111,7 @@ async function streamToString(stream: any): Promise<string> {
   return Buffer.concat(chunks).toString('utf-8')
 }
 
-// IMPROVED: Better email body parsing with more robust fallbacks
+// IMPROVED: Better email body parsing - aggressive header removal
 function parseEmailBodyFromRaw(rawEmail: string): { body: string; bodyHtml?: string; headers: Record<string, string> } {
   console.log('📧 Parsing email body from raw content, length:', rawEmail.length)
   
@@ -157,7 +157,7 @@ function parseEmailBodyFromRaw(rawEmail: string): { body: string; bodyHtml?: str
   }
   
   // Get everything after headers as potential body content
-  const bodyContent = lines.slice(headerEndIndex + 1).join('\n')
+  let bodyContent = lines.slice(headerEndIndex + 1).join('\n')
   console.log('📧 Raw body content length after headers:', bodyContent.length)
   
   const contentType = headers['content-type'] || ''
@@ -235,53 +235,68 @@ function parseEmailBodyFromRaw(rawEmail: string): { body: string; bodyHtml?: str
   // Handle single-part content or multipart parsing failure
   console.log('📧 Using single-part parsing or multipart fallback')
   
-  // Clean up the body content - remove only obvious email headers, not content
-  let cleanBody = bodyContent
+  // AGGRESSIVE header removal - strip ALL lines that look like headers
+  const bodyLines = bodyContent.split('\n')
+  let cleanLines: string[] = []
+  let foundContent = false
   
-  // Only remove lines that look like email headers (have colons and are at the start)
-  const bodyLines = cleanBody.split('\n')
-  let contentStartIndex = 0
-  
-  // Skip only the first few lines if they look like headers that somehow leaked through
-  for (let i = 0; i < Math.min(10, bodyLines.length); i++) {
-    const line = bodyLines[i].trim()
+  for (let i = 0; i < bodyLines.length; i++) {
+    const line = bodyLines[i]
+    const trimmedLine = line.trim()
     
-    // If we find a line that doesn't look like a header, stop skipping
-    if (line && !line.match(/^[A-Za-z-]+:\s/)) {
-      contentStartIndex = i
-      break
-    }
-    
-    // If this looks like a header, continue
-    if (line.match(/^(Message-ID|Subject|From|To|Date|MIME-Version|Content-Type|Content-Transfer-Encoding):/i)) {
-      contentStartIndex = i + 1
+    // Skip empty lines at the beginning
+    if (!foundContent && !trimmedLine) {
       continue
     }
     
-    // If we hit a blank line, content starts after it
-    if (!line) {
-      contentStartIndex = i + 1
-      break
+    // Check if this line looks like a header (has colon and matches header pattern)
+    const isHeaderLine = /^[A-Za-z-][A-Za-z0-9-]*:\s/.test(trimmedLine)
+    const isCommonEmailHeader = /^(Message-ID|Subject|From|To|Date|MIME-Version|Content-Type|Content-Transfer-Encoding|Received|Return-Path|X-|DKIM-|Authentication-Results):/i.test(trimmedLine)
+    
+    // If we haven't found content yet and this looks like a header, skip it
+    if (!foundContent && (isHeaderLine || isCommonEmailHeader)) {
+      console.log('📧 Skipping header line:', trimmedLine.substring(0, 50) + '...')
+      continue
     }
     
-    // If line doesn't match header pattern, this is content
+    // If we reach here, this should be content
+    foundContent = true
+    cleanLines.push(line)
+  }
+  
+  let cleanBody = cleanLines.join('\n').trim()
+  
+  // Additional cleanup - remove any remaining header-like lines from the start
+  const finalLines = cleanBody.split('\n')
+  let finalStartIndex = 0
+  
+  for (let i = 0; i < Math.min(5, finalLines.length); i++) {
+    const line = finalLines[i].trim()
+    if (!line) {
+      finalStartIndex = i + 1
+      continue
+    }
+    
+    // If this still looks like a header, skip it
+    if (/^[A-Za-z-][A-Za-z0-9-]*:\s/.test(line)) {
+      console.log('📧 Removing residual header:', line.substring(0, 50) + '...')
+      finalStartIndex = i + 1
+      continue
+    }
+    
+    // This is content, stop here
     break
   }
   
-  cleanBody = bodyLines.slice(contentStartIndex).join('\n').trim()
+  cleanBody = finalLines.slice(finalStartIndex).join('\n').trim()
   
-  console.log('📧 Single-part body processing:', {
+  console.log('📧 Body content after aggressive header removal:', {
     originalLength: bodyContent.length,
     cleanedLength: cleanBody.length,
-    skippedLines: contentStartIndex,
-    hasContent: cleanBody.length > 0
+    linesRemoved: bodyLines.length - cleanLines.length + finalStartIndex,
+    hasContent: cleanBody.length > 0,
+    preview: cleanBody.substring(0, 100) + '...'
   })
-  
-  // Final fallback - if we still don't have content, use the original body content
-  if (!cleanBody || cleanBody.length < 10) {
-    console.warn('📧 Clean body too short, using original body content')
-    cleanBody = bodyContent.trim()
-  }
   
   // If it's HTML content, also set bodyHtml
   let bodyHtml: string | undefined
