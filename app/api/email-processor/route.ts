@@ -3,6 +3,7 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { WorkMailMessageFlowClient, GetRawMessageContentCommand } from '@aws-sdk/client-workmailmessageflow';
 import { z } from 'zod';
 
 //
@@ -21,6 +22,7 @@ if (!process.env.EMAILS_TABLE_NAME) {
 }
 
 const ddb = new DynamoDBClient({ region: REGION });
+const workmailClient = new WorkMailMessageFlowClient({ region: REGION });
 
 //
 // ─── VALIDATION SCHEMAS ───────────────────────────────────────────────────────
@@ -112,12 +114,247 @@ export async function POST(req: Request) {
 }
 
 //
+// ─── EXTRACT EMAIL CONTENT FROM WORKMAIL ──────────────────────────────────────
+//
+async function extractWorkMailContent(messageId: string): Promise<{
+  subject: string;
+  sender: string;
+  recipients: string[];
+  body: string;
+  bodyHtml?: string;
+  timestamp: string;
+  size: number;
+  headers: Record<string, string>;
+  attachments: string[];
+  urls: string[];
+}> {
+  try {
+    console.log('📧 Fetching raw message content from WorkMail for:', messageId);
+    
+    const command = new GetRawMessageContentCommand({
+      messageId: messageId
+    });
+    
+    const response = await workmailClient.send(command);
+    
+    if (!response.messageContent) {
+      throw new Error('No message content received from WorkMail');
+    }
+    
+    // Convert the stream to string
+    const rawContent = await streamToString(response.messageContent);
+    
+    // Parse the MIME content
+    const parsedEmail = await parseMimeContent(rawContent);
+    
+    console.log('✅ Successfully extracted email content from WorkMail');
+    return parsedEmail;
+    
+  } catch (error: any) {
+    console.error('❌ Failed to extract WorkMail content:', error);
+    throw new Error(`Failed to extract email content: ${error.message}`);
+  }
+}
+
+//
+// ─── HELPER FUNCTIONS FOR MIME PARSING ────────────────────────────────────────
+//
+async function streamToString(stream: any): Promise<string> {
+  const chunks: Buffer[] = [];
+  
+  return new Promise((resolve, reject) => {
+    stream.on('data', (chunk: any) => {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+      } else {
+        chunks.push(Buffer.from(chunk));
+      }
+    });
+    stream.on('error', (error: any) => {
+      console.error('❌ Stream error:', error);
+      reject(error);
+    });
+    stream.on('end', () => {
+      try {
+        const result = Buffer.concat(chunks).toString('utf8');
+        resolve(result);
+      } catch (error) {
+        console.error('❌ Error converting stream to string:', error);
+        reject(error);
+      }
+    });
+  });
+}
+
+async function parseMimeContent(rawContent: string): Promise<{
+  subject: string;
+  sender: string;
+  recipients: string[];
+  body: string;
+  bodyHtml?: string;
+  timestamp: string;
+  size: number;
+  headers: Record<string, string>;
+  attachments: string[];
+  urls: string[];
+}> {
+  const headers: Record<string, string> = {};
+  const lines = rawContent.split('\n');
+  let currentHeader = '';
+  let isBodySection = false;
+  let bodyLines: string[] = [];
+  let htmlBodyLines: string[] = [];
+  let isHtmlSection = false;
+  
+  for (const line of lines) {
+    if (!isBodySection && line.trim() === '') {
+      isBodySection = true;
+      continue;
+    }
+    
+    if (!isBodySection) {
+      // Parse headers
+      if (line.startsWith(' ') || line.startsWith('\t')) {
+        // Continuation of previous header
+        if (currentHeader) {
+          headers[currentHeader] += ' ' + line.trim();
+        }
+      } else {
+        const colonIndex = line.indexOf(':');
+        if (colonIndex > 0) {
+          currentHeader = line.substring(0, colonIndex).toLowerCase();
+          headers[currentHeader] = line.substring(colonIndex + 1).trim();
+        }
+      }
+    } else {
+      // Parse body
+      if (line.includes('Content-Type: text/html')) {
+        isHtmlSection = true;
+        continue;
+      }
+      if (line.includes('Content-Type: text/plain')) {
+        isHtmlSection = false;
+        continue;
+      }
+      
+      if (isHtmlSection) {
+        htmlBodyLines.push(line);
+      } else {
+        bodyLines.push(line);
+      }
+    }
+  }
+  
+  // Extract basic information with safety checks
+  const subject = headers['subject'] || 'No Subject';
+  const sender = extractEmailFromHeader(headers['from'] || '');
+  const recipients = extractEmailsFromHeader(headers['to'] || '');
+  
+  let timestamp: string;
+  try {
+    timestamp = headers['date'] ? new Date(headers['date']).toISOString() : new Date().toISOString();
+  } catch (error) {
+    console.warn('❌ Invalid date in email headers, using current time');
+    timestamp = new Date().toISOString();
+  }
+  
+  const body = bodyLines.join('\n').trim() || 'No message content';
+  const bodyHtml = htmlBodyLines.length > 0 ? htmlBodyLines.join('\n').trim() : undefined;
+  const size = rawContent.length;
+  
+  // Extract URLs from body
+  const urls = extractUrls(body + (bodyHtml || ''));
+  
+  // Extract attachment names (simplified)
+  const attachments = extractAttachmentNames(rawContent);
+  
+  return {
+    subject,
+    sender,
+    recipients,
+    body,
+    bodyHtml,
+    timestamp,
+    size,
+    headers,
+    attachments,
+    urls
+  };
+}
+
+function extractEmailFromHeader(header: string): string {
+  if (!header) return 'unknown@email.com';
+  const match = header.match(/<([^>]+)>/);
+  const result = match ? match[1] : header.trim();
+  return result.includes('@') ? result : 'unknown@email.com';
+}
+
+function extractEmailsFromHeader(header: string): string[] {
+  if (!header) return ['unknown@email.com'];
+  const emails = header.split(',').map(email => extractEmailFromHeader(email.trim()));
+  const validEmails = emails.filter(email => email.includes('@'));
+  return validEmails.length > 0 ? validEmails : ['unknown@email.com'];
+}
+
+function extractUrls(text: string): string[] {
+  const urlRegex = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi;
+  return text.match(urlRegex) || [];
+}
+
+function extractAttachmentNames(rawContent: string): string[] {
+  const attachmentRegex = /filename="([^"]+)"/gi;
+  const matches = [];
+  let match;
+  while ((match = attachmentRegex.exec(rawContent)) !== null) {
+    matches.push(match[1]);
+  }
+  return matches;
+}
+
+//
 // ─── STORE EMAIL IN DYNAMODB - UPDATED WITH NEW ATTRIBUTES ──────────────────
 //
 async function storeEmail(email: EmailRequest) {
+  let emailData: any = email;
+  
   if (email.type === 'workmail_webhook') {
-    // WorkMail webhook type - would need to fetch actual email content
-    return;
+    console.log('🔍 Processing WorkMail webhook, extracting message content...');
+    try {
+      const extractedContent = await extractWorkMailContent(email.messageId);
+      
+      // Convert webhook to full email data
+      emailData = {
+        type: 'workmail_email',
+        messageId: email.messageId,
+        subject: extractedContent.subject,
+        sender: extractedContent.sender,
+        recipients: extractedContent.recipients,
+        timestamp: extractedContent.timestamp,
+        body: extractedContent.body,
+        bodyHtml: extractedContent.bodyHtml,
+        attachments: extractedContent.attachments,
+        headers: extractedContent.headers,
+        direction: 'inbound', // WorkMail webhooks are typically inbound
+        size: extractedContent.size,
+        urls: extractedContent.urls
+      };
+      
+      console.log('✅ WorkMail content extracted successfully');
+    } catch (error: any) {
+      console.error('❌ Failed to extract WorkMail content, storing webhook data only:', error);
+      // Fallback - store basic webhook info
+      emailData = {
+        type: 'workmail_webhook_fallback',
+        messageId: email.messageId,
+        subject: 'WorkMail Message (content extraction failed)',
+        sender: 'unknown@workmail',
+        recipients: [email.userId],
+        timestamp: new Date().toISOString(),
+        body: 'Email content could not be extracted from WorkMail. Check logs for details.',
+        direction: 'inbound',
+        size: 0
+      };
+    }
   }
 
   console.log('💾 Storing email in DynamoDB with new attributes');
@@ -127,10 +364,12 @@ async function storeEmail(email: EmailRequest) {
   
   // Determine userId - for mock emails, use the first recipient or sender
   let userId: string;
-  if (email.direction === 'outbound') {
-    userId = email.sender;
+  if (email.type === 'workmail_webhook') {
+    userId = email.userId; // Use userId from webhook
+  } else if (emailData.direction === 'outbound') {
+    userId = emailData.sender;
   } else {
-    userId = email.recipients[0]; // Use first recipient for inbound emails
+    userId = emailData.recipients && emailData.recipients.length > 0 ? emailData.recipients[0] : emailData.sender;
   }
 
   console.log('👤 Using userId for email storage:', userId);
@@ -139,15 +378,15 @@ async function storeEmail(email: EmailRequest) {
   const item: Record<string, any> = {
     // Core email attributes
     userId: { S: userId },                    // HASH key (required)
-    receivedAt: { S: email.timestamp },       // RANGE key (required)
-    messageId: { S: email.messageId },
+    receivedAt: { S: emailData.timestamp },   // RANGE key (required)
+    messageId: { S: emailData.messageId },
     emailId: { S: emailId },
-    sender: { S: email.sender },
-    recipients: { SS: email.recipients },
-    subject: { S: email.subject },
-    body: { S: email.body },
-    direction: { S: email.direction },
-    size: { N: email.size.toString() },
+    sender: { S: emailData.sender },
+    recipients: { SS: emailData.recipients && emailData.recipients.length > 0 ? emailData.recipients : [emailData.sender] },
+    subject: { S: emailData.subject },
+    body: { S: emailData.body || '' },
+    direction: { S: emailData.direction },
+    size: { N: (emailData.size || 0).toString() },
     status: { S: 'received' },
     threatLevel: { S: 'none' },
     isPhishing: { BOOL: false },
@@ -165,27 +404,29 @@ async function storeEmail(email: EmailRequest) {
   };
 
   // Add optional fields
-  if (email.bodyHtml) {
-    item.bodyHtml = { S: email.bodyHtml };
+  if (emailData.bodyHtml) {
+    item.bodyHtml = { S: emailData.bodyHtml };
   }
   
-  if (email.attachments && email.attachments.length > 0) {
-    item.attachments = { SS: email.attachments };
+  if (emailData.attachments && emailData.attachments.length > 0) {
+    item.attachments = { SS: emailData.attachments };
   }
   
-  if (email.headers) {
-    item.headers = { S: JSON.stringify(email.headers) };
+  if (emailData.headers) {
+    item.headers = { S: typeof emailData.headers === 'string' ? emailData.headers : JSON.stringify(emailData.headers) };
   }
   
-  if (email.urls && email.urls.length > 0) {
-    item.urls = { SS: email.urls };
+  if (emailData.urls && emailData.urls.length > 0) {
+    item.urls = { SS: emailData.urls };
   }
 
   console.log('📧 Email item prepared for DynamoDB with attributes:', {
-    messageId: email.messageId,
+    messageId: emailData.messageId,
     userId,
     flaggedCategory: 'none',
-    hasNewAttributes: true
+    hasNewAttributes: true,
+    bodyLength: emailData.body?.length || 0,
+    hasHtmlBody: !!emailData.bodyHtml
   });
 
   try {
@@ -200,7 +441,7 @@ async function storeEmail(email: EmailRequest) {
     console.log('✅ Email stored successfully with new attributes');
   } catch (err: any) {
     if (err.name === 'ConditionalCheckFailedException') {
-      console.log('ℹ️ Email already exists, skipping duplicate:', email.messageId)
+      console.log('ℹ️ Email already exists, skipping duplicate:', emailData.messageId)
       // Don't throw error - email already exists
       return;
     }
@@ -209,7 +450,7 @@ async function storeEmail(email: EmailRequest) {
       error: err.message,
       code: err.code,
       tableName: EMAILS_TABLE,
-      messageId: email.messageId,
+      messageId: emailData.messageId,
       userId: userId
     });
     throw new Error(`Failed to store email in database: ${err.message}`);
