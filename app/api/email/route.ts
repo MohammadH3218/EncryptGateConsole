@@ -139,7 +139,15 @@ export async function GET(request: Request) {
         sender: item.sender?.S || 'unknown',
         subject: item.subject?.S || 'No Subject',
         timestamp: item.receivedAt?.S || item.timestamp?.S || 'unknown',
-        userId: item.userId?.S || 'none'
+        userId: item.userId?.S || 'none',
+        // DEBUG: Check body fields in DynamoDB item
+        hasBodyField: !!item.body,
+        bodyType: item.body ? Object.keys(item.body)[0] : 'none',
+        bodyContent: item.body?.S ? item.body.S.substring(0, 100) + '...' : 'NO BODY',
+        hasBodyHtmlField: !!item.bodyHtml,
+        bodyHtmlType: item.bodyHtml ? Object.keys(item.bodyHtml)[0] : 'none',
+        bodyHtmlContent: item.bodyHtml?.S ? item.bodyHtml.S.substring(0, 100) + '...' : 'NO HTML BODY',
+        allFields: Object.keys(item)
       });
 
       const timestamp = item.receivedAt?.S || item.timestamp?.S || new Date().toISOString();
@@ -183,14 +191,29 @@ export async function GET(request: Request) {
     
     // Log sample email for debugging
     if (emails.length > 0) {
-      console.log('📋 Sample email data:', {
+      console.log('📋 Sample email data (first email):', {
         id: emails[0].id,
         subject: emails[0].subject,
         sender: emails[0].sender,
         recipients: emails[0].recipients,
         timestamp: emails[0].timestamp,
         userId: emails[0].userId,
-        bodyLength: emails[0].body.length
+        bodyExists: !!emails[0].body,
+        bodyLength: emails[0].body?.length || 0,
+        bodyContent: emails[0].body ? emails[0].body.substring(0, 100) + '...' : 'NO BODY',
+        bodyHtmlExists: !!emails[0].bodyHtml,
+        bodyHtmlLength: emails[0].bodyHtml?.length || 0,
+        bodyHtmlContent: emails[0].bodyHtml ? emails[0].bodyHtml.substring(0, 100) + '...' : 'NO HTML BODY'
+      });
+      
+      // Count emails with body content
+      const emailsWithBody = emails.filter(e => e.body && e.body.trim().length > 0).length;
+      const emailsWithHtml = emails.filter(e => e.bodyHtml && e.bodyHtml.trim().length > 0).length;
+      console.log('📊 API Body content summary:', {
+        totalEmails: emails.length,
+        emailsWithBody,
+        emailsWithHtml,
+        emailsWithoutBody: emails.length - emailsWithBody
       });
     }
 
