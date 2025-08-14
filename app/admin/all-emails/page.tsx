@@ -1,4 +1,4 @@
-// app/admin/all-emails/page.tsx - UPDATED VERSION
+// app/admin/all-emails/page.tsx - IMPROVED VERSION WITH BETTER EMAIL VIEWING
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
@@ -41,7 +41,9 @@ import {
   CheckCircle,
   Info,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  FileText
 } from "lucide-react"
 
 interface Email {
@@ -119,6 +121,9 @@ export default function AdminAllEmailsPage() {
   // Success/info messages
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [infoMessage, setInfoMessage] = useState<string | null>(null)
+
+  // Email viewer state
+  const [emailViewerTab, setEmailViewerTab] = useState<"content" | "html" | "headers" | "debug">("content")
 
   // Handle keyboard shortcuts for email viewer
   useEffect(() => {
@@ -211,18 +216,30 @@ export default function AdminAllEmailsPage() {
             bodyLength: e.body?.length || 0,
             bodyHtmlExists: !!e.bodyHtml,
             bodyHtmlLength: e.bodyHtml?.length || 0,
-            firstBodyChars: e.body ? e.body.substring(0, 100) + '...' : 'NO BODY'
+            firstBodyChars: e.body ? e.body.substring(0, 100) + '...' : 'NO BODY',
+            hasValidContent: e.body && e.body.trim().length > 0
           })));
           
           // Check all emails for body content
           const emailsWithBody = data.emails.filter(e => e.body && e.body.trim().length > 0);
           const emailsWithHtml = data.emails.filter(e => e.bodyHtml && e.bodyHtml.trim().length > 0);
+          const emailsWithoutContent = data.emails.filter(e => !e.body || e.body.trim().length === 0);
+          
           console.log('📊 Body content analysis:', {
             totalEmails: data.emails.length,
             emailsWithBody: emailsWithBody.length,
             emailsWithHtml: emailsWithHtml.length,
-            emailsWithoutBody: data.emails.length - emailsWithBody.length
+            emailsWithoutBody: emailsWithoutContent.length,
+            contentCoverage: `${Math.round((emailsWithBody.length / data.emails.length) * 100)}%`
           });
+          
+          // Log examples of emails without content for debugging
+          if (emailsWithoutContent.length > 0) {
+            console.warn('📧 Emails without body content (first 3):');
+            emailsWithoutContent.slice(0, 3).forEach((email, i) => {
+              console.warn(`  ${i + 1}. ${email.subject} (${email.messageId}) - body: "${email.body}"`);
+            });
+          }
         } else {
           console.log('ℹ️ No emails in response');
         }
@@ -273,7 +290,7 @@ export default function AdminAllEmailsPage() {
     return () => window.removeEventListener("scroll", onScroll);
   }, [hasMore, loading, loadingMore, loadEmails]);
 
-  // Apply filters - UPDATED to include new filters
+  // Apply filters
   useEffect(() => {
     console.log('🔍 Applying filters...', {
       searchQuery,
@@ -354,7 +371,7 @@ export default function AdminAllEmailsPage() {
     investigationFilter
   ]);
 
-  // Badge renderers - UPDATED
+  // Badge renderers
   const getFlaggedBadge = (category: string, severity?: string) => {
     switch (category) {
       case "manual":
@@ -430,7 +447,7 @@ export default function AdminAllEmailsPage() {
   const viewEmail = (email: Email) => {
     console.log('👁️ Viewing email:', email.id);
     console.log('📧 Full email object:', email);
-    console.log('📧 Email body content:', {
+    console.log('📧 Email body content validation:', {
       bodyExists: !!email.body,
       bodyLength: email.body?.length || 0,
       bodyContent: email.body,
@@ -438,9 +455,12 @@ export default function AdminAllEmailsPage() {
       bodyHtmlLength: email.bodyHtml?.length || 0,
       bodyHtmlContent: email.bodyHtml,
       messageId: email.messageId,
-      subject: email.subject
+      subject: email.subject,
+      hasValidBody: email.body && email.body.trim().length > 0,
+      bodyPreview: email.body ? email.body.substring(0, 200) + '...' : 'NO BODY'
     });
     setSelectedEmail(email);
+    setEmailViewerTab("content"); // Reset to content tab
   };
 
   const flagEmail = async (email: Email) => {
@@ -506,7 +526,6 @@ export default function AdminAllEmailsPage() {
       if (!emailUpdateResponse.ok) {
         const errorData = await emailUpdateResponse.json();
         console.warn('⚠️ Failed to update email status in database:', errorData);
-        // Don't throw error here - the detection was created successfully
         setSuccessMessage('Email flagged successfully! Detection has been created. Note: Email status update in database failed.');
       } else {
         console.log('✅ Email status updated in database');
@@ -532,7 +551,6 @@ export default function AdminAllEmailsPage() {
     setInfoMessage(null);
 
     try {
-      // Check if email has a linked detection
       if (!email.detectionId) {
         setInfoMessage('This email does not have a linked detection to unflag.');
         return;
@@ -553,7 +571,6 @@ export default function AdminAllEmailsPage() {
       const result = await response.json();
       console.log('✅ Detection deleted successfully:', result);
 
-      // Update email status in database
       const updatePayload = {
         flaggedCategory: 'clean',
         flaggedSeverity: undefined,
@@ -573,15 +590,12 @@ export default function AdminAllEmailsPage() {
       if (!emailUpdateResponse.ok) {
         const errorData = await emailUpdateResponse.json();
         console.warn('⚠️ Failed to update email status in database:', errorData);
-        // Don't throw error here - the detection was deleted successfully
-        // The email might not exist in the database or might have a different messageId format
         setSuccessMessage('Email unflagged successfully. Note: Email status update in database failed, but detection was removed.');
       } else {
         console.log('✅ Email status updated in database');
         setSuccessMessage('Email unflagged successfully and marked as clean.');
       }
 
-      // Refresh emails to update the UI
       await loadEmails(true);
       
     } catch (err: any) {
@@ -590,6 +604,12 @@ export default function AdminAllEmailsPage() {
     } finally {
       setUnflaggingEmail(null);
     }
+  };
+
+  // Copy to clipboard helper
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setInfoMessage('Copied to clipboard!');
   };
 
   // Error state (keeping existing error handling)
@@ -738,7 +758,7 @@ export default function AdminAllEmailsPage() {
           </Card>
         )}
 
-        {/* Stats - UPDATED to include flagged categories */}
+        {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
           <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardContent className="pt-6">
@@ -818,7 +838,7 @@ export default function AdminAllEmailsPage() {
           </Card>
         </div>
 
-        {/* Filters - UPDATED with new filter options */}
+        {/* Filters */}
         <Card className="mb-6 bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-white">
@@ -869,7 +889,6 @@ export default function AdminAllEmailsPage() {
               </div>
             </div>
 
-            {/* NEW: Second row of filters */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Flagged Category</label>
@@ -990,8 +1009,13 @@ export default function AdminAllEmailsPage() {
                       <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
                         <TableCell className="font-medium text-white">
                           <div className="w-48">
-                            <div className="truncate text-sm" title={email.subject || 'No Subject'}>
+                            <div className="truncate text-sm flex items-center gap-2" title={email.subject || 'No Subject'}>
                               {email.subject || 'No Subject'}
+                              {email.body && email.body.trim().length > 0 ? (
+                                <FileText className="h-3 w-3 text-green-400" />
+                              ) : (
+                                <FileText className="h-3 w-3 text-red-400" />
+                              )}
                             </div>
                             {email.urls?.length ? (
                               <div className="text-xs text-gray-400">
@@ -1105,7 +1129,7 @@ export default function AdminAllEmailsPage() {
           </CardContent>
         </Card>
 
-        {/* Email Viewer Dialog - IMPROVED */}
+        {/* IMPROVED Email Viewer Dialog */}
         {selectedEmail && (
           <div 
             className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -1116,7 +1140,7 @@ export default function AdminAllEmailsPage() {
             }}
           >
             <div 
-              className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
+              className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
@@ -1163,6 +1187,55 @@ export default function AdminAllEmailsPage() {
                   >
                     ✕
                   </Button>
+                </div>
+              </div>
+              
+              {/* Tabs */}
+              <div className="border-b border-[#1f1f1f] px-6">
+                <div className="flex space-x-6">
+                  <button
+                    className={`py-2 px-1 border-b-2 text-sm font-medium ${
+                      emailViewerTab === "content" 
+                        ? "border-blue-500 text-blue-400" 
+                        : "border-transparent text-gray-400 hover:text-white"
+                    }`}
+                    onClick={() => setEmailViewerTab("content")}
+                  >
+                    <FileText className="h-4 w-4 inline mr-2" />
+                    Content
+                  </button>
+                  {selectedEmail.bodyHtml && (
+                    <button
+                      className={`py-2 px-1 border-b-2 text-sm font-medium ${
+                        emailViewerTab === "html" 
+                          ? "border-blue-500 text-blue-400" 
+                          : "border-transparent text-gray-400 hover:text-white"
+                      }`}
+                      onClick={() => setEmailViewerTab("html")}
+                    >
+                      HTML
+                    </button>
+                  )}
+                  <button
+                    className={`py-2 px-1 border-b-2 text-sm font-medium ${
+                      emailViewerTab === "headers" 
+                        ? "border-blue-500 text-blue-400" 
+                        : "border-transparent text-gray-400 hover:text-white"
+                    }`}
+                    onClick={() => setEmailViewerTab("headers")}
+                  >
+                    Headers
+                  </button>
+                  <button
+                    className={`py-2 px-1 border-b-2 text-sm font-medium ${
+                      emailViewerTab === "debug" 
+                        ? "border-blue-500 text-blue-400" 
+                        : "border-transparent text-gray-400 hover:text-white"
+                    }`}
+                    onClick={() => setEmailViewerTab("debug")}
+                  >
+                    Debug
+                  </button>
                 </div>
               </div>
               
@@ -1252,25 +1325,61 @@ export default function AdminAllEmailsPage() {
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">Message ID</label>
-                          <p className="text-xs text-gray-400 mt-1 font-mono break-all">{selectedEmail.messageId}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <p className="text-xs text-gray-400 font-mono break-all flex-1">{selectedEmail.messageId}</p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => copyToClipboard(selectedEmail.messageId)}
+                              className="text-gray-400 hover:text-white p-1"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
                   </div>
 
-                  {/* Investigation Details */}
-                  {selectedEmail.investigationNotes && (
+                  {/* Tab Content */}
+                  {emailViewerTab === "content" && (
                     <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
                       <CardHeader className="pb-3">
-                        <CardTitle className="text-white text-base">Investigation Notes</CardTitle>
+                        <CardTitle className="text-white text-base flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          Message Content
+                        </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="bg-[#0f0f0f] p-4 rounded-lg">
-                          <p className="text-sm text-white whitespace-pre-wrap">{selectedEmail.investigationNotes}</p>
-                          {selectedEmail.flaggedAt && (
-                            <div className="mt-3 pt-3 border-t border-[#2a2a2a]">
-                              <p className="text-xs text-gray-400">
-                                Flagged {selectedEmail.flaggedBy ? `by ${selectedEmail.flaggedBy}` : ''} on {new Date(selectedEmail.flaggedAt).toLocaleString()}
+                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
+                          {selectedEmail.body && selectedEmail.body.trim().length > 0 ? (
+                            <div className="space-y-3">
+                              <div className="flex items-center gap-2 text-sm text-gray-400">
+                                <span>Plain Text Content:</span>
+                                <Badge variant="outline" className="border-gray-500/30 text-gray-400">TEXT</Badge>
+                                <span className="text-xs">({selectedEmail.body.length} chars)</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => copyToClipboard(selectedEmail.body)}
+                                  className="text-gray-400 hover:text-white p-1 ml-auto"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                </Button>
+                              </div>
+                              <pre className="text-sm text-white whitespace-pre-wrap font-mono leading-relaxed">
+                                {selectedEmail.body}
+                              </pre>
+                            </div>
+                          ) : (
+                            <div className="text-center py-8">
+                              <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                              <p className="text-white font-medium">No Message Content Available</p>
+                              <p className="text-sm text-gray-400 mt-2">
+                                The email body content could not be extracted or is empty.
+                              </p>
+                              <p className="text-xs text-gray-500 mt-2">
+                                This could be due to complex email formatting, encryption, or processing limitations.
                               </p>
                             </div>
                           )}
@@ -1279,49 +1388,108 @@ export default function AdminAllEmailsPage() {
                     </Card>
                   )}
 
-                  {/* Email Body */}
-                  <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-white text-base">Message Content</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="bg-[#0f0f0f] p-4 rounded-lg">
-                        {/* Debug information */}
-                        
-                        {selectedEmail.bodyHtml ? (
+                  {emailViewerTab === "html" && selectedEmail.bodyHtml && (
+                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">HTML Content</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
                           <div className="space-y-3">
                             <div className="flex items-center gap-2 text-sm text-gray-400">
                               <span>HTML Content:</span>
                               <Badge variant="outline" className="border-blue-500/30 text-blue-400">HTML</Badge>
                               <span className="text-xs">({selectedEmail.bodyHtml.length} chars)</span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => copyToClipboard(selectedEmail.bodyHtml || '')}
+                                className="text-gray-400 hover:text-white p-1 ml-auto"
+                              >
+                                <Copy className="h-3 w-3" />
+                              </Button>
                             </div>
                             <div 
                               className="text-sm text-white prose prose-invert max-w-none"
                               dangerouslySetInnerHTML={{ __html: selectedEmail.bodyHtml }}
                             />
-                            {selectedEmail.body && selectedEmail.body !== selectedEmail.bodyHtml && (
-                              <>
-                                <div className="border-t border-[#2a2a2a] my-4"></div>
-                                <div className="text-sm text-gray-400 mb-2">Plain Text Version:</div>
-                                <pre className="text-sm text-gray-300 whitespace-pre-wrap font-mono">{selectedEmail.body}</pre>
-                              </>
-                            )}
                           </div>
-                        ) : (
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-2 text-sm text-gray-400">
-                              <span>Plain Text Content:</span>
-                              <Badge variant="outline" className="border-gray-500/30 text-gray-400">TEXT</Badge>
-                              <span className="text-xs">({(selectedEmail.body?.length || 0)} chars)</span>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {emailViewerTab === "headers" && (
+                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">Email Headers</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
+                          {Object.keys(selectedEmail.headers).length > 0 ? (
+                            <div className="space-y-2">
+                              {Object.entries(selectedEmail.headers).map(([key, value]) => (
+                                <div key={key} className="border-b border-[#2a2a2a] pb-2">
+                                  <div className="font-mono text-sm">
+                                    <span className="text-blue-400">{key}:</span>{' '}
+                                    <span className="text-white break-all">{value}</span>
+                                  </div>
+                                </div>
+                              ))}
                             </div>
-                            <pre className="text-sm text-white whitespace-pre-wrap font-mono leading-relaxed">
-                              {selectedEmail.body || 'No message content'}
-                            </pre>
+                          ) : (
+                            <p className="text-gray-400 text-sm">No headers available</p>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {emailViewerTab === "debug" && (
+                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">Debug Information</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
+                          <div className="space-y-4">
+                            <div>
+                              <h4 className="text-sm font-medium text-white mb-2">Content Analysis</h4>
+                              <div className="grid grid-cols-2 gap-4 text-xs">
+                                <div>
+                                  <span className="text-gray-400">Body Length:</span>
+                                  <span className="text-white ml-2">{selectedEmail.body?.length || 0} chars</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">HTML Length:</span>
+                                  <span className="text-white ml-2">{selectedEmail.bodyHtml?.length || 0} chars</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Has Body:</span>
+                                  <span className={`ml-2 ${selectedEmail.body && selectedEmail.body.trim().length > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {selectedEmail.body && selectedEmail.body.trim().length > 0 ? 'Yes' : 'No'}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400">Has HTML:</span>
+                                  <span className={`ml-2 ${selectedEmail.bodyHtml && selectedEmail.bodyHtml.trim().length > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {selectedEmail.bodyHtml && selectedEmail.bodyHtml.trim().length > 0 ? 'Yes' : 'No'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div>
+                              <h4 className="text-sm font-medium text-white mb-2">Raw Email Object</h4>
+                              <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono bg-[#0a0a0a] p-3 rounded border border-[#2a2a2a] max-h-96 overflow-y-auto">
+                                {JSON.stringify(selectedEmail, null, 2)}
+                              </pre>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   {/* Attachments & URLs */}
                   {(selectedEmail.attachments?.length > 0 || (selectedEmail.urls && selectedEmail.urls.length > 0)) && (
