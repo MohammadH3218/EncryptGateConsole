@@ -438,6 +438,47 @@ export async function POST(req: Request) {
         
         messageBody = bodyLines.join('\n').trim();
         
+        // Clean up the message body - remove headers if they leaked through
+        if (messageBody.includes('Message-ID:') || messageBody.includes('Subject:')) {
+          console.log('📧 Headers found in body, cleaning up...');
+          const bodyParts = messageBody.split('\n');
+          const cleanBodyLines: string[] = [];
+          let skipHeaders = true;
+          
+          for (const line of bodyParts) {
+            if (skipHeaders) {
+              // Skip lines that look like headers
+              if (line.includes(':') && (
+                line.startsWith('Message-ID:') ||
+                line.startsWith('Subject:') ||
+                line.startsWith('From:') ||
+                line.startsWith('To:') ||
+                line.startsWith('Date:') ||
+                line.startsWith('MIME-Version:') ||
+                line.startsWith('Content-Type:') ||
+                line.startsWith('Content-Transfer-Encoding:')
+              )) {
+                continue;
+              } else if (line.trim() === '') {
+                continue; // Skip empty lines after headers
+              } else {
+                // This looks like actual content
+                skipHeaders = false;
+                cleanBodyLines.push(line);
+              }
+            } else {
+              cleanBodyLines.push(line);
+            }
+          }
+          
+          messageBody = cleanBodyLines.join('\n').trim();
+          console.log('📧 Cleaned message body:', {
+            originalLength: bodyLines.join('\n').length,
+            cleanedLength: messageBody.length,
+            cleanedContent: messageBody.substring(0, 200)
+          });
+        }
+        
         // Enhanced logging for debugging
         console.log('📧 Email content parsing results:', {
           totalLines: lines.length,
