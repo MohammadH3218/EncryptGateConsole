@@ -73,13 +73,11 @@ export async function updateEmailAttributes(
       attributeNames['#flaggedCategory'] = 'flaggedCategory';
       attributeValues[':flaggedCategory'] = { S: attributes.flaggedCategory };
 
-      // If unflagging (setting to 'none' or 'clean'), remove severity and investigation status
+      // If unflagging (setting to 'none' or 'clean'), remove severity and detection ID
       if (attributes.flaggedCategory === 'none' || attributes.flaggedCategory === 'clean') {
         updateExpressions.push('#flaggedSeverity = :null');
-        updateExpressions.push('#investigationStatus = :null');
         updateExpressions.push('#detectionId = :null');
         attributeNames['#flaggedSeverity'] = 'flaggedSeverity';
-        attributeNames['#investigationStatus'] = 'investigationStatus';
         attributeNames['#detectionId'] = 'detectionId';
         attributeValues[':null'] = { NULL: true };
       }
@@ -120,7 +118,7 @@ export async function updateEmailAttributes(
     attributeNames['#updatedAt'] = 'updatedAt';
     attributeValues[':updatedAt'] = { S: new Date().toISOString() };
 
-    // Add flaggedAt timestamp if flagging
+    // Add flaggedAt timestamp if flagging, clear it if unflagging
     if (attributes.flaggedCategory === 'ai' || attributes.flaggedCategory === 'manual') {
       updateExpressions.push('#flaggedAt = :flaggedAt');
       attributeNames['#flaggedAt'] = 'flaggedAt';
@@ -128,6 +126,9 @@ export async function updateEmailAttributes(
     } else if (attributes.flaggedCategory === 'none' || attributes.flaggedCategory === 'clean') {
       updateExpressions.push('#flaggedAt = :null');
       attributeNames['#flaggedAt'] = 'flaggedAt';
+      if (!attributeValues[':null']) {
+        attributeValues[':null'] = { NULL: true };
+      }
     }
 
     const updateCommand = new UpdateItemCommand({
