@@ -412,8 +412,14 @@ export async function POST(req: Request) {
       try {
         const rawBuffer = Buffer.from(sesRecord.raw.base64, 'base64');
         const rawText = rawBuffer.toString('utf-8');
+        console.log('📧 Raw email content received from Lambda:', {
+          contentLength: rawText.length,
+          contentPreview: rawText.substring(0, 200)
+        });
+        
         const lines = rawText.split('\n');
         let inBody = false;
+        let bodyLines: string[] = [];
         
         for (const line of lines) {
           if (!inBody) {
@@ -426,21 +432,60 @@ export async function POST(req: Request) {
               headers[line.slice(0, idx).toLowerCase()] = line.slice(idx + 1).trim();
             }
           } else {
-            messageBody += line + '\n';
+            bodyLines.push(line);
           }
         }
-        messageBody = messageBody.trim();
-        console.log('📧 Using Lambda-provided raw message content');
-      } catch (err) {
+        
+        messageBody = bodyLines.join('\n').trim();
+        
+        // Enhanced logging for debugging
+        console.log('📧 Email content parsing results:', {
+          totalLines: lines.length,
+          headerCount: Object.keys(headers).length,
+          bodyLines: bodyLines.length,
+          bodyLength: messageBody.length,
+          bodyPreview: messageBody.substring(0, 200),
+          hasContent: messageBody.length > 0,
+          isEmpty: messageBody === ''
+        });
+        
+        // If body is empty, try alternative parsing
+        if (!messageBody || messageBody.trim() === '') {
+          console.log('📧 Body is empty, trying alternative parsing...');
+          
+          // Look for content after double newline
+          const doubleNewlineIndex = rawText.indexOf('\n\n');
+          if (doubleNewlineIndex > 0) {
+            messageBody = rawText.substring(doubleNewlineIndex + 2).trim();
+            console.log('📧 Alternative parsing found body:', {
+              bodyLength: messageBody.length,
+              bodyPreview: messageBody.substring(0, 100)
+            });
+          }
+          
+          // If still empty, use the entire raw content minus headers
+          if (!messageBody || messageBody.trim() === '') {
+            const headerEndIndex = rawText.indexOf('\n\n');
+            if (headerEndIndex > 0) {
+              messageBody = rawText.substring(headerEndIndex + 2);
+            } else {
+              messageBody = rawText;
+            }
+            console.log('📧 Using full content as body:', {
+              bodyLength: messageBody.length
+            });
+          }
+        }
+        
+        console.log('📧 Final parsed message body:', {
+          length: messageBody.length,
+          content: messageBody.substring(0, 300) + (messageBody.length > 300 ? '...' : ''),
+          hasValidContent: messageBody.length > 0 && messageBody.trim() !== ''
+        });
+        
+      } catch (err: any) {
         console.error('❌ Error parsing Lambda raw content:', err);
-        messageBody = `Email processed via Lambda function.
-
-Subject: ${mail.commonHeaders.subject || 'No Subject'}
-From: ${mail.commonHeaders.from.join(', ')}
-To: ${mail.commonHeaders.to.join(', ')}
-Date: ${mail.timestamp}
-
-[Email body content processed by Lambda function]`;
+        messageBody = `Email content parsing failed: ${err.message}`;
       }
     } else {
       // Fallback to WorkMail API
@@ -498,6 +543,15 @@ Date: ${mail.timestamp}
 
     // Store in DynamoDB
     try {
+      console.log('📧 Pre-DynamoDB email data:', {
+        messageId: emailItem.messageId,
+        subject: emailItem.subject,
+        bodyLength: emailItem.body?.length || 0,
+        bodyHtmlLength: emailItem.bodyHtml?.length || 0,
+        bodyPreview: emailItem.body?.substring(0, 100) || 'NO BODY',
+        bodyHtmlPreview: emailItem.bodyHtml?.substring(0, 100) || 'NO HTML BODY'
+      });
+      
       console.log(`💾 Writing email to DynamoDB table ${EMAILS_TABLE}`)
       const dbItem: Record<string, any> = {
         userId: { S: userId },
