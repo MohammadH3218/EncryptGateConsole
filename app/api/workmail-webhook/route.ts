@@ -123,29 +123,113 @@ async function parseRawMessage(
     }
     const raw = await streamToString(resp.messageContent)
     console.log(`📄 Raw message size: ${raw.length} characters`)
+    
     const lines = raw.split('\n')
-    let inBody = false
-    const headers: Record<string,string> = {}
-    let body = ''
-    for (const line of lines) {
-      if (!inBody) {
-        if (line.trim() === '') {
-          inBody = true
-          continue
-        }
-        const idx = line.indexOf(':')
-        if (idx > 0) {
-          headers[line.slice(0, idx).toLowerCase()] = line.slice(idx + 1).trim()
+    let currentHeader = ''
+    let headerEndIndex = -1
+    const headers: Record<string, string> = {}
+    
+    // Parse headers first
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      
+      if (line.trim() === '') {
+        headerEndIndex = i
+        break
+      }
+      
+      if (line.startsWith(' ') || line.startsWith('\t')) {
+        // Continuation of previous header
+        if (currentHeader) {
+          headers[currentHeader] += ' ' + line.trim()
         }
       } else {
-        body += line + '\n'
+        const colonIndex = line.indexOf(':')
+        if (colonIndex > 0) {
+          currentHeader = line.substring(0, colonIndex).toLowerCase()
+          headers[currentHeader] = line.substring(colonIndex + 1).trim()
+        }
       }
     }
-    console.log(`✅ Parsed message: ${Object.keys(headers).length} headers, ${body.length} body chars`)
-    return { headers, messageBody: body.trim() }
+    
+    console.log(`📧 Parsed headers: ${Object.keys(headers).length}`)
+    
+    // Parse body content
+    let body = ''
+    let bodyHtml = ''
+    
+    if (headerEndIndex >= 0) {
+      const bodyContent = lines.slice(headerEndIndex + 1).join('\n')
+      console.log(`📧 Body content length: ${bodyContent.length}`)
+      
+      // Check if this is multipart content
+      const contentType = headers['content-type'] || ''
+      if (contentType.includes('multipart')) {
+        // Extract boundary
+        const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/)
+        if (boundaryMatch) {
+          const boundary = boundaryMatch[1]
+          console.log(`📧 Found multipart boundary: ${boundary}`)
+          
+          const parts = bodyContent.split(`--${boundary}`)
+          console.log(`📧 Found ${parts.length} parts`)
+          
+          for (const part of parts) {
+            if (part.trim() === '' || part.trim() === '--') continue
+            
+            const partLines = part.split('\n')
+            let partHeaderEndIndex = -1
+            const partHeaders: Record<string, string> = {}
+            
+            // Parse part headers
+            for (let i = 0; i < partLines.length; i++) {
+              const line = partLines[i]
+              if (line.trim() === '') {
+                partHeaderEndIndex = i
+                break
+              }
+              const colonIndex = line.indexOf(':')
+              if (colonIndex > 0) {
+                const key = line.substring(0, colonIndex).toLowerCase()
+                const value = line.substring(colonIndex + 1).trim()
+                partHeaders[key] = value
+              }
+            }
+            
+            if (partHeaderEndIndex >= 0) {
+              const partContent = partLines.slice(partHeaderEndIndex + 1).join('\n').trim()
+              const partContentType = partHeaders['content-type'] || ''
+              
+              if (partContentType.includes('text/plain')) {
+                body = partContent
+                console.log(`📧 Found plain text body, length: ${body.length}`)
+              } else if (partContentType.includes('text/html')) {
+                bodyHtml = partContent
+                console.log(`📧 Found HTML body, length: ${bodyHtml.length}`)
+              }
+            }
+          }
+        }
+      } else {
+        // Single part content
+        body = bodyContent.trim()
+        console.log(`📧 Single part body, length: ${body.length}`)
+      }
+    }
+    
+    // Fallback if no body content found
+    if (!body && !bodyHtml) {
+      body = 'No message content available'
+      console.log('⚠️ No body content found, using fallback')
+    }
+    
+    const messageBody = body || bodyHtml || 'No content available'
+    
+    console.log(`✅ Parsed message: ${Object.keys(headers).length} headers, ${messageBody.length} body chars`)
+    return { headers, messageBody, bodyHtml }
   } catch (err) {
     console.error('❌ Error parsing raw message:', err)
-    return { headers: {}, messageBody: '' }
+    return { headers: {}, messageBody: '', bodyHtml: '' }
   }
 }
 
@@ -321,6 +405,7 @@ export async function POST(req: Request) {
     // Get message body from Lambda's raw data or fetch from WorkMail
     let headers: Record<string, string> = {}
     let messageBody = ''
+    let bodyHtml = ''
     
     if (sesRecord.raw?.base64) {
       // Lambda provided raw message content
@@ -365,6 +450,10 @@ Date: ${mail.timestamp}
         const parsed = await parseRawMessage(mailClient, mail.messageId)
         headers = parsed.headers
         messageBody = parsed.messageBody
+        bodyHtml = parsed.bodyHtml || ''
+        if (bodyHtml) {
+          console.log('📧 HTML body extracted from WorkMail API');
+        }
       } catch (err) {
         console.error('❌ Error fetching from WorkMail:', err);
         messageBody = `Email processed via WorkMail webhook.
@@ -398,7 +487,7 @@ Date: ${mail.timestamp}
       subject: mail.commonHeaders.subject || 'No Subject',
       timestamp: mail.timestamp,
       body: messageBody,
-      bodyHtml: messageBody,
+      bodyHtml: bodyHtml || messageBody,
       headers,
       attachments: [] as string[],
       direction: isOutbound ? 'outbound' : 'inbound',
@@ -424,7 +513,11 @@ Date: ${mail.timestamp}
         status: { S: 'received' },
         threatLevel: { S: 'none' },
         isPhishing: { BOOL: false },
-        createdAt: { S: new Date().toISOString() }
+        createdAt: { S: new Date().toISOString() },
+        
+        // NEW ATTRIBUTES - Set defaults for new email attributes
+        flaggedCategory: { S: 'none' },          // Default: 'none' (not flagged)
+        updatedAt: { S: new Date().toISOString() } // Track last update
       }
 
       if (recipients.length) dbItem.recipients = { SS: recipients }
