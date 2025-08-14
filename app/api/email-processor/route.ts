@@ -198,52 +198,37 @@ async function parseMimeContent(rawContent: string): Promise<{
   attachments: string[];
   urls: string[];
 }> {
+  console.log('📧 Parsing MIME content, length:', rawContent.length);
+  
   const headers: Record<string, string> = {};
   const lines = rawContent.split('\n');
   let currentHeader = '';
-  let isBodySection = false;
-  let bodyLines: string[] = [];
-  let htmlBodyLines: string[] = [];
-  let isHtmlSection = false;
+  let headerEndIndex = -1;
   
-  for (const line of lines) {
-    if (!isBodySection && line.trim() === '') {
-      isBodySection = true;
-      continue;
+  // Parse headers first
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    
+    if (line.trim() === '') {
+      headerEndIndex = i;
+      break;
     }
     
-    if (!isBodySection) {
-      // Parse headers
-      if (line.startsWith(' ') || line.startsWith('\t')) {
-        // Continuation of previous header
-        if (currentHeader) {
-          headers[currentHeader] += ' ' + line.trim();
-        }
-      } else {
-        const colonIndex = line.indexOf(':');
-        if (colonIndex > 0) {
-          currentHeader = line.substring(0, colonIndex).toLowerCase();
-          headers[currentHeader] = line.substring(colonIndex + 1).trim();
-        }
+    if (line.startsWith(' ') || line.startsWith('\t')) {
+      // Continuation of previous header
+      if (currentHeader) {
+        headers[currentHeader] += ' ' + line.trim();
       }
     } else {
-      // Parse body
-      if (line.includes('Content-Type: text/html')) {
-        isHtmlSection = true;
-        continue;
-      }
-      if (line.includes('Content-Type: text/plain')) {
-        isHtmlSection = false;
-        continue;
-      }
-      
-      if (isHtmlSection) {
-        htmlBodyLines.push(line);
-      } else {
-        bodyLines.push(line);
+      const colonIndex = line.indexOf(':');
+      if (colonIndex > 0) {
+        currentHeader = line.substring(0, colonIndex).toLowerCase();
+        headers[currentHeader] = line.substring(colonIndex + 1).trim();
       }
     }
   }
+  
+  console.log('📧 Parsed headers:', Object.keys(headers).length);
   
   // Extract basic information with safety checks
   const subject = headers['subject'] || 'No Subject';
@@ -258,8 +243,75 @@ async function parseMimeContent(rawContent: string): Promise<{
     timestamp = new Date().toISOString();
   }
   
-  const body = bodyLines.join('\n').trim() || 'No message content';
-  const bodyHtml = htmlBodyLines.length > 0 ? htmlBodyLines.join('\n').trim() : undefined;
+  // Parse body content
+  let body = '';
+  let bodyHtml = '';
+  
+  if (headerEndIndex >= 0) {
+    const bodyContent = lines.slice(headerEndIndex + 1).join('\n');
+    console.log('📧 Body content length:', bodyContent.length);
+    
+    // Check if this is multipart content
+    const contentType = headers['content-type'] || '';
+    if (contentType.includes('multipart')) {
+      // Extract boundary
+      const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/);
+      if (boundaryMatch) {
+        const boundary = boundaryMatch[1];
+        console.log('📧 Found multipart boundary:', boundary);
+        
+        const parts = bodyContent.split(`--${boundary}`);
+        console.log('📧 Found', parts.length, 'parts');
+        
+        for (const part of parts) {
+          if (part.trim() === '' || part.trim() === '--') continue;
+          
+          const partLines = part.split('\n');
+          let partHeaderEndIndex = -1;
+          const partHeaders: Record<string, string> = {};
+          
+          // Parse part headers
+          for (let i = 0; i < partLines.length; i++) {
+            const line = partLines[i];
+            if (line.trim() === '') {
+              partHeaderEndIndex = i;
+              break;
+            }
+            const colonIndex = line.indexOf(':');
+            if (colonIndex > 0) {
+              const key = line.substring(0, colonIndex).toLowerCase();
+              const value = line.substring(colonIndex + 1).trim();
+              partHeaders[key] = value;
+            }
+          }
+          
+          if (partHeaderEndIndex >= 0) {
+            const partContent = partLines.slice(partHeaderEndIndex + 1).join('\n').trim();
+            const partContentType = partHeaders['content-type'] || '';
+            
+            if (partContentType.includes('text/plain')) {
+              body = partContent;
+              console.log('📧 Found plain text body, length:', body.length);
+            } else if (partContentType.includes('text/html')) {
+              bodyHtml = partContent;
+              console.log('📧 Found HTML body, length:', bodyHtml.length);
+            }
+          }
+        }
+      }
+    } else {
+      // Single part content
+      body = bodyContent.trim();
+      console.log('📧 Single part body, length:', body.length);
+    }
+  }
+  
+  // Fallback if no body content found
+  if (!body && !bodyHtml) {
+    body = 'No message content available';
+    console.log('⚠️ No body content found, using fallback');
+  }
+  
   const size = rawContent.length;
   
   // Extract URLs from body
@@ -268,12 +320,22 @@ async function parseMimeContent(rawContent: string): Promise<{
   // Extract attachment names (simplified)
   const attachments = extractAttachmentNames(rawContent);
   
+  console.log('✅ MIME parsing complete:', {
+    subject,
+    sender,
+    recipients: recipients.length,
+    bodyLength: body.length,
+    htmlBodyLength: bodyHtml?.length || 0,
+    urlsFound: urls.length,
+    attachmentsFound: attachments.length
+  });
+  
   return {
     subject,
     sender,
     recipients,
     body,
-    bodyHtml,
+    bodyHtml: bodyHtml || undefined,
     timestamp,
     size,
     headers,
