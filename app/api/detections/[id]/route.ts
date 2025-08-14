@@ -130,7 +130,8 @@ export async function DELETE(
         const success = await updateEmailAttributes(emailMessageId, {
           flaggedCategory: 'clean',
           investigationStatus: 'resolved',
-          flaggedBy: 'analyst',
+          detectionId: undefined,
+          flaggedBy: 'Security Analyst',
           investigationNotes: `Detection "${detectionData?.name}" was unflagged and marked as clean by analyst.`
         });
         
