@@ -944,26 +944,29 @@ export default function AdminAllEmailsPage() {
               </div>
             ) : (
               <>
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
-                      <TableHead className="text-white">Subject</TableHead>
-                      <TableHead className="text-white">Sender</TableHead>
-                      <TableHead className="text-white">Recipients</TableHead>
-                      <TableHead className="text-white">Received</TableHead>
-                      <TableHead className="text-white">Direction</TableHead>
-                      <TableHead className="text-white">Flagged</TableHead>
-                      <TableHead className="text-white">Investigation</TableHead>
-                      <TableHead className="text-white">Status</TableHead>
-                      <TableHead className="text-white">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                        <TableHead className="text-white w-48">Subject</TableHead>
+                        <TableHead className="text-white w-44">Sender</TableHead>
+                        <TableHead className="text-white w-44">Recipients</TableHead>
+                        <TableHead className="text-white w-36">Received</TableHead>
+                        <TableHead className="text-white w-24">Direction</TableHead>
+                        <TableHead className="text-white w-28">Flagged</TableHead>
+                        <TableHead className="text-white w-28">Investigation</TableHead>
+                        <TableHead className="text-white w-24">Status</TableHead>
+                        <TableHead className="text-white w-28">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
                   <TableBody>
                     {filteredEmails.map(email => (
                       <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
                         <TableCell className="font-medium text-white">
-                          <div className="max-w-xs">
-                            <div className="truncate">{email.subject || 'No Subject'}</div>
+                          <div className="w-48">
+                            <div className="truncate text-sm" title={email.subject || 'No Subject'}>
+                              {email.subject || 'No Subject'}
+                            </div>
                             {email.urls?.length ? (
                               <div className="text-xs text-gray-400">
                                 {email.urls.length} URL{email.urls.length > 1 ? "s" : ""}
@@ -972,17 +975,21 @@ export default function AdminAllEmailsPage() {
                           </div>
                         </TableCell>
                         <TableCell className="text-white">
-                          <div className="max-w-xs truncate">{email.sender}</div>
+                          <div className="w-44 truncate text-sm" title={email.sender}>
+                            {email.sender}
+                          </div>
                         </TableCell>
                         <TableCell className="text-white">
-                          <div className="max-w-sm truncate">
+                          <div className="w-44 truncate text-sm" title={email.recipients.join(", ")}>
                             {email.recipients.slice(0, 2).join(", ")}
                             {email.recipients.length > 2 && ` +${email.recipients.length - 2}`}
                           </div>
                         </TableCell>
                         <TableCell className="text-white">
-                          <div className="text-sm">
-                            {new Date(email.timestamp).toLocaleString()}
+                          <div className="text-xs">
+                            {new Date(email.timestamp).toLocaleDateString()}
+                            <br />
+                            {new Date(email.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -1051,8 +1058,9 @@ export default function AdminAllEmailsPage() {
                         </TableCell>
                       </TableRow>
                     ))}
-                  </TableBody>
-                </Table>
+                    </TableBody>
+                  </Table>
+                </div>
 
                 {/* Load more indicator */}
                 {loadingMore && (
@@ -1144,7 +1152,7 @@ export default function AdminAllEmailsPage() {
                       <CardContent className="space-y-4">
                         <div>
                           <label className="text-sm font-medium text-gray-400">Subject</label>
-                          <p className="font-medium text-white mt-1">{selectedEmail.subject || 'No Subject'}</p>
+                          <p className="font-medium text-white mt-1 break-words">{selectedEmail.subject || 'No Subject'}</p>
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">From</label>
