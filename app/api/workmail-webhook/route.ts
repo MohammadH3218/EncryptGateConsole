@@ -111,6 +111,192 @@ async function streamToString(stream: any): Promise<string> {
   return Buffer.concat(chunks).toString('utf-8')
 }
 
+// IMPROVED: Better email body parsing with more robust fallbacks
+function parseEmailBodyFromRaw(rawEmail: string): { body: string; bodyHtml?: string; headers: Record<string, string> } {
+  console.log('📧 Parsing email body from raw content, length:', rawEmail.length)
+  
+  const lines = rawEmail.split('\n')
+  const headers: Record<string, string> = {}
+  let headerEndIndex = -1
+  
+  // Parse headers - stop at first blank line
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    
+    if (line.trim() === '') {
+      headerEndIndex = i
+      console.log('📧 Found header end at line:', i)
+      break
+    }
+    
+    // Handle header continuation lines
+    if (line.startsWith(' ') || line.startsWith('\t')) {
+      // This is a continuation of the previous header
+      const lastHeaderKey = Object.keys(headers).pop()
+      if (lastHeaderKey) {
+        headers[lastHeaderKey] += ' ' + line.trim()
+      }
+    } else {
+      const colonIndex = line.indexOf(':')
+      if (colonIndex > 0) {
+        const key = line.substring(0, colonIndex).toLowerCase().trim()
+        const value = line.substring(colonIndex + 1).trim()
+        headers[key] = value
+      }
+    }
+  }
+  
+  console.log('📧 Parsed headers:', Object.keys(headers).length)
+  
+  if (headerEndIndex === -1) {
+    console.warn('📧 No header/body separator found, treating entire content as body')
+    return {
+      body: rawEmail,
+      headers
+    }
+  }
+  
+  // Get everything after headers as potential body content
+  const bodyContent = lines.slice(headerEndIndex + 1).join('\n')
+  console.log('📧 Raw body content length after headers:', bodyContent.length)
+  
+  const contentType = headers['content-type'] || ''
+  console.log('📧 Content-Type:', contentType)
+  
+  // Handle multipart content
+  if (contentType.toLowerCase().includes('multipart')) {
+    const boundaryMatch = contentType.match(/boundary[=\s]*["']?([^"'\s;]+)["']?/i)
+    if (boundaryMatch) {
+      const boundary = boundaryMatch[1]
+      console.log('📧 Found multipart boundary:', boundary)
+      
+      const parts = bodyContent.split(`--${boundary}`)
+      console.log('📧 Split into', parts.length, 'parts')
+      
+      let textPart = ''
+      let htmlPart = ''
+      
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i].trim()
+        if (part === '' || part === '--') continue
+        
+        console.log(`📧 Processing part ${i + 1}, length:`, part.length)
+        
+        const partLines = part.split('\n')
+        let partHeaderEnd = -1
+        const partHeaders: Record<string, string> = {}
+        
+        // Parse part headers
+        for (let j = 0; j < partLines.length; j++) {
+          const line = partLines[j]
+          if (line.trim() === '') {
+            partHeaderEnd = j
+            break
+          }
+          const colonIndex = line.indexOf(':')
+          if (colonIndex > 0) {
+            const key = line.substring(0, colonIndex).toLowerCase().trim()
+            const value = line.substring(colonIndex + 1).trim()
+            partHeaders[key] = value
+          }
+        }
+        
+        if (partHeaderEnd >= 0) {
+          const partBody = partLines.slice(partHeaderEnd + 1).join('\n').trim()
+          const partContentType = partHeaders['content-type'] || ''
+          
+          console.log(`📧 Part ${i + 1} content-type:`, partContentType, 'body length:', partBody.length)
+          
+          if (partContentType.toLowerCase().includes('text/plain') && partBody) {
+            textPart = partBody
+            console.log('📧 Found text/plain part, length:', textPart.length)
+          } else if (partContentType.toLowerCase().includes('text/html') && partBody) {
+            htmlPart = partBody
+            console.log('📧 Found text/html part, length:', htmlPart.length)
+          }
+        }
+      }
+      
+      // Return the parsed parts
+      if (textPart || htmlPart) {
+        console.log('📧 Multipart parsing successful:', { 
+          textLength: textPart.length, 
+          htmlLength: htmlPart.length 
+        })
+        return {
+          body: textPart || htmlPart, // Prefer text, fallback to HTML
+          bodyHtml: htmlPart || undefined,
+          headers
+        }
+      }
+    }
+  }
+  
+  // Handle single-part content or multipart parsing failure
+  console.log('📧 Using single-part parsing or multipart fallback')
+  
+  // Clean up the body content - remove only obvious email headers, not content
+  let cleanBody = bodyContent
+  
+  // Only remove lines that look like email headers (have colons and are at the start)
+  const bodyLines = cleanBody.split('\n')
+  let contentStartIndex = 0
+  
+  // Skip only the first few lines if they look like headers that somehow leaked through
+  for (let i = 0; i < Math.min(10, bodyLines.length); i++) {
+    const line = bodyLines[i].trim()
+    
+    // If we find a line that doesn't look like a header, stop skipping
+    if (line && !line.match(/^[A-Za-z-]+:\s/)) {
+      contentStartIndex = i
+      break
+    }
+    
+    // If this looks like a header, continue
+    if (line.match(/^(Message-ID|Subject|From|To|Date|MIME-Version|Content-Type|Content-Transfer-Encoding):/i)) {
+      contentStartIndex = i + 1
+      continue
+    }
+    
+    // If we hit a blank line, content starts after it
+    if (!line) {
+      contentStartIndex = i + 1
+      break
+    }
+    
+    // If line doesn't match header pattern, this is content
+    break
+  }
+  
+  cleanBody = bodyLines.slice(contentStartIndex).join('\n').trim()
+  
+  console.log('📧 Single-part body processing:', {
+    originalLength: bodyContent.length,
+    cleanedLength: cleanBody.length,
+    skippedLines: contentStartIndex,
+    hasContent: cleanBody.length > 0
+  })
+  
+  // Final fallback - if we still don't have content, use the original body content
+  if (!cleanBody || cleanBody.length < 10) {
+    console.warn('📧 Clean body too short, using original body content')
+    cleanBody = bodyContent.trim()
+  }
+  
+  // If it's HTML content, also set bodyHtml
+  let bodyHtml: string | undefined
+  if (contentType.toLowerCase().includes('text/html') || cleanBody.includes('<html') || cleanBody.includes('</html>')) {
+    bodyHtml = cleanBody
+    console.log('📧 Detected HTML content, setting bodyHtml')
+  }
+  
+  return {
+    body: cleanBody || 'No message content available',
+    bodyHtml,
+    headers
+  }
+}
+
 async function parseRawMessage(
   mailClient: WorkMailMessageFlowClient,
   messageId: string
@@ -124,109 +310,14 @@ async function parseRawMessage(
     const raw = await streamToString(resp.messageContent)
     console.log(`📄 Raw message size: ${raw.length} characters`)
     
-    const lines = raw.split('\n')
-    let currentHeader = ''
-    let headerEndIndex = -1
-    const headers: Record<string, string> = {}
+    const parsed = parseEmailBodyFromRaw(raw)
     
-    // Parse headers first
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      
-      if (line.trim() === '') {
-        headerEndIndex = i
-        break
-      }
-      
-      if (line.startsWith(' ') || line.startsWith('\t')) {
-        // Continuation of previous header
-        if (currentHeader) {
-          headers[currentHeader] += ' ' + line.trim()
-        }
-      } else {
-        const colonIndex = line.indexOf(':')
-        if (colonIndex > 0) {
-          currentHeader = line.substring(0, colonIndex).toLowerCase()
-          headers[currentHeader] = line.substring(colonIndex + 1).trim()
-        }
-      }
+    console.log(`✅ Parsed message: ${Object.keys(parsed.headers).length} headers, ${parsed.body.length} body chars, ${parsed.bodyHtml?.length || 0} HTML chars`)
+    return { 
+      headers: parsed.headers, 
+      messageBody: parsed.body, 
+      bodyHtml: parsed.bodyHtml || '' 
     }
-    
-    console.log(`📧 Parsed headers: ${Object.keys(headers).length}`)
-    
-    // Parse body content
-    let body = ''
-    let bodyHtml = ''
-    
-    if (headerEndIndex >= 0) {
-      const bodyContent = lines.slice(headerEndIndex + 1).join('\n')
-      console.log(`📧 Body content length: ${bodyContent.length}`)
-      
-      // Check if this is multipart content
-      const contentType = headers['content-type'] || ''
-      if (contentType.includes('multipart')) {
-        // Extract boundary
-        const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/)
-        if (boundaryMatch) {
-          const boundary = boundaryMatch[1]
-          console.log(`📧 Found multipart boundary: ${boundary}`)
-          
-          const parts = bodyContent.split(`--${boundary}`)
-          console.log(`📧 Found ${parts.length} parts`)
-          
-          for (const part of parts) {
-            if (part.trim() === '' || part.trim() === '--') continue
-            
-            const partLines = part.split('\n')
-            let partHeaderEndIndex = -1
-            const partHeaders: Record<string, string> = {}
-            
-            // Parse part headers
-            for (let i = 0; i < partLines.length; i++) {
-              const line = partLines[i]
-              if (line.trim() === '') {
-                partHeaderEndIndex = i
-                break
-              }
-              const colonIndex = line.indexOf(':')
-              if (colonIndex > 0) {
-                const key = line.substring(0, colonIndex).toLowerCase()
-                const value = line.substring(colonIndex + 1).trim()
-                partHeaders[key] = value
-              }
-            }
-            
-            if (partHeaderEndIndex >= 0) {
-              const partContent = partLines.slice(partHeaderEndIndex + 1).join('\n').trim()
-              const partContentType = partHeaders['content-type'] || ''
-              
-              if (partContentType.includes('text/plain')) {
-                body = partContent
-                console.log(`📧 Found plain text body, length: ${body.length}`)
-              } else if (partContentType.includes('text/html')) {
-                bodyHtml = partContent
-                console.log(`📧 Found HTML body, length: ${bodyHtml.length}`)
-              }
-            }
-          }
-        }
-      } else {
-        // Single part content
-        body = bodyContent.trim()
-        console.log(`📧 Single part body, length: ${body.length}`)
-      }
-    }
-    
-    // Fallback if no body content found
-    if (!body && !bodyHtml) {
-      body = 'No message content available'
-      console.log('⚠️ No body content found, using fallback')
-    }
-    
-    const messageBody = body || bodyHtml || 'No content available'
-    
-    console.log(`✅ Parsed message: ${Object.keys(headers).length} headers, ${messageBody.length} body chars`)
-    return { headers, messageBody, bodyHtml }
   } catch (err) {
     console.error('❌ Error parsing raw message:', err)
     return { headers: {}, messageBody: '', bodyHtml: '' }
@@ -402,7 +493,7 @@ export async function POST(req: Request) {
       })
     }
 
-    // Get message body from Lambda's raw data or fetch from WorkMail
+    // IMPROVED: Get message body from Lambda's raw data with better parsing
     let headers: Record<string, string> = {}
     let messageBody = ''
     let bodyHtml = ''
@@ -414,113 +505,20 @@ export async function POST(req: Request) {
         const rawText = rawBuffer.toString('utf-8');
         console.log('📧 Raw email content received from Lambda:', {
           contentLength: rawText.length,
-          contentPreview: rawText.substring(0, 200)
+          contentPreview: rawText.substring(0, 200) + '...'
         });
         
-        const lines = rawText.split('\n');
-        let inBody = false;
-        let bodyLines: string[] = [];
+        // Use the improved parsing function
+        const parsed = parseEmailBodyFromRaw(rawText);
+        headers = parsed.headers;
+        messageBody = parsed.body;
+        bodyHtml = parsed.bodyHtml || '';
         
-        for (const line of lines) {
-          if (!inBody) {
-            if (line.trim() === '') {
-              inBody = true;
-              continue;
-            }
-            const idx = line.indexOf(':');
-            if (idx > 0) {
-              headers[line.slice(0, idx).toLowerCase()] = line.slice(idx + 1).trim();
-            }
-          } else {
-            bodyLines.push(line);
-          }
-        }
-        
-        messageBody = bodyLines.join('\n').trim();
-        
-        // Clean up the message body - remove headers if they leaked through
-        if (messageBody.includes('Message-ID:') || messageBody.includes('Subject:')) {
-          console.log('📧 Headers found in body, cleaning up...');
-          const bodyParts = messageBody.split('\n');
-          const cleanBodyLines: string[] = [];
-          let skipHeaders = true;
-          
-          for (const line of bodyParts) {
-            if (skipHeaders) {
-              // Skip lines that look like headers
-              if (line.includes(':') && (
-                line.startsWith('Message-ID:') ||
-                line.startsWith('Subject:') ||
-                line.startsWith('From:') ||
-                line.startsWith('To:') ||
-                line.startsWith('Date:') ||
-                line.startsWith('MIME-Version:') ||
-                line.startsWith('Content-Type:') ||
-                line.startsWith('Content-Transfer-Encoding:')
-              )) {
-                continue;
-              } else if (line.trim() === '') {
-                continue; // Skip empty lines after headers
-              } else {
-                // This looks like actual content
-                skipHeaders = false;
-                cleanBodyLines.push(line);
-              }
-            } else {
-              cleanBodyLines.push(line);
-            }
-          }
-          
-          messageBody = cleanBodyLines.join('\n').trim();
-          console.log('📧 Cleaned message body:', {
-            originalLength: bodyLines.join('\n').length,
-            cleanedLength: messageBody.length,
-            cleanedContent: messageBody.substring(0, 200)
-          });
-        }
-        
-        // Enhanced logging for debugging
-        console.log('📧 Email content parsing results:', {
-          totalLines: lines.length,
-          headerCount: Object.keys(headers).length,
-          bodyLines: bodyLines.length,
+        console.log('📧 Lambda content parsing results:', {
+          hasHeaders: Object.keys(headers).length > 0,
           bodyLength: messageBody.length,
-          bodyPreview: messageBody.substring(0, 200),
-          hasContent: messageBody.length > 0,
-          isEmpty: messageBody === ''
-        });
-        
-        // If body is empty, try alternative parsing
-        if (!messageBody || messageBody.trim() === '') {
-          console.log('📧 Body is empty, trying alternative parsing...');
-          
-          // Look for content after double newline
-          const doubleNewlineIndex = rawText.indexOf('\n\n');
-          if (doubleNewlineIndex > 0) {
-            messageBody = rawText.substring(doubleNewlineIndex + 2).trim();
-            console.log('📧 Alternative parsing found body:', {
-              bodyLength: messageBody.length,
-              bodyPreview: messageBody.substring(0, 100)
-            });
-          }
-          
-          // If still empty, use the entire raw content minus headers
-          if (!messageBody || messageBody.trim() === '') {
-            const headerEndIndex = rawText.indexOf('\n\n');
-            if (headerEndIndex > 0) {
-              messageBody = rawText.substring(headerEndIndex + 2);
-            } else {
-              messageBody = rawText;
-            }
-            console.log('📧 Using full content as body:', {
-              bodyLength: messageBody.length
-            });
-          }
-        }
-        
-        console.log('📧 Final parsed message body:', {
-          length: messageBody.length,
-          content: messageBody.substring(0, 300) + (messageBody.length > 300 ? '...' : ''),
+          bodyHtmlLength: bodyHtml.length,
+          bodyPreview: messageBody.substring(0, 200) + (messageBody.length > 200 ? '...' : ''),
           hasValidContent: messageBody.length > 0 && messageBody.trim() !== ''
         });
         
@@ -551,6 +549,24 @@ Date: ${mail.timestamp}
 
 [Email body content not available]`;
       }
+    }
+
+    // Final validation - ensure we have some body content
+    if (!messageBody || messageBody.trim() === '' || messageBody === 'No message content available') {
+      console.warn('📧 No valid body content found, using fallback');
+      messageBody = `Email received and processed successfully.
+
+Subject: ${mail.commonHeaders.subject || 'No Subject'}
+From: ${mail.commonHeaders.from.join(', ')}
+To: ${mail.commonHeaders.to.join(', ')}
+Date: ${mail.timestamp}
+
+The email body content could not be extracted. This may be due to:
+- Complex email formatting
+- Encrypted content
+- Email processing limitations
+
+Please check the original email for full content.`;
     }
 
     // Determine direction from Lambda workmail metadata
@@ -584,13 +600,13 @@ Date: ${mail.timestamp}
 
     // Store in DynamoDB
     try {
-      console.log('📧 Pre-DynamoDB email data:', {
+      console.log('📧 Pre-DynamoDB email data validation:', {
         messageId: emailItem.messageId,
         subject: emailItem.subject,
         bodyLength: emailItem.body?.length || 0,
         bodyHtmlLength: emailItem.bodyHtml?.length || 0,
         bodyPreview: emailItem.body?.substring(0, 100) || 'NO BODY',
-        bodyHtmlPreview: emailItem.bodyHtml?.substring(0, 100) || 'NO HTML BODY'
+        bodyIsValid: emailItem.body && emailItem.body.trim().length > 0
       });
       
       console.log(`💾 Writing email to DynamoDB table ${EMAILS_TABLE}`)
@@ -627,7 +643,7 @@ Date: ${mail.timestamp}
         Item: dbItem,
         ConditionExpression: 'attribute_not_exists(messageId)'
       }))
-      console.log('✅ Email stored successfully in DynamoDB')
+      console.log('✅ Email stored successfully in DynamoDB with body content')
       
     } catch(err: any) {
       if (err.name === 'ConditionalCheckFailedException') {
@@ -663,7 +679,7 @@ Date: ${mail.timestamp}
       })
     } catch{}
 
-    console.log('🎉 Email processing complete')
+    console.log('🎉 Email processing complete with body content')
     return NextResponse.json({
       status: 'processed',
       messageId: emailItem.messageId,
@@ -671,6 +687,8 @@ Date: ${mail.timestamp}
       threatsTriggered: hasThreat,
       webhookType: 'Lambda-Processed',
       userId: userId,
+      bodyLength: emailItem.body.length,
+      hasBodyContent: emailItem.body.length > 0,
       filtersApplied: ['DIRECT_SES_FILTER', 'DIRECT_WORKMAIL_FILTER', 'LAMBDA_ONLY_FILTER'],
       processingNote: 'Only Lambda-processed events allowed - all direct webhooks filtered out'
     })
@@ -701,7 +719,8 @@ export async function GET() {
       status: 'webhook_ready',
       duplicatePreventionActive: true,
       filtersActive: ['DIRECT_SES_FILTER', 'DIRECT_WORKMAIL_FILTER', 'LAMBDA_ONLY_FILTER'],
-      message: 'Production webhook with comprehensive filtering - only Lambda-processed events allowed'
+      bodyParsingImproved: true,
+      message: 'Production webhook with comprehensive filtering and improved body parsing - only Lambda-processed events allowed'
     })
   } catch(err) {
     console.error('❌ Health check failed', err)
