@@ -206,8 +206,23 @@ export default function AdminAllEmailsPage() {
             timestamp: e.timestamp,
             flaggedCategory: e.flaggedCategory,
             flaggedSeverity: e.flaggedSeverity,
-            investigationStatus: e.investigationStatus
+            investigationStatus: e.investigationStatus,
+            bodyExists: !!e.body,
+            bodyLength: e.body?.length || 0,
+            bodyHtmlExists: !!e.bodyHtml,
+            bodyHtmlLength: e.bodyHtml?.length || 0,
+            firstBodyChars: e.body ? e.body.substring(0, 100) + '...' : 'NO BODY'
           })));
+          
+          // Check all emails for body content
+          const emailsWithBody = data.emails.filter(e => e.body && e.body.trim().length > 0);
+          const emailsWithHtml = data.emails.filter(e => e.bodyHtml && e.bodyHtml.trim().length > 0);
+          console.log('📊 Body content analysis:', {
+            totalEmails: data.emails.length,
+            emailsWithBody: emailsWithBody.length,
+            emailsWithHtml: emailsWithHtml.length,
+            emailsWithoutBody: data.emails.length - emailsWithBody.length
+          });
         } else {
           console.log('ℹ️ No emails in response');
         }
@@ -414,6 +429,17 @@ export default function AdminAllEmailsPage() {
 
   const viewEmail = (email: Email) => {
     console.log('👁️ Viewing email:', email.id);
+    console.log('📧 Full email object:', email);
+    console.log('📧 Email body content:', {
+      bodyExists: !!email.body,
+      bodyLength: email.body?.length || 0,
+      bodyContent: email.body,
+      bodyHtmlExists: !!email.bodyHtml,
+      bodyHtmlLength: email.bodyHtml?.length || 0,
+      bodyHtmlContent: email.bodyHtml,
+      messageId: email.messageId,
+      subject: email.subject
+    });
     setSelectedEmail(email);
   };
 
@@ -1260,11 +1286,14 @@ export default function AdminAllEmailsPage() {
                     </CardHeader>
                     <CardContent>
                       <div className="bg-[#0f0f0f] p-4 rounded-lg">
+                        {/* Debug information */}
+                        
                         {selectedEmail.bodyHtml ? (
                           <div className="space-y-3">
                             <div className="flex items-center gap-2 text-sm text-gray-400">
                               <span>HTML Content:</span>
                               <Badge variant="outline" className="border-blue-500/30 text-blue-400">HTML</Badge>
+                              <span className="text-xs">({selectedEmail.bodyHtml.length} chars)</span>
                             </div>
                             <div 
                               className="text-sm text-white prose prose-invert max-w-none"
@@ -1283,6 +1312,7 @@ export default function AdminAllEmailsPage() {
                             <div className="flex items-center gap-2 text-sm text-gray-400">
                               <span>Plain Text Content:</span>
                               <Badge variant="outline" className="border-gray-500/30 text-gray-400">TEXT</Badge>
+                              <span className="text-xs">({(selectedEmail.body?.length || 0)} chars)</span>
                             </div>
                             <pre className="text-sm text-white whitespace-pre-wrap font-mono leading-relaxed">
                               {selectedEmail.body || 'No message content'}
