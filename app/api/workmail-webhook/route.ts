@@ -16,7 +16,7 @@ const EMAILS_TABLE    = process.env.EMAILS_TABLE_NAME    || 'Emails'
 const BASE_URL        = process.env.BASE_URL             || 'https://console-encryptgate.net'
 const AWS_REGION      = process.env.AWS_REGION           || 'us-east-1'
 
-console.log('📧 WorkMail Webhook (WorkMail-Only) initialized:', {
+console.log('📧 Pure WorkMail Webhook initialized (NO SES):', {
   ORG_ID,
   CS_TABLE,
   EMPLOYEES_TABLE,
@@ -27,7 +27,7 @@ console.log('📧 WorkMail Webhook (WorkMail-Only) initialized:', {
 
 const ddb = new DynamoDBClient({ region: AWS_REGION })
 
-// Simplified schema for WorkMail Message Flow events
+// Pure WorkMail Message Flow schema (NO SES)
 const WorkMailMessageFlowSchema = z.object({
   messageId: z.string(),
   flowDirection: z.enum(['INBOUND', 'OUTBOUND']).optional(),
@@ -38,6 +38,7 @@ const WorkMailMessageFlowSchema = z.object({
     recipients: z.array(z.string()).optional()
   }).optional(),
   subject: z.string().optional(),
+  timestamp: z.string().optional(),
   raw: z.object({
     base64: z.string()
   }).optional(),
@@ -179,7 +180,7 @@ function containsSuspiciousKeywords(body: string): boolean {
 
 export async function POST(req: Request) {
   try {
-    console.log('📥 WorkMail webhook received (WorkMail-Only version)')
+    console.log('📥 Pure WorkMail webhook received (NO SES)')
     const raw = await req.json()
     
     console.log('🔍 Raw webhook data:', {
@@ -187,8 +188,19 @@ export async function POST(req: Request) {
       hasFlowDirection: !!raw?.flowDirection,
       hasRaw: !!raw?.raw?.base64,
       hasExtractedBody: !!raw?.extractedBody,
-      processingVersion: raw?.processingInfo?.version
+      processingVersion: raw?.processingInfo?.version,
+      hasRecords: !!raw?.Records // Should be false for pure WorkMail
     });
+
+    // REJECT any SES events completely
+    if (raw?.Records?.[0]?.eventSource === 'aws:ses') {
+      console.log('🚫 REJECTED: SES event detected - only WorkMail Message Flow events allowed');
+      return NextResponse.json({
+        status: 'rejected',
+        reason: 'ses_events_not_supported',
+        message: 'Only WorkMail Message Flow events are supported. Please configure WorkMail Message Flow instead of SES.'
+      }, { status: 400 });
+    }
 
     try {
       const event = WorkMailMessageFlowSchema.parse(raw)
@@ -250,7 +262,8 @@ export async function POST(req: Request) {
         sender: emailData.sender,
         recipients: emailData.recipients,
         bodyLength: emailData.body?.length || 0,
-        bodyPreview: emailData.body?.substring(0, 150) || 'NO BODY'
+        bodyPreview: emailData.body?.substring(0, 150) || 'NO BODY',
+        hasRealContent: emailData.body && emailData.body.length > 0 && !emailData.body.includes('No email content available')
       });
       
       // Check if sender or recipients are monitored
@@ -290,7 +303,7 @@ export async function POST(req: Request) {
         sender: emailData.sender,
         recipients: emailData.recipients,
         subject: emailData.subject,
-        timestamp: new Date().toISOString(),
+        timestamp: event.timestamp || new Date().toISOString(),
         body: emailData.body,
         bodyHtml: emailData.bodyHtml || emailData.body,
         headers: emailData.headers,
@@ -386,17 +399,17 @@ export async function POST(req: Request) {
         console.warn('⚠️ Graph update call failed:', graphErr);
       }
 
-      console.log('🎉 WorkMail-only email processing complete');
+      console.log('🎉 Pure WorkMail email processing complete');
       return NextResponse.json({
         status: 'processed',
         messageId: emailItem.messageId,
         direction: emailItem.direction,
         threatsTriggered: hasThreat,
-        webhookType: 'WorkMail-Message-Flow-Only',
+        webhookType: 'Pure-WorkMail-Message-Flow',
         userId: userId,
         bodyLength: emailItem.body.length,
         hasRealContent: emailItem.body.length > 0 && !emailItem.body.includes('No email content available'),
-        processingMethod: 'workmail-direct'
+        processingMethod: 'workmail-pure'
       });
       
     } catch (schemaError: any) {
@@ -404,7 +417,8 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { 
           error: 'Invalid WorkMail Message Flow event format', 
-          details: schemaError.message 
+          details: schemaError.message,
+          message: 'Only WorkMail Message Flow events are supported. SES events are rejected.'
         },
         { status: 400 }
       );
@@ -424,7 +438,7 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  console.log('🏥 Health check - WorkMail-Only Webhook');
+  console.log('🏥 Health check - Pure WorkMail Webhook (NO SES)');
   try {
     await ddb.send(new QueryCommand({
       TableName: CS_TABLE,
@@ -435,15 +449,17 @@ export async function GET() {
     
     return NextResponse.json({ 
       status: 'webhook_ready',
-      version: 'workmail-only-v1.0',
-      processingMethod: 'workmail-message-flow-direct',
+      version: 'workmail-pure-v1.0',
+      processingMethod: 'workmail-message-flow-only',
+      sesSupport: false,
       features: [
-        'workmail-message-flow-api',
+        'workmail-message-flow-api-only',
         'direct-mime-parsing',
         'real-email-body-extraction',
-        'no-s3-dependency'
+        'no-ses-dependencies',
+        'rejects-ses-events'
       ],
-      message: 'WorkMail-only webhook ready - no SES/S3 dependencies'
+      message: 'Pure WorkMail webhook ready - SES events are rejected'
     });
   } catch(err) {
     console.error('❌ Health check failed', err);
