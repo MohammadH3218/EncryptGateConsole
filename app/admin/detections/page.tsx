@@ -1,4 +1,4 @@
-// app/admin/detections/page.tsx - UPDATED VERSION
+// app/admin/detections/page.tsx - UPDATED VERSION with proper URL encoding
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
@@ -294,8 +294,56 @@ export default function AdminDetectionsPage() {
     }
   }
 
-  const handleInvestigate = (detection: Detection) => {
-    router.push(`/admin/investigate/${detection.emailMessageId}`)
+  const handleInvestigate = async (detection: Detection) => {
+    try {
+      console.log('🔍 Starting investigation for detection:', {
+        detectionId: detection.id,
+        emailMessageId: detection.emailMessageId,
+        originalMessageId: detection.emailMessageId
+      })
+
+      // Check if investigation already exists (try with encoded URL)
+      const encodedMessageId = encodeURIComponent(detection.emailMessageId)
+      console.log('🔗 Encoded messageId for API call:', encodedMessageId)
+      
+      const existingResponse = await fetch(`/api/investigations/${encodedMessageId}`)
+      
+      if (!existingResponse.ok) {
+        // Create new investigation
+        console.log('📝 Creating investigation for detection:', detection.id)
+        const createResponse = await fetch('/api/investigations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            emailMessageId: detection.emailMessageId, // Use original messageId for storage
+            detectionId: detection.detectionId,
+            investigatorName: 'John Doe', // TODO: Get from auth
+            priority: detection.severity === 'critical' ? 'critical' : 
+                     detection.severity === 'high' ? 'high' : 'medium'
+          })
+        })
+        
+        if (createResponse.ok) {
+          console.log('✅ Investigation created successfully')
+        } else {
+          console.warn('⚠️ Failed to create investigation, but continuing with navigation')
+        }
+      } else {
+        console.log('✅ Investigation already exists')
+      }
+      
+      // Navigate to investigation page with properly encoded messageId
+      const navigationUrl = `/admin/investigate/${encodedMessageId}`
+      console.log('🧭 Navigating to:', navigationUrl)
+      
+      router.push(navigationUrl)
+    } catch (error) {
+      console.error('❌ Failed to create/navigate to investigation:', error)
+      // Still navigate even if creation fails - use encoded URL for navigation
+      const fallbackUrl = `/admin/investigate/${encodeURIComponent(detection.emailMessageId)}`
+      console.log('🔄 Fallback navigation to:', fallbackUrl)
+      router.push(fallbackUrl)
+    }
   }
 
   const refreshDetections = () => {

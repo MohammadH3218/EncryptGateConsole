@@ -149,7 +149,10 @@ export default function InvestigationPage() {
     setError(null)
     
     try {
+      // Decode the URL-encoded emailId
+      const decodedEmailId = decodeURIComponent(emailId)
       console.log('🔍 Loading investigation data for emailId:', emailId)
+      console.log('🔍 Decoded emailId:', decodedEmailId)
       
       // Load email data
       const emailsResponse = await fetch('/api/email?limit=1000')
@@ -160,9 +163,32 @@ export default function InvestigationPage() {
       const emailsData = await emailsResponse.json()
       const emails = emailsData.emails || []
       
-      const foundEmail = emails.find((email: any) => 
-        email.messageId === emailId || email.id === emailId
-      )
+      console.log('📧 Total emails loaded:', emails.length)
+      console.log('📧 Sample messageIds:', emails.slice(0, 3).map((e: any) => e.messageId))
+      
+      // Try multiple matching strategies
+      const foundEmail = emails.find((email: any) => {
+        const matches = [
+          email.messageId === emailId,                    // Direct match
+          email.messageId === decodedEmailId,            // Decoded match
+          email.id === emailId,                          // ID match
+          email.id === decodedEmailId,                   // Decoded ID match
+          email.messageId && email.messageId.includes(emailId.replace(/[<>]/g, '')), // Partial match without brackets
+          email.messageId && decodedEmailId.includes(email.messageId) // Reverse partial match
+        ]
+        
+        if (matches.some(Boolean)) {
+          console.log('✅ Found email match:', {
+            searchId: emailId,
+            decodedId: decodedEmailId,
+            foundMessageId: email.messageId,
+            foundId: email.id,
+            matchType: matches.findIndex(Boolean)
+          })
+          return true
+        }
+        return false
+      })
       
       if (foundEmail) {
         console.log('✅ Found email data:', foundEmail)
@@ -205,19 +231,24 @@ export default function InvestigationPage() {
 
         // Load or create investigation
         try {
-          const investigationResponse = await fetch(`/api/investigations/${emailId}`)
+          // Try with both original and decoded IDs
+          let investigationResponse = await fetch(`/api/investigations/${emailId}`)
+          if (!investigationResponse.ok) {
+            investigationResponse = await fetch(`/api/investigations/${encodeURIComponent(decodedEmailId)}`)
+          }
+          
           if (investigationResponse.ok) {
             const investigationData = await investigationResponse.json()
             setInvestigation(investigationData)
             console.log('✅ Found existing investigation:', investigationData)
           } else {
             // Create new investigation
-            console.log('📝 Creating new investigation for email:', emailId)
+            console.log('📝 Creating new investigation for email:', decodedEmailId)
             const createResponse = await fetch('/api/investigations', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                emailMessageId: emailDetails.messageId,
+                emailMessageId: emailDetails.messageId, // Use the actual messageId from found email
                 detectionId: foundEmail.detectionId,
                 investigatorName: 'John Doe', // TODO: Get from auth
                 priority: 'medium'
@@ -235,7 +266,13 @@ export default function InvestigationPage() {
         }
         
       } else {
-        throw new Error('Email not found')
+        console.error('❌ Email not found. Search details:', {
+          originalId: emailId,
+          decodedId: decodedEmailId,
+          totalEmailsSearched: emails.length,
+          sampleMessageIds: emails.slice(0, 5).map((e: any) => e.messageId)
+        })
+        throw new Error(`Email not found. Searched for: ${decodedEmailId} among ${emails.length} emails.`)
       }
       
     } catch (err: any) {
@@ -392,14 +429,39 @@ export default function InvestigationPage() {
         <FadeInSection>
           <Card className="border-red-500/20 bg-[#0f0f0f]">
             <CardContent className="pt-6">
-              <div className="flex items-center gap-2 text-red-400">
+              <div className="flex items-center gap-2 text-red-400 mb-4">
                 <AlertTriangle className="h-5 w-5" />
                 <p className="text-white">{error || 'Email not found'}</p>
               </div>
-              <Button onClick={() => router.back()} className="mt-4 bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Go Back
-              </Button>
+              
+              {/* Debug Information */}
+              <div className="bg-[#1a1a1a] p-4 rounded-lg border border-[#2a2a2a] mb-4">
+                <h4 className="text-white font-medium mb-2">Debug Information:</h4>
+                <div className="text-sm text-gray-400 space-y-1">
+                  <div><strong>Original URL ID:</strong> {emailId}</div>
+                  <div><strong>Decoded ID:</strong> {decodeURIComponent(emailId)}</div>
+                  <div className="mt-2">
+                    <strong>This could happen if:</strong>
+                    <ul className="list-disc list-inside mt-1 space-y-1">
+                      <li>The email was not loaded in the first 1000 emails</li>
+                      <li>The messageId format doesn't match what's in the database</li>
+                      <li>The email was deleted or moved</li>
+                      <li>There's a URL encoding/decoding issue</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="flex gap-2">
+                <Button onClick={() => router.back()} className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
+                  <ArrowLeft className="h-4 w-4 mr-2" />
+                  Go Back
+                </Button>
+                <Button onClick={loadInvestigationData} className="bg-blue-600 hover:bg-blue-700">
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Retry
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </FadeInSection>
