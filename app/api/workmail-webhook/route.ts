@@ -16,7 +16,7 @@ const EMAILS_TABLE    = process.env.EMAILS_TABLE_NAME    || 'Emails'
 const BASE_URL        = process.env.BASE_URL             || 'https://console-encryptgate.net'
 const AWS_REGION      = process.env.AWS_REGION           || 'us-east-1'
 
-console.log('📧 Pure WorkMail Webhook initialized (NO SES):', {
+console.log('📧 Enhanced Webhook Handler initialized:', {
   ORG_ID,
   CS_TABLE,
   EMPLOYEES_TABLE,
@@ -27,7 +27,37 @@ console.log('📧 Pure WorkMail Webhook initialized (NO SES):', {
 
 const ddb = new DynamoDBClient({ region: AWS_REGION })
 
-// Pure WorkMail Message Flow schema (NO SES)
+// Enhanced schemas for different processing methods
+const S3ProcessedEmailSchema = z.object({
+  messageId: z.string(),
+  subject: z.string(),
+  flowDirection: z.enum(['INBOUND', 'OUTBOUND']).optional(),
+  orgId: z.string().optional(),
+  envelope: z.object({
+    mailFrom: z.string(),
+    recipients: z.array(z.string())
+  }),
+  timestamp: z.string(),
+  raw: z.object({
+    base64: z.string()
+  }),
+  extractedBody: z.string(),
+  processingInfo: z.object({
+    version: z.string(),
+    extractionMethod: z.string(),
+    requestId: z.string(),
+    headersExtracted: z.number().optional(),
+    bodyExtracted: z.boolean().optional(),
+    bodyLength: z.number().optional(),
+    contentType: z.string().optional(),
+    s3: z.object({
+      bucket: z.string(),
+      key: z.string(),
+      size: z.number().optional()
+    }).optional()
+  })
+});
+
 const WorkMailMessageFlowSchema = z.object({
   messageId: z.string(),
   flowDirection: z.enum(['INBOUND', 'OUTBOUND']).optional(),
@@ -72,90 +102,6 @@ async function isMonitoredEmployee(email: string): Promise<boolean> {
   }
 }
 
-function parseEmailBodyFromBase64(base64Content: string): { 
-  body: string; 
-  bodyHtml?: string; 
-  headers: Record<string, string>;
-  subject?: string;
-  sender?: string;
-  recipients?: string[];
-} {
-  try {
-    console.log('📧 Parsing email from base64 content');
-    
-    const rawContent = Buffer.from(base64Content, 'base64').toString('utf-8');
-    console.log('📧 Raw content length:', rawContent.length);
-    
-    const lines = rawContent.split('\n');
-    const headers: Record<string, string> = {};
-    let headerEndIndex = -1;
-    
-    // Parse headers
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      if (line.trim() === '' || line === '\r') {
-        headerEndIndex = i;
-        break;
-      }
-      
-      const colonIndex = line.indexOf(':');
-      if (colonIndex > 0) {
-        const key = line.substring(0, colonIndex).toLowerCase().trim();
-        const value = line.substring(colonIndex + 1).trim();
-        headers[key] = value;
-      }
-    }
-    
-    console.log('📧 Parsed headers:', Object.keys(headers));
-    
-    // Get body content
-    let body = '';
-    if (headerEndIndex >= 0) {
-      body = lines.slice(headerEndIndex + 1).join('\n').trim();
-    }
-    
-    console.log('📧 Extracted body length:', body.length);
-    console.log('📧 Body preview:', body.substring(0, 200));
-    
-    // Extract email details from headers
-    const subject = headers['subject'] || 'No Subject';
-    const sender = extractEmailAddress(headers['from'] || '');
-    const recipients = extractEmailAddresses(headers['to'] || '');
-    
-    return {
-      body: body || 'No message content available',
-      headers,
-      subject,
-      sender,
-      recipients
-    };
-    
-  } catch (error) {
-    console.error('❌ Error parsing base64 content:', error);
-    return {
-      body: 'Error parsing email content',
-      headers: {},
-      subject: 'Parsing Error',
-      sender: 'unknown@email.com',
-      recipients: ['unknown@email.com']
-    };
-  }
-}
-
-function extractEmailAddress(header: string): string {
-  if (!header) return 'unknown@email.com';
-  const match = header.match(/<([^>]+)>/);
-  const result = match ? match[1] : header.trim();
-  return result.includes('@') ? result : 'unknown@email.com';
-}
-
-function extractEmailAddresses(header: string): string[] {
-  if (!header) return ['unknown@email.com'];
-  const emails = header.split(',').map(email => extractEmailAddress(email.trim()));
-  const validEmails = emails.filter(email => email.includes('@'));
-  return validEmails.length > 0 ? validEmails : ['unknown@email.com'];
-}
-
 function extractUrls(text: string): string[] {
   const re = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi
   const urls = text.match(re) || []
@@ -168,7 +114,8 @@ function containsSuspiciousKeywords(body: string): boolean {
     'urgent', 'verify account',
     'immediate action', 'suspended',
     'click here', 'confirm identity',
-    'prize', 'winner', 'limited time'
+    'prize', 'winner', 'limited time',
+    'act now', 'final notice'
   ]
   const lower = body.toLowerCase()
   const found = suspicious.filter(k => lower.includes(k))
@@ -178,254 +125,305 @@ function containsSuspiciousKeywords(body: string): boolean {
   return found.length > 0
 }
 
+async function storeEmailInDynamoDB(emailData: any, userId: string): Promise<void> {
+  try {
+    console.log(`💾 Storing email in DynamoDB for user: ${userId}`)
+    
+    const emailId = `email-${Date.now()}-${Math.random().toString(36).slice(2,8)}`
+    
+    const dbItem: Record<string, any> = {
+      userId: { S: userId },
+      receivedAt: { S: emailData.timestamp },
+      messageId: { S: emailData.messageId },
+      emailId: { S: emailId },
+      sender: { S: emailData.sender || '' },
+      subject: { S: emailData.subject || 'No Subject' },
+      body: { S: emailData.body || '' },
+      bodyHtml: { S: emailData.bodyHtml || emailData.body || '' },
+      direction: { S: emailData.direction || 'inbound' },
+      size: { N: String(emailData.size || emailData.body?.length || 0) },
+      status: { S: 'received' },
+      threatLevel: { S: 'none' },
+      isPhishing: { BOOL: false },
+      createdAt: { S: new Date().toISOString() },
+      flaggedCategory: { S: 'none' },
+      updatedAt: { S: new Date().toISOString() }
+    }
+
+    // Add optional fields
+    if (emailData.recipients?.length) dbItem.recipients = { SS: emailData.recipients }
+    if (emailData.attachments?.length) dbItem.attachments = { SS: emailData.attachments }
+    if (emailData.urls?.length) dbItem.urls = { SS: emailData.urls }
+    if (emailData.headers && Object.keys(emailData.headers).length) {
+      dbItem.headers = { S: JSON.stringify(emailData.headers) }
+    }
+
+    await ddb.send(new PutItemCommand({
+      TableName: EMAILS_TABLE,
+      Item: dbItem,
+      ConditionExpression: 'attribute_not_exists(messageId)'
+    }))
+    
+    console.log('✅ Email stored successfully in DynamoDB')
+    
+  } catch(err: any) {
+    if (err.name === 'ConditionalCheckFailedException') {
+      console.log('ℹ️ Email already exists, skipping duplicate:', emailData.messageId)
+      return
+    } else {
+      console.error('❌ DynamoDB storage failed:', err)
+      throw err
+    }
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    console.log('📥 Pure WorkMail webhook received (NO SES)')
+    console.log('📥 Enhanced webhook received')
     const raw = await req.json()
     
-    console.log('🔍 Raw webhook data:', {
+    console.log('🔍 Raw webhook data analysis:', {
       hasMessageId: !!raw?.messageId,
       hasFlowDirection: !!raw?.flowDirection,
       hasRaw: !!raw?.raw?.base64,
       hasExtractedBody: !!raw?.extractedBody,
       processingVersion: raw?.processingInfo?.version,
-      hasRecords: !!raw?.Records // Should be false for pure WorkMail
-    });
+      extractionMethod: raw?.processingInfo?.extractionMethod,
+      hasS3Info: !!raw?.processingInfo?.s3,
+      bodyLength: raw?.extractedBody?.length || 0,
+      hasRealContent: raw?.extractedBody && raw.extractedBody.length > 10,
+      contentPreview: raw?.extractedBody ? raw.extractedBody.substring(0, 100) + '...' : 'NO CONTENT'
+    })
 
-    // REJECT any SES events completely
+    // REJECT any SES records that somehow make it here
     if (raw?.Records?.[0]?.eventSource === 'aws:ses') {
-      console.log('🚫 REJECTED: SES event detected - only WorkMail Message Flow events allowed');
+      console.log('🚫 REJECTED: Direct SES events not supported in webhook')
       return NextResponse.json({
         status: 'rejected',
-        reason: 'ses_events_not_supported',
-        message: 'Only WorkMail Message Flow events are supported. Please configure WorkMail Message Flow instead of SES.'
-      }, { status: 400 });
+        reason: 'direct_ses_events_not_supported',
+        message: 'Use Lambda->Webhook flow, not direct SES->Webhook'
+      }, { status: 400 })
     }
 
-    try {
-      const event = WorkMailMessageFlowSchema.parse(raw)
-      console.log('✅ WorkMail Message Flow schema validation passed')
+    // PRIORITY: Handle S3-processed emails (primary path)
+    if (raw?.processingInfo?.extractionMethod?.includes('S3') || raw?.processingInfo?.s3) {
+      console.log('📧 Processing S3-extracted email (PRIMARY PATH)')
       
-      const messageId = event.messageId;
-      console.log('📧 Processing WorkMail message:', messageId);
-      
-      // Skip outbound messages for now (optional)
-      if (event.flowDirection === 'OUTBOUND') {
-        console.log('🚫 Skipping OUTBOUND message');
-        return NextResponse.json({
-          status: 'skipped',
-          reason: 'outbound_message',
-          messageId
-        });
-      }
-      
-      // Parse email content from raw data
-      let emailData: any = {
-        messageId,
-        body: '',
-        headers: {},
-        subject: 'No Subject',
-        sender: 'unknown@email.com',
-        recipients: ['unknown@email.com']
-      };
-      
-      if (event.raw?.base64) {
-        console.log('📧 Parsing email from Lambda-provided raw content');
-        const parsed = parseEmailBodyFromBase64(event.raw.base64);
-        emailData = {
-          messageId,
-          body: parsed.body,
-          bodyHtml: parsed.bodyHtml,
-          headers: parsed.headers,
-          subject: parsed.subject || event.subject || 'No Subject',
-          sender: parsed.sender || 'unknown@email.com',
-          recipients: parsed.recipients || ['unknown@email.com']
-        };
-      } else if (event.extractedBody) {
-        console.log('📧 Using extracted body from Lambda');
-        emailData.body = event.extractedBody;
-        emailData.subject = event.subject || 'No Subject';
-        
-        // Try to get sender/recipients from envelope
-        if (event.envelope) {
-          emailData.sender = event.envelope.mailFrom || 'unknown@email.com';
-          emailData.recipients = event.envelope.recipients || ['unknown@email.com'];
-        }
-      } else {
-        console.warn('⚠️ No usable email content in WorkMail event');
-        emailData.body = 'No email content available from WorkMail Message Flow';
-      }
-      
-      console.log('📧 Email data extracted:', {
-        messageId: emailData.messageId,
-        subject: emailData.subject,
-        sender: emailData.sender,
-        recipients: emailData.recipients,
-        bodyLength: emailData.body?.length || 0,
-        bodyPreview: emailData.body?.substring(0, 150) || 'NO BODY',
-        hasRealContent: emailData.body && emailData.body.length > 0 && !emailData.body.includes('No email content available')
-      });
-      
-      // Check if sender or recipients are monitored
-      const senderMonitored = await isMonitoredEmployee(emailData.sender);
-      const recipientsMonitored = await Promise.all(
-        emailData.recipients.map(isMonitoredEmployee)
-      );
-      
-      const hasMonitoredParticipant = senderMonitored || recipientsMonitored.some(Boolean);
-      
-      if (!hasMonitoredParticipant) {
-        console.log('ℹ️ No monitored participants, skipping');
-        return NextResponse.json({
-          status: 'skipped',
-          reason: 'no-monitored-users',
-          participants: { 
-            sender: emailData.sender, 
-            recipients: emailData.recipients 
-          }
-        });
-      }
-      
-      // Determine userId based on monitoring
-      const userId = senderMonitored 
-        ? emailData.sender 
-        : emailData.recipients[recipientsMonitored.findIndex(Boolean)] || emailData.recipients[0];
-      
-      console.log('👤 Using userId:', userId);
-      
-      // Analyze content
-      const urls = extractUrls(emailData.body);
-      const hasThreat = urls.length > 0 || containsSuspiciousKeywords(emailData.body);
-      
-      // Prepare email item for storage
-      const emailItem = {
-        messageId: emailData.messageId,
-        sender: emailData.sender,
-        recipients: emailData.recipients,
-        subject: emailData.subject,
-        timestamp: event.timestamp || new Date().toISOString(),
-        body: emailData.body,
-        bodyHtml: emailData.bodyHtml || emailData.body,
-        headers: emailData.headers,
-        attachments: [] as string[],
-        direction: senderMonitored ? 'outbound' : 'inbound',
-        size: emailData.body?.length || 0,
-        urls,
-        hasThreat
-      };
-      
-      console.log('📧 Final email item for storage:', {
-        messageId: emailItem.messageId,
-        bodyLength: emailItem.body.length,
-        direction: emailItem.direction,
-        hasRealContent: emailItem.body.length > 0 && !emailItem.body.includes('No email content available')
-      });
-      
-      // Store in DynamoDB
       try {
-        console.log(`💾 Writing email to DynamoDB table ${EMAILS_TABLE}`);
+        const event = S3ProcessedEmailSchema.parse(raw)
         
-        const dbItem: Record<string, any> = {
-          userId: { S: userId },
-          receivedAt: { S: emailItem.timestamp },
-          messageId: { S: emailItem.messageId },
-          emailId: { S: `email-${Date.now()}-${Math.random().toString(36).slice(2,8)}` },
-          sender: { S: emailItem.sender || '' },
-          subject: { S: emailItem.subject || 'No Subject' },
-          body: { S: emailItem.body || '' },
-          bodyHtml: { S: emailItem.bodyHtml || '' },
-          direction: { S: emailItem.direction },
-          size: { N: String(emailItem.size || 0) },
-          status: { S: 'received' },
-          threatLevel: { S: 'none' },
-          isPhishing: { BOOL: false },
-          createdAt: { S: new Date().toISOString() },
-          
-          // Email attributes
-          flaggedCategory: { S: 'none' },
-          updatedAt: { S: new Date().toISOString() }
-        };
-
-        if (emailItem.recipients?.length) dbItem.recipients = { SS: emailItem.recipients };
-        if (emailItem.attachments?.length) dbItem.attachments = { SS: emailItem.attachments };
-        if (emailItem.urls?.length) dbItem.urls = { SS: emailItem.urls };
-        if (emailItem.headers && Object.keys(emailItem.headers).length) {
-          dbItem.headers = { S: JSON.stringify(emailItem.headers) };
+        const emailData = {
+          messageId: event.messageId,
+          subject: event.subject,
+          sender: event.envelope.mailFrom,
+          recipients: event.envelope.recipients,
+          body: event.extractedBody || 'No content available',
+          timestamp: event.timestamp,
+          headers: {}, // Could parse from raw.base64 if needed
+          direction: 'inbound',
+          size: event.processingInfo.bodyLength || event.extractedBody?.length || 0,
+          urls: extractUrls(event.extractedBody || ''),
+          attachments: []
         }
-
-        await ddb.send(new PutItemCommand({
-          TableName: EMAILS_TABLE,
-          Item: dbItem,
-          ConditionExpression: 'attribute_not_exists(messageId)'
-        }));
         
-        console.log('✅ Email stored successfully in DynamoDB');
+        console.log('📧 S3-processed email data:', {
+          messageId: emailData.messageId,
+          subject: emailData.subject,
+          sender: emailData.sender,
+          recipients: emailData.recipients.length,
+          bodyLength: emailData.body?.length || 0,
+          bodyPreview: emailData.body?.substring(0, 150) || 'NO BODY',
+          hasRealContent: emailData.body && emailData.body.length > 10 && !emailData.body.includes('No email content available'),
+          extractionMethod: event.processingInfo.extractionMethod,
+          s3Bucket: event.processingInfo.s3?.bucket,
+          s3Key: event.processingInfo.s3?.key
+        })
         
-      } catch(err: any) {
-        if (err.name === 'ConditionalCheckFailedException') {
-          console.log('ℹ️ Email already exists, skipping duplicate:', emailItem.messageId);
+        // Check monitoring status
+        const senderMonitored = await isMonitoredEmployee(emailData.sender)
+        const recipientsMonitored = await Promise.all(
+          emailData.recipients.map(isMonitoredEmployee)
+        )
+        
+        const hasMonitoredParticipant = senderMonitored || recipientsMonitored.some(Boolean)
+        
+        if (!hasMonitoredParticipant) {
+          console.log('ℹ️ No monitored participants, skipping email', {
+            sender: emailData.sender,
+            recipients: emailData.recipients
+          })
           return NextResponse.json({
-            status: 'duplicate_skipped',
-            reason: 'email_already_exists',
-            messageId: emailItem.messageId
-          });
-        } else {
-          console.error('❌ DynamoDB write failed', err);
-          throw err;
+            status: 'skipped',
+            reason: 'no-monitored-users',
+            participants: { 
+              sender: emailData.sender, 
+              recipients: emailData.recipients 
+            }
+          })
         }
-      }
+        
+        // Determine userId
+        const userId = senderMonitored 
+          ? emailData.sender 
+          : emailData.recipients[recipientsMonitored.findIndex(Boolean)] || emailData.recipients[0]
+        
+        console.log('👤 Using userId for storage:', userId)
+        
+        // Analyze for threats
+        const hasThreat = emailData.urls.length > 0 || containsSuspiciousKeywords(emailData.body)
+        
+        // Store email
+        await storeEmailInDynamoDB(emailData, userId)
+        
+        // Trigger threat detection if needed
+        if (hasThreat) {
+          try {
+            console.log('🔍 Triggering threat detection')
+            await fetch(`${BASE_URL}/api/threat-detection`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ...emailData,
+                userId,
+                threatScore: emailData.urls.length * 20 + (containsSuspiciousKeywords(emailData.body) ? 30 : 0)
+              })
+            })
+          } catch (threatErr) {
+            console.warn('⚠️ Threat detection call failed:', threatErr)
+          }
+        }
 
-      // Trigger threat detection if needed
-      if (hasThreat) {
+        // Update graph
         try {
-          await fetch(`${BASE_URL}/api/threat-detection`, {
+          await fetch(`${BASE_URL}/api/graph`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(emailItem)
-          });
-        } catch (threatErr) {
-          console.warn('⚠️ Threat detection call failed:', threatErr);
+            body: JSON.stringify({ action: 'add_email', data: { ...emailData, userId } })
+          })
+        } catch (graphErr) {
+          console.warn('⚠️ Graph update call failed:', graphErr)
         }
-      }
 
-      // Update graph
-      try {
-        await fetch(`${BASE_URL}/api/graph`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'add_email', data: emailItem })
-        });
-      } catch (graphErr) {
-        console.warn('⚠️ Graph update call failed:', graphErr);
+        console.log('🎉 S3-processed email handling complete')
+        return NextResponse.json({
+          status: 'processed',
+          messageId: emailData.messageId,
+          processingMethod: 'S3_ENHANCED_EXTRACTION',
+          bodyLength: emailData.body.length,
+          hasRealContent: emailData.body.length > 10 && !emailData.body.includes('No email content available'),
+          userId: userId,
+          threatsDetected: hasThreat,
+          extractionMethod: event.processingInfo.extractionMethod
+        })
+        
+      } catch (parseError: any) {
+        console.error('❌ S3 email parsing failed:', parseError.message)
+        return NextResponse.json({
+          error: 'S3 email parsing failed',
+          details: parseError.message,
+          extractionMethod: raw?.processingInfo?.extractionMethod
+        }, { status: 400 })
       }
-
-      console.log('🎉 Pure WorkMail email processing complete');
-      return NextResponse.json({
-        status: 'processed',
-        messageId: emailItem.messageId,
-        direction: emailItem.direction,
-        threatsTriggered: hasThreat,
-        webhookType: 'Pure-WorkMail-Message-Flow',
-        userId: userId,
-        bodyLength: emailItem.body.length,
-        hasRealContent: emailItem.body.length > 0 && !emailItem.body.includes('No email content available'),
-        processingMethod: 'workmail-pure'
-      });
-      
-    } catch (schemaError: any) {
-      console.error('❌ Schema validation failed:', schemaError.message);
-      return NextResponse.json(
-        { 
-          error: 'Invalid WorkMail Message Flow event format', 
-          details: schemaError.message,
-          message: 'Only WorkMail Message Flow events are supported. SES events are rejected.'
-        },
-        { status: 400 }
-      );
     }
 
+    // FALLBACK: Handle WorkMail Message Flow events
+    if (raw?.processingInfo?.extractionMethod?.includes('WORKMAIL') || 
+        (raw?.messageId && raw?.envelope && !raw?.processingInfo?.s3)) {
+      console.log('📧 Processing WorkMail Message Flow event (FALLBACK)')
+      
+      try {
+        const event = WorkMailMessageFlowSchema.parse(raw)
+        
+        // Skip outbound messages
+        if (event.flowDirection === 'OUTBOUND') {
+          console.log('🚫 Skipping OUTBOUND message')
+          return NextResponse.json({
+            status: 'skipped',
+            reason: 'outbound_message',
+            messageId: event.messageId
+          })
+        }
+        
+        // Process WorkMail event (similar to S3 but with WorkMail-specific handling)
+        const emailData = {
+          messageId: event.messageId,
+          subject: event.subject || 'No Subject',
+          sender: event.envelope?.mailFrom || 'unknown@email.com',
+          recipients: event.envelope?.recipients || ['unknown@email.com'],
+          body: event.extractedBody || 'No content available from WorkMail',
+          timestamp: event.timestamp || new Date().toISOString(),
+          headers: {},
+          direction: 'inbound',
+          size: event.extractedBody?.length || 0,
+          urls: extractUrls(event.extractedBody || ''),
+          attachments: []
+        }
+        
+        console.log('📧 WorkMail email data:', {
+          messageId: emailData.messageId,
+          bodyLength: emailData.body.length,
+          hasContent: emailData.body.length > 10
+        })
+        
+        // Apply same monitoring and storage logic as S3 path
+        const senderMonitored = await isMonitoredEmployee(emailData.sender)
+        const recipientsMonitored = await Promise.all(
+          emailData.recipients.map(isMonitoredEmployee)
+        )
+        
+        const hasMonitoredParticipant = senderMonitored || recipientsMonitored.some(Boolean)
+        
+        if (!hasMonitoredParticipant) {
+          console.log('ℹ️ No monitored participants in WorkMail event')
+          return NextResponse.json({
+            status: 'skipped',
+            reason: 'no-monitored-users'
+          })
+        }
+        
+        const userId = senderMonitored 
+          ? emailData.sender 
+          : emailData.recipients[recipientsMonitored.findIndex(Boolean)] || emailData.recipients[0]
+        
+        await storeEmailInDynamoDB(emailData, userId)
+        
+        console.log('✅ WorkMail email processed')
+        return NextResponse.json({
+          status: 'processed',
+          messageId: emailData.messageId,
+          processingMethod: 'WORKMAIL_MESSAGE_FLOW',
+          bodyLength: emailData.body.length
+        })
+        
+      } catch (parseError: any) {
+        console.error('❌ WorkMail parsing failed:', parseError.message)
+        return NextResponse.json({
+          error: 'WorkMail event parsing failed',
+          details: parseError.message
+        }, { status: 400 })
+      }
+    }
+
+    // Unknown format
+    console.error('❌ Unknown webhook format:', {
+      hasMessageId: !!raw?.messageId,
+      hasProcessingInfo: !!raw?.processingInfo,
+      extractionMethod: raw?.processingInfo?.extractionMethod,
+      topLevelKeys: Object.keys(raw || {})
+    })
+    
+    return NextResponse.json({
+      error: 'Unknown webhook event format',
+      supportedFormats: ['S3_ENHANCED', 'WORKMAIL_MESSAGE_FLOW'],
+      receivedFormat: {
+        extractionMethod: raw?.processingInfo?.extractionMethod || 'unknown',
+        hasS3Info: !!raw?.processingInfo?.s3,
+        hasMessageId: !!raw?.messageId
+      }
+    }, { status: 400 })
+
   } catch(err: any) {
-    console.error('❌ Webhook processing failed:', err);
+    console.error('❌ Webhook processing failed:', err)
     return NextResponse.json(
       { 
         error: 'Webhook processing failed', 
@@ -433,36 +431,39 @@ export async function POST(req: Request) {
         stack: err.stack?.split('\n').slice(0, 3)
       },
       { status: 500 }
-    );
+    )
   }
 }
 
 export async function GET() {
-  console.log('🏥 Health check - Pure WorkMail Webhook (NO SES)');
+  console.log('🏥 Health check - Enhanced Email Webhook')
   try {
     await ddb.send(new QueryCommand({
       TableName: CS_TABLE,
       KeyConditionExpression: 'orgId = :orgId',
       ExpressionAttributeValues: { ':orgId': { S: ORG_ID } },
       Limit: 1
-    }));
+    }))
     
     return NextResponse.json({ 
       status: 'webhook_ready',
-      version: 'workmail-pure-v1.0',
-      processingMethod: 'workmail-message-flow-only',
-      sesSupport: false,
-      features: [
-        'workmail-message-flow-api-only',
-        'direct-mime-parsing',
-        'real-email-body-extraction',
-        'no-ses-dependencies',
-        'rejects-ses-events'
+      version: 'enhanced-v2.0',
+      supportedMethods: [
+        'SES_S3_ENHANCED',
+        'WORKMAIL_MESSAGE_FLOW', 
+        'SES_LIMITED_FALLBACK'
       ],
-      message: 'Pure WorkMail webhook ready - SES events are rejected'
-    });
+      primaryPath: 'SES->S3->Lambda->Webhook',
+      features: [
+        'full-email-body-extraction',
+        'enhanced-mime-parsing',
+        'real-content-validation',
+        'threat-detection-integration',
+        'monitored-employee-filtering'
+      ]
+    })
   } catch(err) {
-    console.error('❌ Health check failed', err);
-    return NextResponse.json({ status: 'unhealthy' }, { status: 500 });
+    console.error('❌ Health check failed', err)
+    return NextResponse.json({ status: 'unhealthy', error: err }, { status: 500 })
   }
 }

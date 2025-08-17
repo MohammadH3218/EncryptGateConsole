@@ -1,9 +1,8 @@
-// app/api/email-processor/route.ts - SIMPLIFIED WorkMail-Only Version
+// app/api/email-processor/route.ts - Enhanced for S3->Lambda->Webhook flow
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { DynamoDBClient, PutItemCommand } from '@aws-sdk/client-dynamodb';
-import { WorkMailMessageFlowClient, GetRawMessageContentCommand } from '@aws-sdk/client-workmailmessageflow';
 import { z } from 'zod';
 
 //
@@ -14,22 +13,31 @@ const ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
 const ddb = new DynamoDBClient({ region: REGION });
-const workmailClient = new WorkMailMessageFlowClient({ region: REGION });
 
 //
-// ─── VALIDATION SCHEMAS ───────────────────────────────────────────────────────
+// ─── ENHANCED VALIDATION SCHEMAS ───────────────────────────────────────────────
 //
-const WorkMailWebhookSchema = z.object({
+const S3ProcessedEmailSchema = z.object({
+  type: z.literal('s3_processed_email'),
   messageId: z.string().nonempty(),
-  flowDirection: z.enum(['INBOUND', 'OUTBOUND']).optional(),
-  orgId: z.string().optional(),
-  envelope: z.object({
-    mailFrom: z.string().optional(),
-    recipients: z.array(z.string()).optional()
-  }).optional(),
-  subject: z.string().optional(),
-  raw: z.object({
-    base64: z.string()
+  subject: z.string(),
+  sender: z.string().email(),
+  recipients: z.array(z.string().email()).min(1),
+  timestamp: z.string().refine((d) => !isNaN(Date.parse(d)), {
+    message: 'Invalid ISO timestamp',
+  }),
+  body: z.string(),
+  bodyHtml: z.string().optional(),
+  attachments: z.array(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  direction: z.enum(['inbound', 'outbound']).default('inbound'),
+  size: z.number().nonnegative().default(0),
+  urls: z.array(z.string()).optional(),
+  processingInfo: z.object({
+    extractionMethod: z.string(),
+    s3Bucket: z.string().optional(),
+    s3Key: z.string().optional(),
+    bodyLength: z.number().optional()
   }).optional()
 });
 
@@ -56,7 +64,7 @@ const MockEmailSchema = RawEmailSchema.extend({
 });
 
 const EmailRequestSchema = z.discriminatedUnion('type', [
-  WorkMailWebhookSchema.extend({ type: z.literal('workmail_webhook') }),
+  S3ProcessedEmailSchema,
   RawEmailSchema,
   MockEmailSchema,
 ]);
@@ -64,274 +72,33 @@ const EmailRequestSchema = z.discriminatedUnion('type', [
 type EmailRequest = z.infer<typeof EmailRequestSchema>;
 
 //
-// ─── WORKMAIL CONTENT EXTRACTION ─────────────────────────────────────────────
-//
-async function extractWorkMailContent(messageId: string): Promise<{
-  subject: string;
-  sender: string;
-  recipients: string[];
-  body: string;
-  bodyHtml?: string;
-  timestamp: string;
-  size: number;
-  headers: Record<string, string>;
-  attachments: string[];
-  urls: string[];
-}> {
-  try {
-    console.log('📧 Fetching raw message content from WorkMail for:', messageId);
-    
-    const command = new GetRawMessageContentCommand({
-      messageId: messageId
-    });
-    
-    const response = await workmailClient.send(command);
-    
-    if (!response.messageContent) {
-      throw new Error('No message content received from WorkMail');
-    }
-    
-    // Convert the stream to string
-    const rawContent = await streamToString(response.messageContent);
-    
-    // Parse the MIME content
-    const parsedEmail = await parseMimeContent(rawContent);
-    
-    console.log('✅ Successfully extracted email content from WorkMail');
-    return parsedEmail;
-    
-  } catch (error: any) {
-    console.error('❌ Failed to extract WorkMail content:', error);
-    throw new Error(`Failed to extract email content: ${error.message}`);
-  }
-}
-
-async function streamToString(stream: any): Promise<string> {
-  const chunks: Buffer[] = [];
-  
-  return new Promise((resolve, reject) => {
-    stream.on('data', (chunk: any) => {
-      if (Buffer.isBuffer(chunk)) {
-        chunks.push(chunk);
-      } else {
-        chunks.push(Buffer.from(chunk));
-      }
-    });
-    stream.on('error', (error: any) => {
-      reject(error);
-    });
-    stream.on('end', () => {
-      try {
-        const result = Buffer.concat(chunks).toString('utf8');
-        resolve(result);
-      } catch (error) {
-        reject(error);
-      }
-    });
-  });
-}
-
-async function parseMimeContent(rawContent: string): Promise<{
-  subject: string;
-  sender: string;
-  recipients: string[];
-  body: string;
-  bodyHtml?: string;
-  timestamp: string;
-  size: number;
-  headers: Record<string, string>;
-  attachments: string[];
-  urls: string[];
-}> {
-  console.log('📧 Parsing MIME content, length:', rawContent.length);
-  
-  const headers: Record<string, string> = {};
-  const lines = rawContent.split('\n');
-  let currentHeader = '';
-  let headerEndIndex = -1;
-  
-  // Parse headers first
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    
-    if (line.trim() === '') {
-      headerEndIndex = i;
-      break;
-    }
-    
-    if (line.startsWith(' ') || line.startsWith('\t')) {
-      // Continuation of previous header
-      if (currentHeader) {
-        headers[currentHeader] += ' ' + line.trim();
-      }
-    } else {
-      const colonIndex = line.indexOf(':');
-      if (colonIndex > 0) {
-        currentHeader = line.substring(0, colonIndex).toLowerCase();
-        headers[currentHeader] = line.substring(colonIndex + 1).trim();
-      }
-    }
-  }
-  
-  console.log('📧 Parsed headers:', Object.keys(headers).length);
-  
-  // Extract basic information
-  const subject = headers['subject'] || 'No Subject';
-  const sender = extractEmailFromHeader(headers['from'] || '');
-  const recipients = extractEmailsFromHeader(headers['to'] || '');
-  
-  let timestamp: string;
-  try {
-    timestamp = headers['date'] ? new Date(headers['date']).toISOString() : new Date().toISOString();
-  } catch (error) {
-    timestamp = new Date().toISOString();
-  }
-  
-  // Parse body content using simple extraction
-  let body = '';
-  if (headerEndIndex >= 0) {
-    const bodyContent = lines.slice(headerEndIndex + 1).join('\n');
-    
-    // Simple body extraction - remove any remaining headers and clean up
-    const bodyLines = bodyContent.split('\n');
-    const cleanLines = [];
-    let foundContent = false;
-    
-    for (const line of bodyLines) {
-      const trimmed = line.trim();
-      
-      // Skip empty lines at start
-      if (!foundContent && !trimmed) continue;
-      
-      // Skip lines that look like headers
-      if (!foundContent && /^[A-Za-z-]+:\s/.test(trimmed)) continue;
-      
-      foundContent = true;
-      cleanLines.push(line);
-    }
-    
-    body = cleanLines.join('\n').trim();
-  }
-  
-  // Fallback if no body content found
-  if (!body) {
-    body = 'No message content available';
-  }
-  
-  const size = rawContent.length;
-  const urls = extractUrls(body);
-  const attachments = extractAttachmentNames(rawContent);
-  
-  console.log('✅ MIME parsing complete:', {
-    subject,
-    sender,
-    recipients: recipients.length,
-    bodyLength: body.length,
-    urlsFound: urls.length,
-    attachmentsFound: attachments.length
-  });
-  
-  return {
-    subject,
-    sender,
-    recipients,
-    body,
-    timestamp,
-    size,
-    headers,
-    attachments,
-    urls
-  };
-}
-
-function extractEmailFromHeader(header: string): string {
-  if (!header) return 'unknown@email.com';
-  const match = header.match(/<([^>]+)>/);
-  const result = match ? match[1] : header.trim();
-  return result.includes('@') ? result : 'unknown@email.com';
-}
-
-function extractEmailsFromHeader(header: string): string[] {
-  if (!header) return ['unknown@email.com'];
-  const emails = header.split(',').map(email => extractEmailFromHeader(email.trim()));
-  const validEmails = emails.filter(email => email.includes('@'));
-  return validEmails.length > 0 ? validEmails : ['unknown@email.com'];
-}
-
-function extractUrls(text: string): string[] {
-  const urlRegex = /https?:\/\/[^\s<>"{}|\\^`[\]]+/gi;
-  return text.match(urlRegex) || [];
-}
-
-function extractAttachmentNames(rawContent: string): string[] {
-  const attachmentRegex = /filename="([^"]+)"/gi;
-  const matches = [];
-  let match;
-  while ((match = attachmentRegex.exec(rawContent)) !== null) {
-    matches.push(match[1]);
-  }
-  return matches;
-}
-
-//
 // ─── STORE EMAIL IN DYNAMODB ─────────────────────────────────────────────────
 //
 async function storeEmail(email: EmailRequest) {
-  let emailData: any = email;
-  
-  if (email.type === 'workmail_webhook') {
-    console.log('🔍 Processing WorkMail webhook, extracting message content...');
-    try {
-      const extractedContent = await extractWorkMailContent(email.messageId);
-      
-      // Convert webhook to full email data
-      emailData = {
-        type: 'workmail_email',
-        messageId: email.messageId,
-        subject: extractedContent.subject,
-        sender: extractedContent.sender,
-        recipients: extractedContent.recipients,
-        timestamp: extractedContent.timestamp,
-        body: extractedContent.body,
-        bodyHtml: extractedContent.bodyHtml,
-        attachments: extractedContent.attachments,
-        headers: extractedContent.headers,
-        direction: 'inbound',
-        size: extractedContent.size,
-        urls: extractedContent.urls
-      };
-      
-      console.log('✅ WorkMail content extracted successfully');
-    } catch (error: any) {
-      console.error('❌ Failed to extract WorkMail content:', error);
-      throw error; // Don't use fallback - we want real content or failure
-    }
-  }
-
-  console.log('💾 Storing email in DynamoDB');
+  console.log('💾 Storing email in DynamoDB:', email.type);
 
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
-  // Determine userId
-  const userId = emailData.direction === 'outbound' 
-    ? emailData.sender
-    : emailData.recipients && emailData.recipients.length > 0 
-      ? emailData.recipients[0] 
-      : emailData.sender;
+  // Determine userId based on direction and monitoring
+  const userId = email.direction === 'outbound' 
+    ? email.sender
+    : email.recipients && email.recipients.length > 0 
+      ? email.recipients[0] 
+      : email.sender;
 
   console.log('👤 Using userId for email storage:', userId);
 
   const item: Record<string, any> = {
     userId: { S: userId },
-    receivedAt: { S: emailData.timestamp },
-    messageId: { S: emailData.messageId },
+    receivedAt: { S: email.timestamp },
+    messageId: { S: email.messageId },
     emailId: { S: emailId },
-    sender: { S: emailData.sender },
-    recipients: { SS: emailData.recipients && emailData.recipients.length > 0 ? emailData.recipients : [emailData.sender] },
-    subject: { S: emailData.subject },
-    body: { S: emailData.body || '' },
-    direction: { S: emailData.direction },
-    size: { N: (emailData.size || 0).toString() },
+    sender: { S: email.sender },
+    recipients: { SS: email.recipients && email.recipients.length > 0 ? email.recipients : [email.sender] },
+    subject: { S: email.subject },
+    body: { S: email.body || '' },
+    direction: { S: email.direction },
+    size: { N: (email.size || 0).toString() },
     status: { S: 'received' },
     threatLevel: { S: 'none' },
     isPhishing: { BOOL: false },
@@ -341,20 +108,31 @@ async function storeEmail(email: EmailRequest) {
   };
 
   // Add optional fields
-  if (emailData.bodyHtml) {
-    item.bodyHtml = { S: emailData.bodyHtml };
+  if (email.bodyHtml) {
+    item.bodyHtml = { S: email.bodyHtml };
   }
   
-  if (emailData.attachments && emailData.attachments.length > 0) {
-    item.attachments = { SS: emailData.attachments };
+  if (email.attachments && email.attachments.length > 0) {
+    item.attachments = { SS: email.attachments };
   }
   
-  if (emailData.headers) {
-    item.headers = { S: typeof emailData.headers === 'string' ? emailData.headers : JSON.stringify(emailData.headers) };
+  if (email.headers) {
+    item.headers = { S: typeof email.headers === 'string' ? email.headers : JSON.stringify(email.headers) };
   }
   
-  if (emailData.urls && emailData.urls.length > 0) {
-    item.urls = { SS: emailData.urls };
+  if (email.urls && email.urls.length > 0) {
+    item.urls = { SS: email.urls };
+  }
+
+  // Add processing info for S3-processed emails
+  if (email.type === 's3_processed_email' && email.processingInfo) {
+    item.processingMethod = { S: email.processingInfo.extractionMethod };
+    if (email.processingInfo.s3Bucket) {
+      item.s3Bucket = { S: email.processingInfo.s3Bucket };
+    }
+    if (email.processingInfo.s3Key) {
+      item.s3Key = { S: email.processingInfo.s3Key };
+    }
   }
 
   try {
@@ -366,10 +144,10 @@ async function storeEmail(email: EmailRequest) {
       })
     );
     
-    console.log('✅ Email stored successfully');
+    console.log('✅ Email stored successfully in DynamoDB');
   } catch (err: any) {
     if (err.name === 'ConditionalCheckFailedException') {
-      console.log('ℹ️ Email already exists, skipping duplicate:', emailData.messageId)
+      console.log('ℹ️ Email already exists, skipping duplicate:', email.messageId)
       return;
     }
     
@@ -397,16 +175,38 @@ export async function POST(req: Request) {
   try {
     console.log('📧 Processing email payload:', payload.type);
     
+    // Log important details for S3-processed emails
+    if (payload.type === 's3_processed_email') {
+      console.log('📧 S3-processed email details:', {
+        messageId: payload.messageId,
+        subject: payload.subject,
+        bodyLength: payload.body?.length || 0,
+        extractionMethod: payload.processingInfo?.extractionMethod,
+        s3Bucket: payload.processingInfo?.s3Bucket,
+        s3Key: payload.processingInfo?.s3Key,
+        hasRealContent: payload.body && payload.body.length > 10 && !payload.body.includes('No email content available')
+      });
+    }
+    
     await storeEmail(payload);
     
-    console.log('✅ Email processed successfully');
+    console.log('✅ Email processed and stored successfully');
     
     return NextResponse.json({
       status: 'processed',
       messageId: payload.messageId,
       type: payload.type,
+      bodyLength: payload.body?.length || 0,
+      hasContent: payload.body && payload.body.length > 10,
       message: `Email ${payload.type} processed successfully`,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      ...(payload.type === 's3_processed_email' && {
+        extractionMethod: payload.processingInfo?.extractionMethod,
+        s3Info: {
+          bucket: payload.processingInfo?.s3Bucket,
+          key: payload.processingInfo?.s3Key
+        }
+      })
     });
   } catch (err: any) {
     console.error('❌ [email-processor] Processing error:', {
@@ -428,7 +228,7 @@ export async function POST(req: Request) {
 }
 
 //
-// ─── GET: HEALTH CHECK AND MOCK TEST ─────────────────────────────────────────
+// ─── GET: HEALTH CHECK AND ENHANCED MOCK TEST ────────────────────────────────
 //
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -444,51 +244,132 @@ export async function GET(req: Request) {
         emailsTable: EMAILS_TABLE,
         hasOrgId: ORG_ID !== 'default-org'
       },
+      supportedTypes: ['s3_processed_email', 'raw_email', 'mock_email'],
       features: {
-        processingMethod: 'workmail-only',
-        s3Dependency: false,
-        directWorkMailApi: true
+        primaryMethod: 'SES->S3->Lambda->Webhook',
+        s3Processing: true,
+        enhancedMimeParsing: true,
+        fullBodyExtraction: true
       },
-      version: 'workmail-only-v1.0'
+      version: 'enhanced-email-processor-v2.0'
     });
   }
 
-  // Mock email test
-  console.log('🧪 Generating mock email for testing');
+  if (action === 's3-test') {
+    // Test S3-processed email format
+    console.log('🧪 Generating S3-processed test email');
+    
+    const mockId = `s3-test-${Date.now()}`;
+    const mock: EmailRequest = {
+      type: 's3_processed_email',
+      messageId: `<${mockId}@s3-test.encryptgate.net>`,
+      subject: `S3 Enhanced Test - ${new Date().toLocaleString()}`,
+      sender: 'test-s3@encryptgate-demo.com',
+      recipients: ['contact@encryptgate.net'],
+      timestamp: new Date().toISOString(),
+      body: `This is an S3-processed test email generated at ${new Date().toLocaleString()}.
+
+This email demonstrates the enhanced SES->S3->Lambda->Webhook flow:
+
+✅ Full MIME parsing from S3-stored email
+✅ Complete email body extraction
+✅ Real content instead of metadata fallbacks
+✅ Enhanced processing pipeline
+✅ Proper DynamoDB storage with full content
+
+Test successful if you can see this complete email body in your UI!
+
+URLs for testing: https://example.com/test
+Email content length: ${new Date().toISOString().length + 400} characters`,
+      bodyHtml: `<p>This is an S3-processed test email generated at <strong>${new Date().toLocaleString()}</strong>.</p>
+<p>This email demonstrates the enhanced SES->S3->Lambda->Webhook flow:</p>
+<ul>
+<li>✅ Full MIME parsing from S3-stored email</li>
+<li>✅ Complete email body extraction</li>
+<li>✅ Real content instead of metadata fallbacks</li>
+<li>✅ Enhanced processing pipeline</li>
+<li>✅ Proper DynamoDB storage with full content</li>
+</ul>
+<p><strong>Test successful if you can see this complete email body in your UI!</strong></p>
+<p>URLs for testing: <a href="https://example.com/test">https://example.com/test</a></p>`,
+      attachments: [],
+      headers: { 
+        'X-Test-Type': 's3-enhanced', 
+        'X-Generated': new Date().toISOString(),
+        'X-Processing-Method': 'SES_S3_ENHANCED'
+      },
+      direction: 'inbound',
+      size: 650,
+      urls: ['https://example.com/test'],
+      processingInfo: {
+        extractionMethod: 'SES_S3_ENHANCED_TEST',
+        s3Bucket: 'ses-inbound-encryptgate',
+        s3Key: `inbound/test-${mockId}`,
+        bodyLength: 650
+      }
+    };
+
+    try {
+      await storeEmail(mock);
+      
+      return NextResponse.json({
+        status: 'test-completed',
+        action: 's3_enhanced_test',
+        payload: {
+          messageId: mock.messageId,
+          subject: mock.subject,
+          sender: mock.sender,
+          recipients: mock.recipients,
+          timestamp: mock.timestamp,
+          bodyLength: mock.body.length,
+          hasRealContent: true,
+          processingMethod: 'S3_ENHANCED_TEST',
+          extractionMethod: mock.processingInfo?.extractionMethod
+        },
+        message: 'S3-enhanced test email processed successfully',
+        instructions: 'Check the All Emails page to see this test email with full body content',
+        expectedFeatures: [
+          'Full email body visible',
+          'HTML content rendering',
+          'URL extraction working',
+          'Complete headers preserved',
+          'S3 processing info stored'
+        ]
+      });
+    } catch (err: any) {
+      console.error('❌ S3 test email failed:', err);
+      return NextResponse.json(
+        { 
+          error: 'S3 test email failed', 
+          message: err.message,
+          action: 's3_test_failed'
+        },
+        { status: 500 }
+      );
+    }
+  }
+
+  // Default mock email test (legacy)
+  console.log('🧪 Generating standard mock email for testing');
   
   const mockId = `mock-${Date.now()}`;
   const mock: EmailRequest = {
     type: 'mock_email',
     messageId: `<${mockId}@encryptgate-test.com>`,
-    subject: `WorkMail-Only Test - ${new Date().toLocaleString()}`,
+    subject: `Standard Test - ${new Date().toLocaleString()}`,
     sender: 'test-sender@encryptgate-demo.com',
     recipients: ['contact@encryptgate.net'],
     timestamp: new Date().toISOString(),
-    body: `This is a test email generated at ${new Date().toLocaleString()} for the WorkMail-only processing system.
+    body: `This is a standard test email generated at ${new Date().toLocaleString()} for basic functionality testing.
 
-This email demonstrates:
-- Direct WorkMail Message Flow processing
-- Real email body content extraction
-- No SES/S3 dependencies
-- Simplified processing pipeline
-
-Test successful if you can see this real content instead of fallback messages.`,
-    bodyHtml: `<p>This is a test email generated at <strong>${new Date().toLocaleString()}</strong> for the WorkMail-only processing system.</p>
-<p>This email demonstrates:</p>
-<ul>
-<li>Direct WorkMail Message Flow processing</li>
-<li>Real email body content extraction</li>
-<li>No SES/S3 dependencies</li>
-<li>Simplified processing pipeline</li>
-</ul>
-<p><strong>Test successful if you can see this real content instead of fallback messages.</strong></p>`,
+This email demonstrates basic email processing capabilities.`,
     attachments: [],
     headers: { 
-      'X-Test': 'workmail-only', 
+      'X-Test': 'standard', 
       'X-Generated': new Date().toISOString()
     },
     direction: 'inbound',
-    size: 350,
+    size: 150,
     urls: []
   };
 
@@ -497,18 +378,16 @@ Test successful if you can see this real content instead of fallback messages.`,
     
     return NextResponse.json({
       status: 'test-completed',
-      action: 'mock_email_generated',
+      action: 'standard_mock_email',
       payload: {
         messageId: mock.messageId,
         subject: mock.subject,
         sender: mock.sender,
         recipients: mock.recipients,
         timestamp: mock.timestamp,
-        userId: mock.recipients[0],
-        processingMethod: 'workmail-only'
+        processingMethod: 'STANDARD_MOCK'
       },
-      message: 'Mock email processed successfully with WorkMail-only method',
-      instructions: 'Check the All Emails page to see if this test email appears with real content'
+      message: 'Standard mock email processed successfully'
     });
   } catch (err: any) {
     console.error('❌ Mock email test failed:', err);
