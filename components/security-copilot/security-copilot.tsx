@@ -197,18 +197,18 @@ export function SecurityCopilotEnhanced({
   return (
     <Card className={cardClassName}>
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-lg">
-          <Bot className="h-5 w-5 text-primary" />
+        <CardTitle className="flex items-center gap-2 text-lg text-white">
+          <Bot className="h-5 w-5 text-blue-400" />
           Security Copilot
           <div className="flex gap-1">
-            <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20 text-xs">
+            <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-xs">
               <Zap className="h-3 w-3 mr-1" />
               Neo4j
             </Badge>
             <Badge variant="outline" className={`text-xs ${
               isConnected 
-                ? 'bg-green-500/10 text-green-500 border-green-500/20' 
-                : 'bg-red-500/10 text-red-500 border-red-500/20'
+                ? 'bg-green-500/10 text-green-400 border-green-500/20' 
+                : 'bg-red-500/10 text-red-400 border-red-500/20'
             }`}>
               {isConnected ? 'Connected' : 'Disconnected'}
             </Badge>
@@ -223,10 +223,10 @@ export function SecurityCopilotEnhanced({
               <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] rounded-lg p-3 ${
                   message.type === 'user'
-                    ? 'bg-primary text-primary-foreground'
+                    ? 'bg-blue-600 text-white'
                     : message.type === 'system'
-                    ? 'bg-muted border border-border'
-                    : 'bg-secondary'
+                    ? 'bg-[#1a1a1a] border border-[#2a2a2a] text-white'
+                    : 'bg-[#1a1a1a] text-white'
                 }`}>
                   <div className="flex items-start gap-2">
                     {message.isLoading && (
@@ -240,16 +240,16 @@ export function SecurityCopilotEnhanced({
                         <div className="mt-2 space-y-1">
                           {message.metadata.confidence && (
                             <div className="flex items-center gap-1">
-                              <CheckCircle className="h-3 w-3 text-green-500" />
-                              <span className="text-xs text-muted-foreground">
+                              <CheckCircle className="h-3 w-3 text-green-400" />
+                              <span className="text-xs text-gray-400">
                                 Confidence: {message.metadata.confidence}%
                               </span>
                             </div>
                           )}
                           {message.metadata.error && (
                             <div className="flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3 text-yellow-500" />
-                              <span className="text-xs text-muted-foreground">
+                              <AlertTriangle className="h-3 w-3 text-yellow-400" />
+                              <span className="text-xs text-gray-400">
                                 Note: {message.metadata.error}
                               </span>
                             </div>
@@ -258,7 +258,7 @@ export function SecurityCopilotEnhanced({
                       )}
                     </div>
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">
+                  <div className="text-xs text-gray-400 mt-1">
                     {message.timestamp.toLocaleTimeString()}
                   </div>
                 </div>
@@ -270,15 +270,15 @@ export function SecurityCopilotEnhanced({
 
         {/* Suggested Questions */}
         {messages.length <= 1 && (
-          <div className="px-4 py-2 border-t">
-            <p className="text-xs text-muted-foreground mb-2">Suggested questions:</p>
+          <div className="px-4 py-2 border-t border-[#2a2a2a]">
+            <p className="text-xs text-gray-400 mb-2">Suggested questions:</p>
             <div className="flex flex-col gap-1">
               {suggestedQuestions.slice(0, 3).map((question, index) => (
                 <Button
                   key={index}
                   variant="ghost"
                   size="sm"
-                  className="justify-start h-auto py-2 px-2 text-xs"
+                  className="justify-start h-auto py-2 px-2 text-xs text-gray-300 hover:bg-[#2a2a2a] hover:text-white"
                   onClick={() => handleSuggestedQuestion(question)}
                   disabled={isLoading}
                 >
@@ -291,12 +291,12 @@ export function SecurityCopilotEnhanced({
 
         {/* Context Info */}
         {context && (
-          <div className="px-4 py-2 border-t">
+          <div className="px-4 py-2 border-t border-[#2a2a2a]">
             <div className="flex items-center gap-1 mb-1">
-              <Info className="h-3 w-3 text-blue-500" />
-              <span className="text-xs font-medium text-muted-foreground">Email Context Loaded</span>
+              <Info className="h-3 w-3 text-blue-400" />
+              <span className="text-xs font-medium text-gray-400">Email Context Loaded</span>
             </div>
-            <div className="text-xs text-muted-foreground space-y-0.5">
+            <div className="text-xs text-gray-400 space-y-0.5">
               <div>From: {context.sender}</div>
               <div>To: {context.recipients?.join(', ') || 'N/A'}</div>
               <div>Subject: {context.subject}</div>
@@ -305,24 +305,25 @@ export function SecurityCopilotEnhanced({
         )}
 
         {/* Input */}
-        <div className="p-4 border-t">
+        <div className="p-4 border-t border-[#2a2a2a]">
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={messageId ? "Ask about this email..." : "Ask about email security..."}
               disabled={isLoading}
-              className="flex-1"
+              className="flex-1 bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-gray-400"
             />
             <Button 
               type="submit" 
               size="icon" 
               disabled={isLoading || !input.trim()}
+              className="bg-blue-600 hover:bg-blue-700"
             >
               <Send className="h-4 w-4" />
             </Button>
           </form>
-          <p className="text-xs text-muted-foreground mt-1">
+          <p className="text-xs text-gray-400 mt-1">
             Powered by Neo4j graph database and AI analysis
           </p>
         </div>
