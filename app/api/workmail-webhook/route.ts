@@ -20,7 +20,7 @@ const EMAILS_TABLE    = process.env.EMAILS_TABLE_NAME    || 'Emails'
 const BASE_URL        = process.env.BASE_URL             || 'https://console-encryptgate.net'
 const AWS_REGION      = process.env.AWS_REGION           || 'us-east-1'
 
-console.log('📧 WorkMail Webhook initialized:', {
+console.log('📧 WorkMail Webhook initialized with improved body extraction v7.0:', {
   ORG_ID,
   CS_TABLE,
   EMPLOYEES_TABLE,
@@ -111,231 +111,363 @@ async function streamToString(stream: any): Promise<string> {
   return Buffer.concat(chunks).toString('utf-8')
 }
 
-// IMPROVED: Better email body parsing - aggressive header removal
+// IMPROVED: Comprehensive email body parsing from raw MIME content
 function parseEmailBodyFromRaw(rawEmail: string): { body: string; bodyHtml?: string; headers: Record<string, string> } {
-  console.log('📧 Parsing email body from raw content, length:', rawEmail.length)
+  console.log('📧 IMPROVED: Parsing email body from raw content, length:', rawEmail.length);
   
-  const lines = rawEmail.split('\n')
-  const headers: Record<string, string> = {}
-  let headerEndIndex = -1
+  const lines = rawEmail.split('\n');
+  const headers: Record<string, string> = {};
+  let headerEndIndex = -1;
   
-  // Parse headers - stop at first blank line
+  // More robust header parsing
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
+    const line = lines[i];
+    const trimmedLine = line.trim();
     
-    if (line.trim() === '') {
-      headerEndIndex = i
-      console.log('📧 Found header end at line:', i)
-      break
+    // Empty line marks end of headers
+    if (trimmedLine === '' || line === '\r' || trimmedLine === '\r') {
+      headerEndIndex = i;
+      console.log('📧 Found header end at line:', i);
+      break;
     }
     
     // Handle header continuation lines
-    if (line.startsWith(' ') || line.startsWith('\t')) {
-      // This is a continuation of the previous header
-      const lastHeaderKey = Object.keys(headers).pop()
+    if ((line.startsWith(' ') || line.startsWith('\t')) && i > 0) {
+      const lastHeaderKey = Object.keys(headers).pop();
       if (lastHeaderKey) {
-        headers[lastHeaderKey] += ' ' + line.trim()
+        headers[lastHeaderKey] += ' ' + trimmedLine;
       }
     } else {
-      const colonIndex = line.indexOf(':')
+      const colonIndex = line.indexOf(':');
       if (colonIndex > 0) {
-        const key = line.substring(0, colonIndex).toLowerCase().trim()
-        const value = line.substring(colonIndex + 1).trim()
-        headers[key] = value
+        const key = line.substring(0, colonIndex).toLowerCase().trim();
+        const value = line.substring(colonIndex + 1).trim();
+        headers[key] = value;
       }
     }
   }
   
-  console.log('📧 Parsed headers:', Object.keys(headers).length)
+  console.log('📧 Parsed headers:', Object.keys(headers).length);
   
   if (headerEndIndex === -1) {
-    console.warn('📧 No header/body separator found, treating entire content as body')
-    return {
-      body: rawEmail,
-      headers
+    console.warn('📧 No header/body separator found, trying heuristic approach');
+    // Try to find where headers likely end
+    for (let i = 5; i < Math.min(50, lines.length); i++) {
+      const line = lines[i].trim();
+      if (line && !line.match(/^[A-Za-z-]+:\s/) && !line.startsWith(' ') && !line.startsWith('\t')) {
+        headerEndIndex = i - 1;
+        console.log('📧 Heuristic header end at line:', headerEndIndex);
+        break;
+      }
+    }
+    if (headerEndIndex === -1) {
+      headerEndIndex = 10; // Fallback
     }
   }
   
   // Get everything after headers as potential body content
-  let bodyContent = lines.slice(headerEndIndex + 1).join('\n')
-  console.log('📧 Raw body content length after headers:', bodyContent.length)
+  let bodyContent = lines.slice(headerEndIndex + 1).join('\n');
+  console.log('📧 Raw body content length after headers:', bodyContent.length);
   
-  const contentType = headers['content-type'] || ''
-  console.log('📧 Content-Type:', contentType)
+  const contentType = (headers['content-type'] || '').toLowerCase();
+  const transferEncoding = (headers['content-transfer-encoding'] || '').toLowerCase();
+  console.log('📧 Content-Type:', contentType);
+  console.log('📧 Transfer-Encoding:', transferEncoding);
   
   // Handle multipart content
-  if (contentType.toLowerCase().includes('multipart')) {
-    const boundaryMatch = contentType.match(/boundary[=\s]*["']?([^"'\s;]+)["']?/i)
+  if (contentType.includes('multipart')) {
+    const boundaryMatch = contentType.match(/boundary[=\s]*["']?([^"'\s;]+)["']?/i);
     if (boundaryMatch) {
-      const boundary = boundaryMatch[1]
-      console.log('📧 Found multipart boundary:', boundary)
+      const boundary = boundaryMatch[1];
+      console.log('📧 Found multipart boundary:', boundary);
       
-      const parts = bodyContent.split(`--${boundary}`)
-      console.log('📧 Split into', parts.length, 'parts')
+      const parts = bodyContent.split(`--${boundary}`);
+      console.log('📧 Split into', parts.length, 'parts');
       
-      let textPart = ''
-      let htmlPart = ''
+      let textPart = '';
+      let htmlPart = '';
       
       for (let i = 0; i < parts.length; i++) {
-        const part = parts[i].trim()
-        if (part === '' || part === '--') continue
+        const part = parts[i].trim();
+        if (part === '' || part === '--') continue;
         
-        console.log(`📧 Processing part ${i + 1}, length:`, part.length)
+        console.log(`📧 Processing part ${i + 1}, length:`, part.length);
         
-        const partLines = part.split('\n')
-        let partHeaderEnd = -1
-        const partHeaders: Record<string, string> = {}
+        const partLines = part.split('\n');
+        let partHeaderEnd = -1;
+        const partHeaders: Record<string, string> = {};
         
         // Parse part headers
         for (let j = 0; j < partLines.length; j++) {
-          const line = partLines[j]
-          if (line.trim() === '') {
-            partHeaderEnd = j
-            break
+          const line = partLines[j];
+          if (line.trim() === '' || line === '\r') {
+            partHeaderEnd = j;
+            break;
           }
-          const colonIndex = line.indexOf(':')
+          const colonIndex = line.indexOf(':');
           if (colonIndex > 0) {
-            const key = line.substring(0, colonIndex).toLowerCase().trim()
-            const value = line.substring(colonIndex + 1).trim()
-            partHeaders[key] = value
+            const key = line.substring(0, colonIndex).toLowerCase().trim();
+            const value = line.substring(colonIndex + 1).trim();
+            partHeaders[key] = value;
           }
         }
         
         if (partHeaderEnd >= 0) {
-          const partBody = partLines.slice(partHeaderEnd + 1).join('\n').trim()
-          const partContentType = partHeaders['content-type'] || ''
+          let partBody = partLines.slice(partHeaderEnd + 1).join('\n').trim();
+          const partContentType = (partHeaders['content-type'] || '').toLowerCase();
+          const partTransferEncoding = (partHeaders['content-transfer-encoding'] || '').toLowerCase();
           
-          console.log(`📧 Part ${i + 1} content-type:`, partContentType, 'body length:', partBody.length)
+          console.log(`📧 Part ${i + 1} content-type:`, partContentType, 'body length:', partBody.length);
           
-          if (partContentType.toLowerCase().includes('text/plain') && partBody) {
-            textPart = partBody
-            console.log('📧 Found text/plain part, length:', textPart.length)
-          } else if (partContentType.toLowerCase().includes('text/html') && partBody) {
-            htmlPart = partBody
-            console.log('📧 Found text/html part, length:', htmlPart.length)
+          // Handle part encoding
+          if (partTransferEncoding === 'quoted-printable') {
+            partBody = partBody
+              .replace(/=\r?\n/g, '')
+              .replace(/=([0-9A-F]{2})/gi, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+            console.log('📧 Decoded quoted-printable part');
+          } else if (partTransferEncoding === 'base64') {
+            try {
+              partBody = Buffer.from(partBody.replace(/\s/g, ''), 'base64').toString('utf8');
+              console.log('📧 Decoded base64 part');
+            } catch (e) {
+              console.warn('📧 Failed to decode base64 part:', (e as Error).message);
+            }
+          }
+          
+          if (partContentType.includes('text/plain') && partBody) {
+            textPart = partBody;
+            console.log('📧 Found text/plain part, length:', textPart.length);
+          } else if (partContentType.includes('text/html') && partBody) {
+            htmlPart = partBody;
+            console.log('📧 Found text/html part, length:', htmlPart.length);
+          } else if (partContentType.includes('text/') && partBody && !textPart) {
+            textPart = partBody;
+            console.log('📧 Using generic text part as fallback');
           }
         }
       }
       
-      // Return the parsed parts
-      if (textPart || htmlPart) {
-        console.log('📧 Multipart parsing successful:', { 
-          textLength: textPart.length, 
-          htmlLength: htmlPart.length 
-        })
+      // Return the best content we found
+      if (textPart) {
+        console.log('📧 Multipart parsing successful, using text part:', textPart.length);
         return {
-          body: textPart || htmlPart, // Prefer text, fallback to HTML
+          body: textPart,
           bodyHtml: htmlPart || undefined,
           headers
-        }
+        };
+      } else if (htmlPart) {
+        console.log('📧 Multipart parsing successful, using HTML part (converted):', htmlPart.length);
+        const plainFromHtml = htmlPart
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<br\s*\/?>/gi, '\n')
+          .replace(/<\/p>/gi, '\n\n')
+          .replace(/<[^>]*>/g, '')
+          .replace(/&nbsp;/g, ' ')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/\s+/g, ' ')
+          .replace(/\n\s+/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+        
+        return {
+          body: plainFromHtml,
+          bodyHtml: htmlPart,
+          headers
+        };
       }
     }
   }
   
   // Handle single-part content or multipart parsing failure
-  console.log('📧 Using single-part parsing or multipart fallback')
+  console.log('📧 Using single-part parsing');
   
-  // AGGRESSIVE header removal - strip ALL lines that look like headers
-  const bodyLines = bodyContent.split('\n')
-  let cleanLines: string[] = []
-  let foundContent = false
+  // Handle encoding for single-part content
+  if (transferEncoding === 'quoted-printable') {
+    bodyContent = bodyContent
+      .replace(/=\r?\n/g, '')
+      .replace(/=([0-9A-F]{2})/gi, (match, hex) => String.fromCharCode(parseInt(hex, 16)));
+    console.log('📧 Decoded quoted-printable content');
+  } else if (transferEncoding === 'base64') {
+    try {
+      bodyContent = Buffer.from(bodyContent.replace(/\s/g, ''), 'base64').toString('utf8');
+      console.log('📧 Decoded base64 content');
+    } catch (e) {
+      console.warn('📧 Failed to decode base64 content:', (e as Error).message);
+    }
+  }
+  
+  // Aggressive header removal for single-part
+  const bodyLines = bodyContent.split('\n');
+  let cleanLines: string[] = [];
+  let foundContent = false;
   
   for (let i = 0; i < bodyLines.length; i++) {
-    const line = bodyLines[i]
-    const trimmedLine = line.trim()
+    const line = bodyLines[i];
+    const trimmedLine = line.trim();
     
     // Skip empty lines at the beginning
     if (!foundContent && !trimmedLine) {
-      continue
+      continue;
     }
     
-    // Check if this line looks like a header (has colon and matches header pattern)
-    const isHeaderLine = /^[A-Za-z-][A-Za-z0-9-]*:\s/.test(trimmedLine)
-    const isCommonEmailHeader = /^(Message-ID|Subject|From|To|Date|MIME-Version|Content-Type|Content-Transfer-Encoding|Received|Return-Path|X-|DKIM-|Authentication-Results):/i.test(trimmedLine)
+    // Check if this line looks like a header
+    const isHeaderLine = /^[A-Za-z-][A-Za-z0-9-]*:\s/.test(trimmedLine);
+    const isCommonEmailHeader = /^(Message-ID|Subject|From|To|Date|MIME-Version|Content-Type|Content-Transfer-Encoding|Received|Return-Path|X-|DKIM-|Authentication-Results|List-|Reply-To|CC|BCC|Delivered-To):/i.test(trimmedLine);
     
     // If we haven't found content yet and this looks like a header, skip it
     if (!foundContent && (isHeaderLine || isCommonEmailHeader)) {
-      console.log('📧 Skipping header line:', trimmedLine.substring(0, 50) + '...')
-      continue
+      console.log('📧 Skipping header line:', trimmedLine.substring(0, 50) + '...');
+      continue;
     }
     
-    // If we reach here, this should be content
-    foundContent = true
-    cleanLines.push(line)
+    // This should be content
+    foundContent = true;
+    cleanLines.push(line);
   }
   
-  let cleanBody = cleanLines.join('\n').trim()
+  let cleanBody = cleanLines.join('\n').trim();
   
-  // Additional cleanup - remove any remaining header-like lines from the start
-  const finalLines = cleanBody.split('\n')
-  let finalStartIndex = 0
+  // Additional cleanup for single-part
+  const finalLines = cleanBody.split('\n');
+  let finalStartIndex = 0;
   
-  for (let i = 0; i < Math.min(5, finalLines.length); i++) {
-    const line = finalLines[i].trim()
+  // Remove any remaining header-like lines from the beginning
+  for (let i = 0; i < Math.min(10, finalLines.length); i++) {
+    const line = finalLines[i].trim();
     if (!line) {
-      finalStartIndex = i + 1
-      continue
+      finalStartIndex = i + 1;
+      continue;
     }
     
     // If this still looks like a header, skip it
-    if (/^[A-Za-z-][A-Za-z0-9-]*:\s/.test(line)) {
-      console.log('📧 Removing residual header:', line.substring(0, 50) + '...')
-      finalStartIndex = i + 1
-      continue
+    if (/^[A-Za-z-][A-Za-z0-9-]*:\s/.test(line) || 
+        /^(MIME-Version|Content-|X-):/i.test(line)) {
+      console.log('📧 Removing residual header:', line.substring(0, 50) + '...');
+      finalStartIndex = i + 1;
+      continue;
     }
     
     // This is content, stop here
-    break
+    break;
   }
   
-  cleanBody = finalLines.slice(finalStartIndex).join('\n').trim()
+  cleanBody = finalLines.slice(finalStartIndex).join('\n').trim();
+  
+  // Handle HTML content
+  let bodyHtml: string | undefined;
+  if (contentType.includes('text/html') || cleanBody.includes('<html') || cleanBody.includes('</html>')) {
+    bodyHtml = cleanBody;
+    // Convert HTML to plain text for body
+    cleanBody = cleanBody
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, ' ')
+      .replace(/\n\s+/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+  
+  // Final validation and cleanup
+  cleanBody = cleanBody
+    .replace(/^\s*[\r\n]+/gm, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
   
   console.log('📧 Body content after aggressive header removal:', {
     originalLength: bodyContent.length,
     cleanedLength: cleanBody.length,
     linesRemoved: bodyLines.length - cleanLines.length + finalStartIndex,
     hasContent: cleanBody.length > 0,
-    preview: cleanBody.substring(0, 100) + '...'
-  })
+    preview: cleanBody.substring(0, 200) + (cleanBody.length > 200 ? '...' : '')
+  });
   
-  // If it's HTML content, also set bodyHtml
-  let bodyHtml: string | undefined
-  if (contentType.toLowerCase().includes('text/html') || cleanBody.includes('<html') || cleanBody.includes('</html>')) {
-    bodyHtml = cleanBody
-    console.log('📧 Detected HTML content, setting bodyHtml')
+  // Final fallback if we still don't have good content
+  if (!cleanBody || cleanBody.length < 10) {
+    console.warn('📧 Minimal content found, trying emergency extraction');
+    
+    // Try to find any meaningful text in the entire raw email
+    const allLines = rawEmail.split('\n');
+    const possibleContent: string[] = [];
+    
+    for (let i = 0; i < allLines.length; i++) {
+      const line = allLines[i].trim();
+      if (line && 
+          line.length > 15 && 
+          !line.match(/^[A-Za-z-]+:\s/) && 
+          !line.startsWith('--') &&
+          !line.match(/^[A-Z0-9+\/=]{20,}$/) && // Skip base64 chunks
+          !line.includes('boundary=')) {
+        possibleContent.push(line);
+      }
+    }
+    
+    if (possibleContent.length > 0) {
+      cleanBody = possibleContent.join('\n').trim();
+      console.log('📧 Emergency extraction found content, length:', cleanBody.length);
+    } else {
+      cleanBody = 'This email appears to contain no readable text content.';
+      console.log('📧 No readable content found, using fallback message');
+    }
   }
   
   return {
     body: cleanBody || 'No message content available',
     bodyHtml,
     headers
-  }
+  };
 }
 
+// IMPROVED: Enhanced raw message parsing with better error handling
 async function parseRawMessage(
   mailClient: WorkMailMessageFlowClient,
   messageId: string
 ) {
   try {
-    console.log(`📧 Fetching raw message content for: ${messageId}`)
+    console.log(`📧 IMPROVED: Fetching raw message content for: ${messageId}`)
     const resp = await mailClient.send(new GetRawMessageContentCommand({ messageId }))
+    
     if (!resp.messageContent) {
       throw new Error('No message content received')
     }
+    
     const raw = await streamToString(resp.messageContent)
     console.log(`📄 Raw message size: ${raw.length} characters`)
     
     const parsed = parseEmailBodyFromRaw(raw)
     
-    console.log(`✅ Parsed message: ${Object.keys(parsed.headers).length} headers, ${parsed.body.length} body chars, ${parsed.bodyHtml?.length || 0} HTML chars`)
+    console.log(`✅ Parsed message successfully:`, {
+      headersCount: Object.keys(parsed.headers).length,
+      bodyLength: parsed.body.length,
+      hasHtml: !!parsed.bodyHtml,
+      htmlLength: parsed.bodyHtml?.length || 0
+    })
+    
     return { 
       headers: parsed.headers, 
       messageBody: parsed.body, 
       bodyHtml: parsed.bodyHtml || '' 
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error('❌ Error parsing raw message:', err)
-    return { headers: {}, messageBody: '', bodyHtml: '' }
+    return { 
+      headers: {}, 
+      messageBody: `Failed to extract email content: ${err.message}`, 
+      bodyHtml: '' 
+    }
   }
 }
 
@@ -363,7 +495,7 @@ function containsSuspiciousKeywords(body: string): boolean {
 
 export async function POST(req: Request) {
   try {
-    console.log('📥 WorkMail webhook received')
+    console.log('📥 WorkMail webhook received with improved body extraction v7.0')
     const raw = await req.json()
     
     // ═════════════════════════════════════════════════════════════════
@@ -424,13 +556,11 @@ export async function POST(req: Request) {
       });
     }
 
-    console.log('✅ FILTER PASSED: Processing Lambda-processed email event');
+    console.log('✅ FILTER PASSED: Processing Lambda-processed email event with improved extraction v7.0');
     
     // ═════════════════════════════════════════════════════════════════
     // PROCESS THE LAMBDA-PROCESSED EMAIL EVENT
     // ═════════════════════════════════════════════════════════════════
-
-    const safeFirst = (arr: any) => Array.isArray(arr) && arr.length ? arr[0] : undefined
 
     const extractEmail = (s: string): string => {
       if (!s) return ""
@@ -455,7 +585,7 @@ export async function POST(req: Request) {
       }
     };
 
-    console.log('🔄 Processing Lambda-wrapped event:', {
+    console.log('🔄 Processing Lambda-wrapped event with improved body extraction v7.0:', {
       messageId: normalized.mail.messageId,
       subject: normalized.mail.commonHeaders.subject,
       flowDirection: sesRecord.workmail?.flowDirection
@@ -476,7 +606,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ status:'ignored', reason:'not-delivery' })
     }
 
-    console.log('📧 Processing email:', mail.messageId)
+    console.log('📧 Processing email with improved extraction v7.0:', mail.messageId)
     
     const rawSender = mail.commonHeaders.from[0] || mail.source
     const rawRecipients = mail.commonHeaders.to.length ? mail.commonHeaders.to : mail.destination
@@ -508,7 +638,7 @@ export async function POST(req: Request) {
       })
     }
 
-    // IMPROVED: Get message body from Lambda's raw data with better parsing
+    // IMPROVED: Get message body from Lambda's raw data with comprehensive parsing
     let headers: Record<string, string> = {}
     let messageBody = ''
     let bodyHtml = ''
@@ -518,7 +648,7 @@ export async function POST(req: Request) {
       try {
         const rawBuffer = Buffer.from(sesRecord.raw.base64, 'base64');
         const rawText = rawBuffer.toString('utf-8');
-        console.log('📧 Raw email content received from Lambda:', {
+        console.log('📧 Raw email content received from Lambda v7.0:', {
           contentLength: rawText.length,
           contentPreview: rawText.substring(0, 200) + '...'
         });
@@ -529,20 +659,20 @@ export async function POST(req: Request) {
         messageBody = parsed.body;
         bodyHtml = parsed.bodyHtml || '';
         
-        console.log('📧 Lambda content parsing results:', {
+        console.log('📧 Lambda content parsing results with improved extraction v7.0:', {
           hasHeaders: Object.keys(headers).length > 0,
           bodyLength: messageBody.length,
           bodyHtmlLength: bodyHtml.length,
           bodyPreview: messageBody.substring(0, 200) + (messageBody.length > 200 ? '...' : ''),
-          hasValidContent: messageBody.length > 0 && messageBody.trim() !== ''
+          hasValidContent: messageBody.length > 0 && messageBody.trim() !== '' && !messageBody.includes('This email appears to contain no readable text content')
         });
         
       } catch (err: any) {
-        console.error('❌ Error parsing Lambda raw content:', err);
+        console.error('❌ Error parsing Lambda raw content v7.0:', err);
         messageBody = `Email content parsing failed: ${err.message}`;
       }
     } else {
-      // Fallback to WorkMail API
+      // Fallback to WorkMail API with improved parsing
       try {
         const { region } = await getWorkMailConfig()
         const mailClient = new WorkMailMessageFlowClient({ region })
@@ -550,11 +680,9 @@ export async function POST(req: Request) {
         headers = parsed.headers
         messageBody = parsed.messageBody
         bodyHtml = parsed.bodyHtml || ''
-        if (bodyHtml) {
-          console.log('📧 HTML body extracted from WorkMail API');
-        }
-      } catch (err) {
-        console.error('❌ Error fetching from WorkMail:', err);
+        console.log('📧 WorkMail API extraction with improved parsing v7.0 completed');
+      } catch (err: any) {
+        console.error('❌ Error fetching from WorkMail with improved parsing v7.0:', err);
         messageBody = `Email processed via WorkMail webhook.
 
 Subject: ${mail.commonHeaders.subject || 'No Subject'}
@@ -562,13 +690,17 @@ From: ${mail.commonHeaders.from.join(', ')}
 To: ${mail.commonHeaders.to.join(', ')}
 Date: ${mail.timestamp}
 
-[Email body content not available]`;
+[Email body content extraction failed with improved parsing v7.0 - check logs for details]`;
       }
     }
 
-    // Final validation - ensure we have some body content
-    if (!messageBody || messageBody.trim() === '' || messageBody === 'No message content available') {
-      console.warn('📧 No valid body content found, using fallback');
+    // Final validation with improved logic - ensure we have some meaningful body content
+    if (!messageBody || 
+        messageBody.trim() === '' || 
+        messageBody === 'No message content available' ||
+        messageBody === 'This email appears to contain no readable text content.' ||
+        messageBody.includes('Failed to extract email content')) {
+      console.warn('📧 No valid body content found after improved extraction v7.0, using enhanced fallback');
       messageBody = `Email received and processed successfully.
 
 Subject: ${mail.commonHeaders.subject || 'No Subject'}
@@ -576,12 +708,12 @@ From: ${mail.commonHeaders.from.join(', ')}
 To: ${mail.commonHeaders.to.join(', ')}
 Date: ${mail.timestamp}
 
-The email body content could not be extracted. This may be due to:
-- Complex email formatting
-- Encrypted content
-- Email processing limitations
+The email body content could not be extracted using our improved parsing system v7.0. This may be due to:
+- Highly complex email formatting
+- Unusual encoding or compression
+- Email processing system limitations
 
-Please check the original email for full content.`;
+The email headers and metadata were processed successfully. Consider checking the original email source for full content.`;
     }
 
     // Determine direction from Lambda workmail metadata
@@ -613,18 +745,19 @@ Please check the original email for full content.`;
       hasThreat
     }
 
-    // Store in DynamoDB
+    // Store in DynamoDB with improved content
     try {
-      console.log('📧 Pre-DynamoDB email data validation:', {
+      console.log('📧 Pre-DynamoDB email data validation with improved extraction v7.0:', {
         messageId: emailItem.messageId,
         subject: emailItem.subject,
         bodyLength: emailItem.body?.length || 0,
         bodyHtmlLength: emailItem.bodyHtml?.length || 0,
         bodyPreview: emailItem.body?.substring(0, 100) || 'NO BODY',
-        bodyIsValid: emailItem.body && emailItem.body.trim().length > 0
+        bodyIsValid: emailItem.body && emailItem.body.trim().length > 0,
+        isImprovedExtraction: !emailItem.body.includes('Email content extraction incomplete')
       });
       
-      console.log(`💾 Writing email to DynamoDB table ${EMAILS_TABLE}`)
+      console.log(`💾 Writing email to DynamoDB table ${EMAILS_TABLE} with improved body content v7.0`)
       const dbItem: Record<string, any> = {
         userId: { S: userId },
         receivedAt: { S: emailItem.timestamp },
@@ -658,7 +791,7 @@ Please check the original email for full content.`;
         Item: dbItem,
         ConditionExpression: 'attribute_not_exists(messageId)'
       }))
-      console.log('✅ Email stored successfully in DynamoDB with body content')
+      console.log('✅ Email stored successfully in DynamoDB with improved body content v7.0')
       
     } catch(err: any) {
       if (err.name === 'ConditionalCheckFailedException') {
@@ -694,22 +827,24 @@ Please check the original email for full content.`;
       })
     } catch{}
 
-    console.log('🎉 Email processing complete with body content')
+    console.log('🎉 Email processing complete with improved body content extraction v7.0')
     return NextResponse.json({
       status: 'processed',
       messageId: emailItem.messageId,
       direction: emailItem.direction,
       threatsTriggered: hasThreat,
-      webhookType: 'Lambda-Processed',
+      webhookType: 'Lambda-Processed-Improved-v7.0',
       userId: userId,
       bodyLength: emailItem.body.length,
       hasBodyContent: emailItem.body.length > 0,
+      isImprovedExtraction: !emailItem.body.includes('Email content extraction incomplete'),
       filtersApplied: ['DIRECT_SES_FILTER', 'DIRECT_WORKMAIL_FILTER', 'LAMBDA_ONLY_FILTER'],
-      processingNote: 'Only Lambda-processed events allowed - all direct webhooks filtered out'
+      extractionVersion: 'v7.0-improved',
+      processingNote: 'Lambda-processed events with comprehensive body extraction v7.0 - all direct webhooks filtered out'
     })
 
   } catch(err: any) {
-    console.error('❌ Webhook processing failed:', err)
+    console.error('❌ Webhook processing failed v7.0:', err)
     return NextResponse.json(
       { 
         error: 'Webhook processing failed', 
@@ -722,7 +857,7 @@ Please check the original email for full content.`;
 }
 
 export async function GET() {
-  console.log('🏥 Health check')
+  console.log('🏥 Health check - Improved Body Extraction v7.0')
   try {
     await ddb.send(new QueryCommand({
       TableName: CS_TABLE,
@@ -732,10 +867,20 @@ export async function GET() {
     }))
     return NextResponse.json({ 
       status: 'webhook_ready',
+      version: 'v7.0-improved-body-extraction',
       duplicatePreventionActive: true,
       filtersActive: ['DIRECT_SES_FILTER', 'DIRECT_WORKMAIL_FILTER', 'LAMBDA_ONLY_FILTER'],
       bodyParsingImproved: true,
-      message: 'Production webhook with comprehensive filtering and improved body parsing - only Lambda-processed events allowed'
+      extractionFeatures: [
+        'comprehensive-mime-parsing',
+        'multipart-boundary-detection',
+        'quoted-printable-decoding',
+        'base64-decoding',
+        'html-to-text-conversion',
+        'aggressive-header-removal',
+        'emergency-fallback-extraction'
+      ],
+      message: 'Production webhook with comprehensive filtering and significantly improved body parsing v7.0 - only Lambda-processed events allowed'
     })
   } catch(err) {
     console.error('❌ Health check failed', err)
