@@ -1,4 +1,4 @@
-// app/api/email-processor/route.ts - UPDATED to set default email attributes
+// app/api/email-processor/route.ts - SIMPLIFIED WorkMail-Only Version
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -13,42 +13,42 @@ const REGION = process.env.AWS_REGION || 'us-east-1';
 const ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
-if (!process.env.ORGANIZATION_ID) {
-  console.warn('ORGANIZATION_ID not set, using default fallback');
-}
-
-if (!process.env.EMAILS_TABLE_NAME) {
-  console.warn('EMAILS_TABLE_NAME not found in env vars, using fallback');
-}
-
 const ddb = new DynamoDBClient({ region: REGION });
 const workmailClient = new WorkMailMessageFlowClient({ region: REGION });
 
 //
 // ─── VALIDATION SCHEMAS ───────────────────────────────────────────────────────
 //
-const WebhookSchema = z.object({
-  type:      z.literal('workmail_webhook'),
-  userId:    z.string().nonempty(),
+const WorkMailWebhookSchema = z.object({
   messageId: z.string().nonempty(),
+  flowDirection: z.enum(['INBOUND', 'OUTBOUND']).optional(),
+  orgId: z.string().optional(),
+  envelope: z.object({
+    mailFrom: z.string().optional(),
+    recipients: z.array(z.string()).optional()
+  }).optional(),
+  subject: z.string().optional(),
+  raw: z.object({
+    base64: z.string()
+  }).optional()
 });
 
 const RawEmailSchema = z.object({
-  type:        z.literal('raw_email'),
-  messageId:   z.string().nonempty(),
-  subject:     z.string(),
-  sender:      z.string().email(),
-  recipients:  z.array(z.string().email()).min(1),
-  timestamp:   z.string().refine((d) => !isNaN(Date.parse(d)), {
-                  message: 'Invalid ISO timestamp',
-                }),
-  body:        z.string(),
-  bodyHtml:    z.string().optional(),
+  type: z.literal('raw_email'),
+  messageId: z.string().nonempty(),
+  subject: z.string(),
+  sender: z.string().email(),
+  recipients: z.array(z.string().email()).min(1),
+  timestamp: z.string().refine((d) => !isNaN(Date.parse(d)), {
+    message: 'Invalid ISO timestamp',
+  }),
+  body: z.string(),
+  bodyHtml: z.string().optional(),
   attachments: z.array(z.string()).optional(),
-  headers:     z.record(z.string(), z.string()).optional(),
-  direction:   z.enum(['inbound', 'outbound']).default('inbound'),
-  size:        z.number().nonnegative().default(0),
-  urls:        z.array(z.string()).optional(),
+  headers: z.record(z.string(), z.string()).optional(),
+  direction: z.enum(['inbound', 'outbound']).default('inbound'),
+  size: z.number().nonnegative().default(0),
+  urls: z.array(z.string()).optional(),
 });
 
 const MockEmailSchema = RawEmailSchema.extend({
@@ -56,7 +56,7 @@ const MockEmailSchema = RawEmailSchema.extend({
 });
 
 const EmailRequestSchema = z.discriminatedUnion('type', [
-  WebhookSchema,
+  WorkMailWebhookSchema.extend({ type: z.literal('workmail_webhook') }),
   RawEmailSchema,
   MockEmailSchema,
 ]);
@@ -64,57 +64,7 @@ const EmailRequestSchema = z.discriminatedUnion('type', [
 type EmailRequest = z.infer<typeof EmailRequestSchema>;
 
 //
-// ─── POST: PROCESS EMAIL DIRECTLY ──────────────────────────────────────────────
-//
-export async function POST(req: Request) {
-  let payload: EmailRequest;
-  try {
-    const rawPayload = await req.json();
-    payload = EmailRequestSchema.parse(rawPayload);
-  } catch (err: any) {
-    console.error('❌ [email-processor] Invalid payload:', err);
-    return NextResponse.json(
-      { error: 'Invalid payload', details: err.errors || err.message },
-      { status: 400 }
-    );
-  }
-
-  try {
-    console.log('📧 Processing email payload:', payload.type);
-    
-    // Store email in DynamoDB
-    await storeEmail(payload);
-    
-    console.log('✅ Email processed successfully');
-    
-    return NextResponse.json({
-      status: 'processed',
-      messageId: payload.messageId,
-      type: payload.type,
-      message: `Email ${payload.type} processed successfully`,
-      timestamp: new Date().toISOString()
-    });
-  } catch (err: any) {
-    console.error('❌ [email-processor] Processing error:', {
-      message: err.message,
-      messageId: payload.messageId,
-      type: payload.type
-    });
-    
-    return NextResponse.json(
-      { 
-        error: 'Failed to process email', 
-        message: err.message,
-        messageId: payload.messageId,
-        type: payload.type
-      },
-      { status: 500 }
-    );
-  }
-}
-
-//
-// ─── EXTRACT EMAIL CONTENT FROM WORKMAIL ──────────────────────────────────────
+// ─── WORKMAIL CONTENT EXTRACTION ─────────────────────────────────────────────
 //
 async function extractWorkMailContent(messageId: string): Promise<{
   subject: string;
@@ -156,9 +106,6 @@ async function extractWorkMailContent(messageId: string): Promise<{
   }
 }
 
-//
-// ─── HELPER FUNCTIONS FOR MIME PARSING ────────────────────────────────────────
-//
 async function streamToString(stream: any): Promise<string> {
   const chunks: Buffer[] = [];
   
@@ -171,7 +118,6 @@ async function streamToString(stream: any): Promise<string> {
       }
     });
     stream.on('error', (error: any) => {
-      console.error('❌ Stream error:', error);
       reject(error);
     });
     stream.on('end', () => {
@@ -179,7 +125,6 @@ async function streamToString(stream: any): Promise<string> {
         const result = Buffer.concat(chunks).toString('utf8');
         resolve(result);
       } catch (error) {
-        console.error('❌ Error converting stream to string:', error);
         reject(error);
       }
     });
@@ -230,7 +175,7 @@ async function parseMimeContent(rawContent: string): Promise<{
   
   console.log('📧 Parsed headers:', Object.keys(headers).length);
   
-  // Extract basic information with safety checks
+  // Extract basic information
   const subject = headers['subject'] || 'No Subject';
   const sender = extractEmailFromHeader(headers['from'] || '');
   const recipients = extractEmailsFromHeader(headers['to'] || '');
@@ -239,85 +184,42 @@ async function parseMimeContent(rawContent: string): Promise<{
   try {
     timestamp = headers['date'] ? new Date(headers['date']).toISOString() : new Date().toISOString();
   } catch (error) {
-    console.warn('❌ Invalid date in email headers, using current time');
     timestamp = new Date().toISOString();
   }
   
-  // Parse body content
+  // Parse body content using simple extraction
   let body = '';
-  let bodyHtml = '';
-  
   if (headerEndIndex >= 0) {
     const bodyContent = lines.slice(headerEndIndex + 1).join('\n');
-    console.log('📧 Body content length:', bodyContent.length);
     
-    // Check if this is multipart content
-    const contentType = headers['content-type'] || '';
-    if (contentType.includes('multipart')) {
-      // Extract boundary
-      const boundaryMatch = contentType.match(/boundary="?([^";\s]+)"?/);
-      if (boundaryMatch) {
-        const boundary = boundaryMatch[1];
-        console.log('📧 Found multipart boundary:', boundary);
-        
-        const parts = bodyContent.split(`--${boundary}`);
-        console.log('📧 Found', parts.length, 'parts');
-        
-        for (const part of parts) {
-          if (part.trim() === '' || part.trim() === '--') continue;
-          
-          const partLines = part.split('\n');
-          let partHeaderEndIndex = -1;
-          const partHeaders: Record<string, string> = {};
-          
-          // Parse part headers
-          for (let i = 0; i < partLines.length; i++) {
-            const line = partLines[i];
-            if (line.trim() === '') {
-              partHeaderEndIndex = i;
-              break;
-            }
-            const colonIndex = line.indexOf(':');
-            if (colonIndex > 0) {
-              const key = line.substring(0, colonIndex).toLowerCase();
-              const value = line.substring(colonIndex + 1).trim();
-              partHeaders[key] = value;
-            }
-          }
-          
-          if (partHeaderEndIndex >= 0) {
-            const partContent = partLines.slice(partHeaderEndIndex + 1).join('\n').trim();
-            const partContentType = partHeaders['content-type'] || '';
-            
-            if (partContentType.includes('text/plain')) {
-              body = partContent;
-              console.log('📧 Found plain text body, length:', body.length);
-            } else if (partContentType.includes('text/html')) {
-              bodyHtml = partContent;
-              console.log('📧 Found HTML body, length:', bodyHtml.length);
-            }
-          }
-        }
-      }
-    } else {
-      // Single part content
-      body = bodyContent.trim();
-      console.log('📧 Single part body, length:', body.length);
+    // Simple body extraction - remove any remaining headers and clean up
+    const bodyLines = bodyContent.split('\n');
+    const cleanLines = [];
+    let foundContent = false;
+    
+    for (const line of bodyLines) {
+      const trimmed = line.trim();
+      
+      // Skip empty lines at start
+      if (!foundContent && !trimmed) continue;
+      
+      // Skip lines that look like headers
+      if (!foundContent && /^[A-Za-z-]+:\s/.test(trimmed)) continue;
+      
+      foundContent = true;
+      cleanLines.push(line);
     }
+    
+    body = cleanLines.join('\n').trim();
   }
   
   // Fallback if no body content found
-  if (!body && !bodyHtml) {
+  if (!body) {
     body = 'No message content available';
-    console.log('⚠️ No body content found, using fallback');
   }
   
   const size = rawContent.length;
-  
-  // Extract URLs from body
-  const urls = extractUrls(body + (bodyHtml || ''));
-  
-  // Extract attachment names (simplified)
+  const urls = extractUrls(body);
   const attachments = extractAttachmentNames(rawContent);
   
   console.log('✅ MIME parsing complete:', {
@@ -325,7 +227,6 @@ async function parseMimeContent(rawContent: string): Promise<{
     sender,
     recipients: recipients.length,
     bodyLength: body.length,
-    htmlBodyLength: bodyHtml?.length || 0,
     urlsFound: urls.length,
     attachmentsFound: attachments.length
   });
@@ -335,7 +236,6 @@ async function parseMimeContent(rawContent: string): Promise<{
     sender,
     recipients,
     body,
-    bodyHtml: bodyHtml || undefined,
     timestamp,
     size,
     headers,
@@ -374,7 +274,7 @@ function extractAttachmentNames(rawContent: string): string[] {
 }
 
 //
-// ─── STORE EMAIL IN DYNAMODB - UPDATED WITH NEW ATTRIBUTES ──────────────────
+// ─── STORE EMAIL IN DYNAMODB ─────────────────────────────────────────────────
 //
 async function storeEmail(email: EmailRequest) {
   let emailData: any = email;
@@ -396,51 +296,34 @@ async function storeEmail(email: EmailRequest) {
         bodyHtml: extractedContent.bodyHtml,
         attachments: extractedContent.attachments,
         headers: extractedContent.headers,
-        direction: 'inbound', // WorkMail webhooks are typically inbound
+        direction: 'inbound',
         size: extractedContent.size,
         urls: extractedContent.urls
       };
       
       console.log('✅ WorkMail content extracted successfully');
     } catch (error: any) {
-      console.error('❌ Failed to extract WorkMail content, storing webhook data only:', error);
-      // Fallback - store basic webhook info
-      emailData = {
-        type: 'workmail_webhook_fallback',
-        messageId: email.messageId,
-        subject: 'WorkMail Message (content extraction failed)',
-        sender: 'unknown@workmail',
-        recipients: [email.userId],
-        timestamp: new Date().toISOString(),
-        body: 'Email content could not be extracted from WorkMail. Check logs for details.',
-        direction: 'inbound',
-        size: 0
-      };
+      console.error('❌ Failed to extract WorkMail content:', error);
+      throw error; // Don't use fallback - we want real content or failure
     }
   }
 
-  console.log('💾 Storing email in DynamoDB with new attributes');
+  console.log('💾 Storing email in DynamoDB');
 
-  // Generate a unique email ID if not present
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
-  // Determine userId - for mock emails, use the first recipient or sender
-  let userId: string;
-  if (email.type === 'workmail_webhook') {
-    userId = email.userId; // Use userId from webhook
-  } else if (emailData.direction === 'outbound') {
-    userId = emailData.sender;
-  } else {
-    userId = emailData.recipients && emailData.recipients.length > 0 ? emailData.recipients[0] : emailData.sender;
-  }
+  // Determine userId
+  const userId = emailData.direction === 'outbound' 
+    ? emailData.sender
+    : emailData.recipients && emailData.recipients.length > 0 
+      ? emailData.recipients[0] 
+      : emailData.sender;
 
   console.log('👤 Using userId for email storage:', userId);
 
-  // Match the webhook storage format exactly WITH NEW ATTRIBUTES
   const item: Record<string, any> = {
-    // Core email attributes
-    userId: { S: userId },                    // HASH key (required)
-    receivedAt: { S: emailData.timestamp },   // RANGE key (required)
+    userId: { S: userId },
+    receivedAt: { S: emailData.timestamp },
     messageId: { S: emailData.messageId },
     emailId: { S: emailId },
     sender: { S: emailData.sender },
@@ -453,16 +336,8 @@ async function storeEmail(email: EmailRequest) {
     threatLevel: { S: 'none' },
     isPhishing: { BOOL: false },
     createdAt: { S: new Date().toISOString() },
-
-    // NEW ATTRIBUTES - Set defaults for new email attributes
-    flaggedCategory: { S: 'none' },          // Default: 'none' (not flagged)
-    // flaggedSeverity: undefined,           // Only set when flagged
-    // investigationStatus: undefined,       // Only set when flagged
-    // detectionId: undefined,               // Only set when linked to detection
-    // flaggedAt: undefined,                 // Only set when flagged
-    // flaggedBy: undefined,                 // Only set when flagged
-    // investigationNotes: undefined,        // Only set when investigation starts
-    updatedAt: { S: new Date().toISOString() }, // Track last update
+    flaggedCategory: { S: 'none' },
+    updatedAt: { S: new Date().toISOString() },
   };
 
   // Add optional fields
@@ -482,15 +357,6 @@ async function storeEmail(email: EmailRequest) {
     item.urls = { SS: emailData.urls };
   }
 
-  console.log('📧 Email item prepared for DynamoDB with attributes:', {
-    messageId: emailData.messageId,
-    userId,
-    flaggedCategory: 'none',
-    hasNewAttributes: true,
-    bodyLength: emailData.body?.length || 0,
-    hasHtmlBody: !!emailData.bodyHtml
-  });
-
   try {
     await ddb.send(
       new PutItemCommand({
@@ -500,116 +366,134 @@ async function storeEmail(email: EmailRequest) {
       })
     );
     
-    console.log('✅ Email stored successfully with new attributes');
+    console.log('✅ Email stored successfully');
   } catch (err: any) {
     if (err.name === 'ConditionalCheckFailedException') {
       console.log('ℹ️ Email already exists, skipping duplicate:', emailData.messageId)
-      // Don't throw error - email already exists
       return;
     }
     
-    console.error('❌ DynamoDB storage failed:', {
-      error: err.message,
-      code: err.code,
-      tableName: EMAILS_TABLE,
-      messageId: emailData.messageId,
-      userId: userId
-    });
+    console.error('❌ DynamoDB storage failed:', err);
     throw new Error(`Failed to store email in database: ${err.message}`);
   }
 }
 
 //
-// ─── GET: QUICK MOCK TEST AND HEALTH CHECK ─────────────────────────────────────
+// ─── POST: PROCESS EMAIL ──────────────────────────────────────────────────────
+//
+export async function POST(req: Request) {
+  let payload: EmailRequest;
+  try {
+    const rawPayload = await req.json();
+    payload = EmailRequestSchema.parse(rawPayload);
+  } catch (err: any) {
+    console.error('❌ [email-processor] Invalid payload:', err);
+    return NextResponse.json(
+      { error: 'Invalid payload', details: err.errors || err.message },
+      { status: 400 }
+    );
+  }
+
+  try {
+    console.log('📧 Processing email payload:', payload.type);
+    
+    await storeEmail(payload);
+    
+    console.log('✅ Email processed successfully');
+    
+    return NextResponse.json({
+      status: 'processed',
+      messageId: payload.messageId,
+      type: payload.type,
+      message: `Email ${payload.type} processed successfully`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err: any) {
+    console.error('❌ [email-processor] Processing error:', {
+      message: err.message,
+      messageId: payload.messageId,
+      type: payload.type
+    });
+    
+    return NextResponse.json(
+      { 
+        error: 'Failed to process email', 
+        message: err.message,
+        messageId: payload.messageId,
+        type: payload.type
+      },
+      { status: 500 }
+    );
+  }
+}
+
+//
+// ─── GET: HEALTH CHECK AND MOCK TEST ─────────────────────────────────────────
 //
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const action = url.searchParams.get('action') || 'test';
 
   if (action === 'health') {
-    try {
-      console.log('🏥 Health check requested');
-      
-      return NextResponse.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        environment: {
-          orgId: ORG_ID,
-          region: REGION,
-          emailsTable: EMAILS_TABLE,
-          hasOrgId: ORG_ID !== 'default-org'
-        },
-        features: {
-          emailAttributes: true,
-          flaggedCategories: ['none', 'ai', 'manual', 'clean'],
-          investigationStatuses: ['new', 'in_progress', 'resolved'],
-          severityLevels: ['critical', 'high', 'medium', 'low']
-        },
-        version: '2.0.0'
-      });
-    } catch (err: any) {
-      console.error('❌ Health check failed:', err);
-      return NextResponse.json(
-        { 
-          status: 'unhealthy', 
-          error: err.message,
-          timestamp: new Date().toISOString()
-        },
-        { status: 500 }
-      );
-    }
+    return NextResponse.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      environment: {
+        orgId: ORG_ID,
+        region: REGION,
+        emailsTable: EMAILS_TABLE,
+        hasOrgId: ORG_ID !== 'default-org'
+      },
+      features: {
+        processingMethod: 'workmail-only',
+        s3Dependency: false,
+        directWorkMailApi: true
+      },
+      version: 'workmail-only-v1.0'
+    });
   }
 
-  // Mock email test - UPDATED with new attributes
+  // Mock email test
   console.log('🧪 Generating mock email for testing');
   
   const mockId = `mock-${Date.now()}`;
   const mock: EmailRequest = {
     type: 'mock_email',
     messageId: `<${mockId}@encryptgate-test.com>`,
-    subject: `Test Email with New Attributes - ${new Date().toLocaleString()}`,
+    subject: `WorkMail-Only Test - ${new Date().toLocaleString()}`,
     sender: 'test-sender@encryptgate-demo.com',
-    recipients: ['contact@encryptgate.net'], // Use your monitored employee
+    recipients: ['contact@encryptgate.net'],
     timestamp: new Date().toISOString(),
-    body: `This is a test email generated at ${new Date().toLocaleString()} for testing the email processing system with new flagged attributes.
+    body: `This is a test email generated at ${new Date().toLocaleString()} for the WorkMail-only processing system.
 
-This email contains:
-- A test subject line
-- Mock sender and recipient
-- Sample body content
-- Test timestamp
-- NEW: Default flagged category set to "none"
-- NEW: Support for investigation tracking
-- NEW: Email status attributes
+This email demonstrates:
+- Direct WorkMail Message Flow processing
+- Real email body content extraction
+- No SES/S3 dependencies
+- Simplified processing pipeline
 
-This helps verify that the email processing pipeline is working correctly with the new email attributes for flagging and investigation tracking.`,
-    bodyHtml: `<p>This is a test email generated at <strong>${new Date().toLocaleString()}</strong> for testing the email processing system with new flagged attributes.</p>
-<p>This email contains:</p>
+Test successful if you can see this real content instead of fallback messages.`,
+    bodyHtml: `<p>This is a test email generated at <strong>${new Date().toLocaleString()}</strong> for the WorkMail-only processing system.</p>
+<p>This email demonstrates:</p>
 <ul>
-<li>A test subject line</li>
-<li>Mock sender and recipient</li>
-<li>Sample body content</li>
-<li>Test timestamp</li>
-<li><strong>NEW:</strong> Default flagged category set to "none"</li>
-<li><strong>NEW:</strong> Support for investigation tracking</li>
-<li><strong>NEW:</strong> Email status attributes</li>
+<li>Direct WorkMail Message Flow processing</li>
+<li>Real email body content extraction</li>
+<li>No SES/S3 dependencies</li>
+<li>Simplified processing pipeline</li>
 </ul>
-<p>This helps verify that the email processing pipeline is working correctly with the new email attributes for flagging and investigation tracking.</p>`,
+<p><strong>Test successful if you can see this real content instead of fallback messages.</strong></p>`,
     attachments: [],
     headers: { 
-      'X-Test': 'true', 
-      'X-Generated': new Date().toISOString(),
-      'X-Features': 'email-attributes-v2'
+      'X-Test': 'workmail-only', 
+      'X-Generated': new Date().toISOString()
     },
     direction: 'inbound',
-    size: 450,
+    size: 350,
     urls: []
   };
 
   try {
     await storeEmail(mock);
-    
-    console.log('✅ Mock email test completed with new attributes');
     
     return NextResponse.json({
       status: 'test-completed',
@@ -621,14 +505,10 @@ This helps verify that the email processing pipeline is working correctly with t
         recipients: mock.recipients,
         timestamp: mock.timestamp,
         userId: mock.recipients[0],
-        newAttributes: {
-          flaggedCategory: 'none',
-          hasInvestigationTracking: true,
-          hasEmailStatusAttributes: true
-        }
+        processingMethod: 'workmail-only'
       },
-      message: 'Mock email processed and stored successfully with new email attributes',
-      instructions: 'Check the All Emails page to see if this test email appears with the new flagging system'
+      message: 'Mock email processed successfully with WorkMail-only method',
+      instructions: 'Check the All Emails page to see if this test email appears with real content'
     });
   } catch (err: any) {
     console.error('❌ Mock email test failed:', err);
