@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Progress } from "@/components/ui/progress"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot"
 import { 
   ArrowLeft,
   Shield,
@@ -611,13 +612,14 @@ export default function InvestigationPage() {
 
         {/* Investigation Tabs */}
         <Tabs defaultValue="overview" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-6 bg-[#1f1f1f]">
+          <TabsList className="grid w-full grid-cols-7 bg-[#1f1f1f]">
             <TabsTrigger value="overview" className="text-white data-[state=active]:bg-[#2a2a2a] data-[state=active]:text-white">Overview</TabsTrigger>
             <TabsTrigger value="email" className="text-white data-[state=active]:bg-[#2a2a2a] data-[state=active]:text-white">Email Details</TabsTrigger>
             <TabsTrigger value="findings" className="text-white data-[state=active]:bg-[#2a2a2a] data-[state=active]:text-white">Findings</TabsTrigger>
             <TabsTrigger value="notes" className="text-white data-[state=active]:bg-[#2a2a2a] data-[state=active]:text-white">Notes</TabsTrigger>
             <TabsTrigger value="timeline" className="text-white data-[state=active]:bg-[#2a2a2a] data-[state=active]:text-white">Timeline</TabsTrigger>
             <TabsTrigger value="technical" className="text-white data-[state=active]:bg-[#2a2a2a] data-[state=active]:text-white">Technical</TabsTrigger>
+            <TabsTrigger value="copilot" className="text-white data-[state=active]:bg-[#2a2a2a] data-[state=active]:text-white">AI Copilot</TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
@@ -909,6 +911,18 @@ export default function InvestigationPage() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* AI Copilot Tab */}
+          <TabsContent value="copilot" className="space-y-4">
+            <div className="h-[600px]">
+              <SecurityCopilotEnhanced
+                messageId={emailDetails.messageId}
+                emailData={emailDetails}
+                detectionData={detectionDetails}
+                className="bg-[#0f0f0f] border-none text-white h-full"
+              />
+            </div>
           </TabsContent>
         </Tabs>
       </div>
