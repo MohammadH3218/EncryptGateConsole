@@ -1,5 +1,8 @@
 // lib/copilot.ts
 import { ensureNeo4jConnection } from './neo4j'
+import { askCopilot, fetchEmailContext } from './neo4j'
+import { EnhancedEmailCopilot } from './graphrag-copilot'
+import { driver } from './neo4j'
 
 interface LLMResponse {
   response: string
@@ -43,7 +46,118 @@ Do NOT output any Cypher in this summary.`
 const MAX_RETRY_ATTEMPTS = 3
 
 export class SecurityCopilotService {
-  constructor() {}
+  private graphragCopilot: EnhancedEmailCopilot | null = null
+
+  constructor() {
+    this.initializeGraphRAG()
+  }
+
+  private async initializeGraphRAG() {
+    try {
+      if (OPENROUTER_API_KEY) {
+        this.graphragCopilot = new EnhancedEmailCopilot(driver, OPENROUTER_API_KEY, OPENROUTER_MODEL)
+      }
+    } catch (error) {
+      console.warn('GraphRAG initialization failed:', error)
+    }
+  }
+
+  async addEmail(params: {
+    messageId: string;
+    sender: string;
+    recipients: string[];
+    subject: string;
+    body: string;
+    timestamp: string;
+    urls: string[];
+  }): Promise<void> {
+    try {
+      const neo4j = await ensureNeo4jConnection()
+      
+      // Create User nodes for sender and recipients
+      const createUserQuery = `
+        MERGE (u:User {email: $email})
+        RETURN u
+      `
+      
+      // Create sender
+      await neo4j.runQuery(createUserQuery, { email: params.sender })
+      
+      // Create recipients
+      for (const recipient of params.recipients) {
+        await neo4j.runQuery(createUserQuery, { email: recipient })
+      }
+      
+      // Create Email node
+      const createEmailQuery = `
+        MERGE (e:Email {messageId: $messageId})
+        SET e.subject = $subject,
+            e.body = $body,
+            e.sentDate = $timestamp
+        RETURN e
+      `
+      
+      await neo4j.runQuery(createEmailQuery, {
+        messageId: params.messageId,
+        subject: params.subject,
+        body: params.body,
+        timestamp: params.timestamp
+      })
+      
+      // Create WAS_SENT relationship (sender -> email)
+      const createSentQuery = `
+        MATCH (u:User {email: $sender}), (e:Email {messageId: $messageId})
+        MERGE (u)-[:WAS_SENT]->(e)
+      `
+      
+      await neo4j.runQuery(createSentQuery, {
+        sender: params.sender,
+        messageId: params.messageId
+      })
+      
+      // Create WAS_SENT_TO relationships (email -> recipients)
+      for (const recipient of params.recipients) {
+        const createSentToQuery = `
+          MATCH (e:Email {messageId: $messageId}), (u:User {email: $recipient})
+          MERGE (e)-[:WAS_SENT_TO]->(u)
+        `
+        
+        await neo4j.runQuery(createSentToQuery, {
+          messageId: params.messageId,
+          recipient: recipient
+        })
+      }
+      
+      // Create URL nodes and relationships
+      for (const url of params.urls) {
+        const domain = new URL(url).hostname
+        
+        const createUrlQuery = `
+          MERGE (u:URL {url: $url})
+          SET u.domain = $domain
+          RETURN u
+        `
+        
+        await neo4j.runQuery(createUrlQuery, { url, domain })
+        
+        const createContainsUrlQuery = `
+          MATCH (e:Email {messageId: $messageId}), (u:URL {url: $url})
+          MERGE (e)-[:CONTAINS_URL]->(u)
+        `
+        
+        await neo4j.runQuery(createContainsUrlQuery, {
+          messageId: params.messageId,
+          url: url
+        })
+      }
+      
+      console.log(`✅ Email added to Neo4j graph: ${params.messageId}`)
+      
+    } catch (error) {
+      console.error('❌ Failed to add email to Neo4j graph:', error)
+      throw new Error(`Failed to add email to graph: ${error}`)
+    }
+  }
 
   async queryLLM(system: string, user: string, temperature: number = 0.2): Promise<string> {
     try {
@@ -155,7 +269,7 @@ RETURN ONLY THE FIXED QUERY - NO EXPLANATIONS, NO MARKDOWN, NO BACKTICKS.`
         
         const results = records.map(record => {
           const obj: any = {}
-          record.keys.forEach(key => {
+          record.keys.forEach((key: string) => {
             obj[key] = record.get(key)
           })
           return obj
@@ -203,12 +317,24 @@ Provide a clear analysis of these results in context of the email investigation.
 
   async processQuestion(question: string, context?: any): Promise<LLMResponse> {
     try {
-      console.log('🤖 Processing copilot question:', question)
+      // Try GraphRAG first if available
+      if (this.graphragCopilot) {
+        const agentId = context?.messageId || 'default'
+        const result = await this.graphragCopilot.askQuestion(question, agentId)
+        return result
+      }
       
-      // Execute query with retries
+      // Fallback to original implementation
+      const messageId = context?.messageId || (typeof context === 'string' ? context : null)
+      if (messageId) {
+        const response = await askCopilot(question, messageId)
+        return {
+          response: response,
+          confidence: 90,
+        }
+      }
+      
       const { results, query } = await this.executeCypherWithRetry(question, context)
-      
-      // Summarize results
       const summary = await this.summarizeResults(question, query, results)
       
       return {
@@ -216,10 +342,8 @@ Provide a clear analysis of these results in context of the email investigation.
         confidence: 85,
       }
     } catch (error: any) {
-      console.error('❌ Copilot processing error:', error)
-      
       return {
-        response: `I encountered an error processing your question: ${error.message}. Please try rephrasing your question or ask something different.`,
+        response: `I encountered an error processing your question. Please try rephrasing your question or ask something different.`,
         error: error.message,
       }
     }
@@ -227,10 +351,37 @@ Provide a clear analysis of these results in context of the email investigation.
 
   async getEmailContext(messageId: string): Promise<any> {
     try {
-      const neo4j = await ensureNeo4jConnection()
-      return await neo4j.getEmailContext(messageId)
+      console.log('🔍 Fetching email context for:', messageId)
+      const contextString = await fetchEmailContext(messageId)
+      
+      if (!contextString) {
+        console.log('❌ No context found for messageId:', messageId)
+        return null
+      }
+      
+      // Parse the context string to extract structured data
+      const lines = contextString.split('\n')
+      const context: any = { messageId }
+      
+      for (const line of lines) {
+        if (line.includes('From:')) {
+          context.sender = line.split('From:')[1]?.trim()
+        } else if (line.includes('To:')) {
+          const recipients = line.split('To:')[1]?.trim()
+          context.recipients = recipients ? recipients.split(',').map(r => r.trim()) : []
+        } else if (line.includes('Subject:')) {
+          context.subject = line.split('Subject:')[1]?.trim()
+        } else if (line.includes('Date:')) {
+          context.date = line.split('Date:')[1]?.trim()
+        } else if (line.includes('Snippet:')) {
+          context.snippet = line.split('Snippet:')[1]?.trim()
+        }
+      }
+      
+      console.log('✅ Email context loaded:', context)
+      return context
     } catch (error) {
-      console.error('Error fetching email context:', error)
+      console.error('❌ Error fetching email context:', error)
       return null
     }
   }

@@ -10,7 +10,7 @@ const NEO4J_ENCRYPTED = process.env.NEO4J_ENCRYPTED === 'true'
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const OPENROUTER_MODEL   = process.env.OPENROUTER_MODEL   || 'mistralai/mixtral-8x7b-instruct'
-const OPENROUTER_URL     = process.env.OPENROUTER_URL!
+const OPENROUTER_URL     = 'https://openrouter.ai/api/v1/chat/completions'
 
 // === Constants ===
 const MAX_RESULTS_TO_RETURN    = 50
@@ -19,11 +19,45 @@ const MAX_RETRY_ATTEMPTS       = 10
 const LLM_TIMEOUT_MS           = 30_000
 
 // === Neo4j Driver Setup ===
-const driver: Driver = neo4j.driver(
+export const driver: Driver = neo4j.driver(
   NEO4J_URI,
   neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD),
   { encrypted: NEO4J_ENCRYPTED }
 )
+
+// === Neo4j Connection Interface ===
+interface Neo4jConnection {
+  runQuery(cypher: string, params?: any): Promise<any[]>
+  close(): Promise<void>
+}
+
+class Neo4jService implements Neo4jConnection {
+  async runQuery(cypher: string, params: any = {}): Promise<any[]> {
+    const session: Session = driver.session()
+    try {
+      const result = await session.run(cypher, params)
+      return result.records.map(record => record.toObject())
+    } catch (error) {
+      throw error
+    } finally {
+      await session.close()
+    }
+  }
+
+  async close(): Promise<void> {
+    await driver.close()
+  }
+}
+
+// Singleton instance
+let neo4jService: Neo4jService | null = null
+
+export async function ensureNeo4jConnection(): Promise<Neo4jConnection> {
+  if (!neo4jService) {
+    neo4jService = new Neo4jService()
+  }
+  return neo4jService
+}
 
 // === Prompt Templates ===
 const SYSTEM_CYPHER_PROMPT = `

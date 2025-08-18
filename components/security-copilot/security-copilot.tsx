@@ -49,8 +49,8 @@ export function SecurityCopilotEnhanced({
       id: 'welcome',
       type: 'system',
       content: messageId 
-        ? `Hello! I'm your Security Copilot powered by Neo4j and advanced AI. I can analyze the email graph, find patterns, and help with your investigation. What would you like to know about this email?`
-        : `Hello! I'm your Security Copilot. I can analyze email relationships, detect patterns, and provide security insights using our knowledge graph. How can I assist you?`,
+        ? `Hello! I'm your Security Copilot. I can analyze email patterns and relationships to help with your investigation. What would you like to know about this email?`
+        : `Hello! I'm your Security Copilot. I can analyze email relationships, detect patterns, and provide security insights. How can I assist you?`,
       timestamp: new Date(),
     }
     
@@ -70,7 +70,6 @@ export function SecurityCopilotEnhanced({
 
   const loadEmailContext = async (msgId: string) => {
     try {
-      console.log('🔍 Loading email context for:', msgId)
       const response = await fetch('/api/graph', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -83,10 +82,9 @@ export function SecurityCopilotEnhanced({
       if (response.ok) {
         const result = await response.json()
         setContext(result.context)
-        console.log('✅ Email context loaded:', result.context)
       }
     } catch (error) {
-      console.error('Failed to load email context:', error)
+      // Silently handle context loading errors
     }
   }
 
@@ -104,7 +102,7 @@ export function SecurityCopilotEnhanced({
     const loadingMessage: Message = {
       id: (Date.now() + 1).toString(),
       type: 'assistant',
-      content: 'Analyzing your question using the knowledge graph...',
+      content: 'Analyzing your question...',
       timestamp: new Date(),
       isLoading: true,
     }
@@ -114,9 +112,7 @@ export function SecurityCopilotEnhanced({
     setIsLoading(true)
 
     try {
-      console.log('🤖 Sending query to copilot:', userMessage.content)
-      
-      // Query the Neo4j copilot
+      // Query the copilot
       const response = await fetch('/api/graph', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -132,7 +128,6 @@ export function SecurityCopilotEnhanced({
       })
 
       const result = await response.json()
-      console.log('🤖 Copilot response:', result)
 
       if (response.ok) {
         const assistantMessage: Message = {
@@ -153,12 +148,10 @@ export function SecurityCopilotEnhanced({
         throw new Error(result.error || 'Failed to get response')
       }
     } catch (error) {
-      console.error('Copilot query error:', error)
-      
       const errorMessage: Message = {
         id: (Date.now() + 3).toString(),
         type: 'assistant',
-        content: 'I encountered an error processing your question. The knowledge graph might be initializing or there could be a connection issue. Please try again in a moment.',
+        content: 'I encountered an error processing your question. Please try again in a moment.',
         timestamp: new Date(),
         metadata: {
           error: error instanceof Error ? error.message : 'Unknown error'
@@ -324,7 +317,7 @@ export function SecurityCopilotEnhanced({
             </Button>
           </form>
           <p className="text-xs text-gray-400 mt-1">
-            Powered by Neo4j graph database and AI analysis
+            AI-powered email investigation assistant
           </p>
         </div>
       </CardContent>
