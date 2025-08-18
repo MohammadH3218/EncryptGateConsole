@@ -1,8 +1,6 @@
 // lib/copilot.ts
 import { ensureNeo4jConnection } from './neo4j'
 import { askCopilot, fetchEmailContext } from './neo4j'
-import { EnhancedEmailCopilot } from './graphrag-copilot'
-import { driver } from './neo4j'
 
 interface LLMResponse {
   response: string
@@ -46,19 +44,23 @@ Do NOT output any Cypher in this summary.`
 const MAX_RETRY_ATTEMPTS = 3
 
 export class SecurityCopilotService {
-  private graphragCopilot: EnhancedEmailCopilot | null = null
+  private queryCache = new Map<string, { result: any, timestamp: number }>()
+  private isInitialized = false
 
   constructor() {
-    this.initializeGraphRAG()
+    this.initialize()
   }
 
-  private async initializeGraphRAG() {
+  private async initialize() {
     try {
-      if (OPENROUTER_API_KEY) {
-        this.graphragCopilot = new EnhancedEmailCopilot(driver, OPENROUTER_API_KEY, OPENROUTER_MODEL)
-      }
+      // Test Neo4j connection
+      const neo4j = await ensureNeo4jConnection()
+      await neo4j.runQuery('RETURN 1')
+      this.isInitialized = true
+      console.log('✅ Security Copilot initialized successfully')
     } catch (error) {
-      console.warn('GraphRAG initialization failed:', error)
+      console.error('❌ Failed to initialize Security Copilot:', error)
+      throw new Error(`Failed to initialize: ${error}`)
     }
   }
 
@@ -71,33 +73,34 @@ export class SecurityCopilotService {
     timestamp: string;
     urls: string[];
   }): Promise<void> {
+    if (!this.isInitialized) {
+      await this.initialize()
+    }
+
     try {
       const neo4j = await ensureNeo4jConnection()
       
-      // Create User nodes for sender and recipients
-      const createUserQuery = `
-        MERGE (u:User {email: $email})
-        RETURN u
-      `
-      
-      // Create sender
-      await neo4j.runQuery(createUserQuery, { email: params.sender })
-      
-      // Create recipients
-      for (const recipient of params.recipients) {
-        await neo4j.runQuery(createUserQuery, { email: recipient })
+      // Create User nodes for sender and recipients in batches
+      const allUsers = [params.sender, ...params.recipients]
+      for (const userEmail of allUsers) {
+        try {
+          await neo4j.runQuery(
+            'MERGE (u:User {email: $email}) RETURN u',
+            { email: userEmail }
+          )
+        } catch (error) {
+          console.warn(`Failed to create user ${userEmail}:`, error)
+        }
       }
       
       // Create Email node
-      const createEmailQuery = `
+      await neo4j.runQuery(`
         MERGE (e:Email {messageId: $messageId})
         SET e.subject = $subject,
             e.body = $body,
             e.sentDate = $timestamp
         RETURN e
-      `
-      
-      await neo4j.runQuery(createEmailQuery, {
+      `, {
         messageId: params.messageId,
         subject: params.subject,
         body: params.body,
@@ -105,50 +108,50 @@ export class SecurityCopilotService {
       })
       
       // Create WAS_SENT relationship (sender -> email)
-      const createSentQuery = `
+      await neo4j.runQuery(`
         MATCH (u:User {email: $sender}), (e:Email {messageId: $messageId})
         MERGE (u)-[:WAS_SENT]->(e)
-      `
-      
-      await neo4j.runQuery(createSentQuery, {
+      `, {
         sender: params.sender,
         messageId: params.messageId
       })
       
       // Create WAS_SENT_TO relationships (email -> recipients)
       for (const recipient of params.recipients) {
-        const createSentToQuery = `
-          MATCH (e:Email {messageId: $messageId}), (u:User {email: $recipient})
-          MERGE (e)-[:WAS_SENT_TO]->(u)
-        `
-        
-        await neo4j.runQuery(createSentToQuery, {
-          messageId: params.messageId,
-          recipient: recipient
-        })
+        try {
+          await neo4j.runQuery(`
+            MATCH (e:Email {messageId: $messageId}), (u:User {email: $recipient})
+            MERGE (e)-[:WAS_SENT_TO]->(u)
+          `, {
+            messageId: params.messageId,
+            recipient: recipient
+          })
+        } catch (error) {
+          console.warn(`Failed to create WAS_SENT_TO relationship for ${recipient}:`, error)
+        }
       }
       
       // Create URL nodes and relationships
       for (const url of params.urls) {
-        const domain = new URL(url).hostname
-        
-        const createUrlQuery = `
-          MERGE (u:URL {url: $url})
-          SET u.domain = $domain
-          RETURN u
-        `
-        
-        await neo4j.runQuery(createUrlQuery, { url, domain })
-        
-        const createContainsUrlQuery = `
-          MATCH (e:Email {messageId: $messageId}), (u:URL {url: $url})
-          MERGE (e)-[:CONTAINS_URL]->(u)
-        `
-        
-        await neo4j.runQuery(createContainsUrlQuery, {
-          messageId: params.messageId,
-          url: url
-        })
+        try {
+          const domain = new URL(url).hostname
+          
+          await neo4j.runQuery(`
+            MERGE (u:URL {url: $url})
+            SET u.domain = $domain
+            RETURN u
+          `, { url, domain })
+          
+          await neo4j.runQuery(`
+            MATCH (e:Email {messageId: $messageId}), (u:URL {url: $url})
+            MERGE (e)-[:CONTAINS_URL]->(u)
+          `, {
+            messageId: params.messageId,
+            url: url
+          })
+        } catch (error) {
+          console.warn(`Failed to process URL ${url}:`, error)
+        }
       }
       
       console.log(`✅ Email added to Neo4j graph: ${params.messageId}`)
@@ -160,6 +163,10 @@ export class SecurityCopilotService {
   }
 
   async queryLLM(system: string, user: string, temperature: number = 0.2): Promise<string> {
+    if (!OPENROUTER_API_KEY) {
+      throw new Error('OPENROUTER_API_KEY is required for LLM queries')
+    }
+
     try {
       const response = await fetch(OPENROUTER_URL, {
         method: 'POST',
@@ -174,15 +181,23 @@ export class SecurityCopilotService {
             { role: 'user', content: user },
           ],
           temperature,
+          max_tokens: 1000,
         }),
       })
 
       if (!response.ok) {
-        throw new Error(`LLM API error: ${response.status}`)
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(`LLM API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`)
       }
 
       const data = await response.json()
-      return data.choices[0]?.message?.content || ''
+      const content = data.choices?.[0]?.message?.content
+      
+      if (!content) {
+        throw new Error('No content received from LLM')
+      }
+      
+      return content
     } catch (error) {
       console.error('LLM query error:', error)
       throw new Error(`Failed to query LLM: ${error}`)
@@ -258,6 +273,10 @@ RETURN ONLY THE FIXED QUERY - NO EXPLANATIONS, NO MARKDOWN, NO BACKTICKS.`
   }
 
   async executeCypherWithRetry(question: string, context?: any): Promise<{ results: any[], query: string }> {
+    if (!this.isInitialized) {
+      await this.initialize()
+    }
+
     const neo4j = await ensureNeo4jConnection()
     let query = await this.generateCypher(question, context)
     let lastError = ''
@@ -267,21 +286,13 @@ RETURN ONLY THE FIXED QUERY - NO EXPLANATIONS, NO MARKDOWN, NO BACKTICKS.`
         console.log(`🔍 Executing query (attempt ${attempt}):`, query)
         const records = await neo4j.runQuery(query)
         
-        const results = records.map(record => {
-          const obj: any = {}
-          record.keys.forEach((key: string) => {
-            obj[key] = record.get(key)
-          })
-          return obj
-        })
-
-        return { results, query }
+        return { results: records, query }
       } catch (error: any) {
         lastError = error.message
         console.error(`❌ Query attempt ${attempt} failed:`, lastError)
         
         if (attempt < MAX_RETRY_ATTEMPTS) {
-          query = await this.correctCypher(query, lastError, attempt + 1)
+          query = await this.correctCypher(query, lastError, attempt)
         }
       }
     }
@@ -311,40 +322,56 @@ Provide a clear analysis of these results in context of the email investigation.
       return await this.queryLLM(SYSTEM_SUMMARY_PROMPT, summaryPrompt)
     } catch (error) {
       console.error('Summarization error:', error)
-      return `Query returned ${results.length} results. Unable to generate detailed summary.`
+      return `Query returned ${results.length} results. Unable to generate detailed summary due to: ${error}`
     }
   }
 
   async processQuestion(question: string, context?: any): Promise<LLMResponse> {
     try {
-      // Try GraphRAG first if available
-      if (this.graphragCopilot) {
-        const agentId = context?.messageId || 'default'
-        const result = await this.graphragCopilot.askQuestion(question, agentId)
-        return result
-      }
-      
-      // Fallback to original implementation
-      const messageId = context?.messageId || (typeof context === 'string' ? context : null)
-      if (messageId) {
-        const response = await askCopilot(question, messageId)
+      // Check cache first
+      const cacheKey = `${question}-${JSON.stringify(context)}`
+      const cached = this.queryCache.get(cacheKey)
+      if (cached && Date.now() - cached.timestamp < 60000) { // 1 minute cache
         return {
-          response: response,
+          response: cached.result,
           confidence: 90,
         }
       }
+
+      // Handle messageId-specific queries
+      const messageId = context?.messageId || (typeof context === 'string' ? context : null)
+      if (messageId) {
+        try {
+          const response = await askCopilot(question, messageId)
+          const result = {
+            response: response,
+            confidence: 90,
+          }
+          this.queryCache.set(cacheKey, { result: response, timestamp: Date.now() })
+          return result
+        } catch (error) {
+          console.warn('Neo4j-based query failed, falling back to graph query:', error)
+        }
+      }
       
+      // Fallback to graph query
       const { results, query } = await this.executeCypherWithRetry(question, context)
       const summary = await this.summarizeResults(question, query, results)
       
-      return {
+      const result = {
         response: summary,
         confidence: 85,
       }
+      
+      this.queryCache.set(cacheKey, { result: summary, timestamp: Date.now() })
+      return result
+      
     } catch (error: any) {
+      console.error('Question processing failed:', error)
       return {
-        response: `I encountered an error processing your question. Please try rephrasing your question or ask something different.`,
+        response: `I encountered an error processing your question: ${error.message}. Please try rephrasing your question or ask something different.`,
         error: error.message,
+        confidence: 0,
       }
     }
   }
@@ -385,6 +412,21 @@ Provide a clear analysis of these results in context of the email investigation.
       return null
     }
   }
+
+  // Health check method
+  async isHealthy(): Promise<boolean> {
+    try {
+      if (!this.isInitialized) {
+        await this.initialize()
+      }
+      const neo4j = await ensureNeo4jConnection()
+      await neo4j.runQuery('RETURN 1')
+      return true
+    } catch (error) {
+      console.error('Health check failed:', error)
+      return false
+    }
+  }
 }
 
 // Singleton instance
@@ -396,3 +438,6 @@ export function getCopilotService(): SecurityCopilotService {
   }
   return copilotService
 }
+
+// Export enhanced version for graph operations
+export { SecurityCopilotService as EnhancedSecurityCopilot }
