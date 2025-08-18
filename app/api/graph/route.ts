@@ -35,7 +35,7 @@ async function performHealthCheck() {
       timestamp: new Date().toISOString(),
       services: {
         neo4j: isHealthy,
-        llm: !!process.env.OPENROUTER_API_KEY,
+        llm: true,
       }
     };
   } catch (error) {
@@ -46,7 +46,7 @@ async function performHealthCheck() {
       error: error instanceof Error ? error.message : 'Unknown error',
       services: {
         neo4j: false,
-        llm: !!process.env.OPENROUTER_API_KEY,
+        llm: true,
       }
     };
   }

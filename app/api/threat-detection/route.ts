@@ -16,9 +16,9 @@ const REGION             = process.env.AWS_REGION!;
 const ORG_ID             = process.env.ORGANIZATION_ID!;
 const EMAILS_TABLE       = process.env.EMAILS_TABLE_NAME!;
 const DETECTIONS_TABLE   = process.env.DETECTIONS_TABLE_NAME!;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
-const OPENROUTER_MODEL   = process.env.OPENROUTER_MODEL || 'mistralai/mixtral-8x7b-instruct';
-const OPENROUTER_URL     = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENAI_API_KEY = "REDACTED_OPENAI_API_KEY";
+const OPENAI_MODEL   = "gpt-4o-mini";
+const OPENAI_URL     = 'https://api.openai.com/v1/chat/completions';
 
 const ddb = new DynamoDBClient({ region: REGION });
 
@@ -152,14 +152,14 @@ Please analyze this email for security threats and respond with the requested JS
 `;
 
   try {
-    const response = await fetch(OPENROUTER_URL, {
+    const response = await fetch(OPENAI_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: OPENROUTER_MODEL,
+        model: OPENAI_MODEL,
         messages: [
           { role: 'system', content: THREAT_ANALYSIS_PROMPT },
           { role: 'user', content: emailContent },

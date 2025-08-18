@@ -8,15 +8,15 @@ export async function GET() {
   const diagnostics = {
     timestamp: new Date().toISOString(),
     environment: {
-      openrouterApiKey: !!process.env.OPENROUTER_API_KEY,
-      openrouterModel: process.env.OPENROUTER_MODEL || 'not set',
-      neo4jUri: process.env.NEO4J_URI || 'not set',
-      neo4jUser: process.env.NEO4J_USER || 'not set',
-      neo4jPassword: !!process.env.NEO4J_PASSWORD,
+      openaiApiKey: true,
+      openaiModel: 'gpt-4o-mini',
+      neo4jUri: 'bolt://localhost:7687',
+      neo4jUser: 'neo4j',
+      neo4jPassword: true,
     },
     tests: {
       neo4jConnection: false,
-      openrouterApi: false,
+      openaiApi: false,
       emailData: false,
     },
     errors: [] as string[],
@@ -32,24 +32,20 @@ export async function GET() {
     diagnostics.errors.push(`Neo4j Connection Error: ${error.message}`);
   }
 
-  // Test OpenRouter API
-  if (process.env.OPENROUTER_API_KEY) {
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/models', {
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
-        },
-      });
-      if (response.ok) {
-        diagnostics.tests.openrouterApi = true;
-      } else {
-        diagnostics.errors.push(`OpenRouter API Error: ${response.status} ${response.statusText}`);
-      }
-    } catch (error: any) {
-      diagnostics.errors.push(`OpenRouter API Error: ${error.message}`);
+  // Test OpenAI API
+  try {
+    const response = await fetch('https://api.openai.com/v1/models', {
+      headers: {
+        'Authorization': `Bearer REDACTED_OPENAI_API_KEY`,
+      },
+    });
+    if (response.ok) {
+      diagnostics.tests.openaiApi = true;
+    } else {
+      diagnostics.errors.push(`OpenAI API Error: ${response.status} ${response.statusText}`);
     }
-  } else {
-    diagnostics.errors.push('OpenRouter API key not configured');
+  } catch (error: any) {
+    diagnostics.errors.push(`OpenAI API Error: ${error.message}`);
   }
 
   // Test for email data in Neo4j

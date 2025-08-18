@@ -3,14 +3,14 @@ import neo4j, { Driver, Session } from 'neo4j-driver'
 import { createHash } from 'crypto'
 
 // === Environment & Configuration ===
-const NEO4J_URI       = process.env.NEO4J_URI      || 'bolt://localhost:7687'
-const NEO4J_USER      = process.env.NEO4J_USER     || 'neo4j'
-const NEO4J_PASSWORD  = process.env.NEO4J_PASSWORD || 'password'
-const NEO4J_ENCRYPTED = process.env.NEO4J_ENCRYPTED === 'true'
+const NEO4J_URI       = 'bolt://localhost:7687'
+const NEO4J_USER      = 'neo4j'
+const NEO4J_PASSWORD  = 'REDACTED_PASSWORD'
+const NEO4J_ENCRYPTED = false
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
-const OPENROUTER_MODEL   = process.env.OPENROUTER_MODEL   || 'mistralai/mixtral-8x7b-instruct'
-const OPENROUTER_URL     = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENAI_API_KEY = "REDACTED_OPENAI_API_KEY"
+const OPENAI_MODEL   = "gpt-4o-mini"
+const OPENAI_URL     = 'https://api.openai.com/v1/chat/completions'
 
 // === Constants ===
 const MAX_RESULTS_TO_RETURN    = 50
@@ -139,7 +139,7 @@ function md5(s: string): string {
 }
 
 // === Helper: LLM Call with Timeout ===
-interface OpenRouterResponse {
+interface OpenAIResponse {
   choices: { message: { content: string } }[]
 }
 
@@ -165,14 +165,14 @@ async function askLLM(
   const timeoutId = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS)
 
   try {
-    const resp = await fetch(OPENROUTER_URL, {
+    const resp = await fetch(OPENAI_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type':  'application/json'
       },
       body: JSON.stringify({
-        model: OPENROUTER_MODEL,
+        model: OPENAI_MODEL,
         messages: [
           { role: 'system', content: system },
           { role: 'user',   content: payload }
@@ -185,7 +185,7 @@ async function askLLM(
     if (!resp.ok) {
       throw new Error(`LLM API ${resp.status} ${resp.statusText}`)
     }
-    const json: OpenRouterResponse = await resp.json()
+    const json: OpenAIResponse = await resp.json()
     const content = json.choices?.[0]?.message?.content || ''
     if (!forceNew) promptCache.set(cacheKey, content)
     return content
