@@ -7,8 +7,8 @@ To enable the Security Copilot functionality, you need to set up the following e
 ### Required Variables
 
 ```bash
-# OpenRouter API Configuration (Required for AI functionality)
-OPENROUTER_API_KEY=your_openrouter_api_key_here
+# OpenAI API Configuration (Required for AI functionality)
+OPENAI_API_KEY=your_openai_api_key_here
 
 # Neo4j Database Configuration
 NEO4J_URI=bolt://localhost:7687
@@ -16,16 +16,16 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=your_neo4j_password
 
 # Optional Variables
-OPENROUTER_MODEL=mistralai/mixtral-8x7b-instruct
+OPENAI_MODEL=gpt-4o-mini
 NEO4J_ENCRYPTED=false
 ```
 
 ### Setup Instructions
 
-1. **OpenRouter API Key**:
-   - Sign up at https://openrouter.ai/
+1. **OpenAI API Key**:
+   - Sign up at https://platform.openai.com/
    - Get your API key from the dashboard
-   - Set the `OPENROUTER_API_KEY` environment variable
+   - Set the `OPENAI_API_KEY` environment variable
 
 2. **Neo4j Database**:
    - Install Neo4j locally or use Neo4j Aura Cloud

@@ -8,9 +8,9 @@ interface LLMResponse {
   error?: string
 }
 
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'mistralai/mixtral-8x7b-instruct'
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENAI_API_KEY = "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"
+const OPENAI_MODEL = "gpt-4o-mini"
+const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 const SYSTEM_CYPHER_PROMPT = `You are EncryptGate Copilot, a Neo4j Cypher expert for email security analysis.
 Use only these labels and relationship types exactly as listed:
@@ -53,14 +53,32 @@ export class SecurityCopilotService {
 
   private async initialize() {
     try {
-      // Test Neo4j connection
+      console.log('🔄 Initializing Security Copilot...')
+      console.log('🔗 Testing Neo4j connection...')
+      
+      // Test Neo4j connection with better error reporting
       const neo4j = await ensureNeo4jConnection()
-      await neo4j.runQuery('RETURN 1')
+      const result = await neo4j.runQuery('RETURN 1 as test')
+      
+      console.log('✅ Neo4j connection successful:', result)
       this.isInitialized = true
       console.log('✅ Security Copilot initialized successfully')
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Failed to initialize Security Copilot:', error)
-      throw new Error(`Failed to initialize: ${error}`)
+      console.error('❌ Error details:', {
+        message: error.message,
+        code: error.code,
+        name: error.name
+      })
+      
+      // Provide more specific error messages
+      if (error.message?.includes('ECONNREFUSED')) {
+        throw new Error(`Neo4j connection failed: Cannot connect to Neo4j at bolt://localhost:7687. Please ensure Neo4j is running and accessible.`)
+      } else if (error.message?.includes('authentication')) {
+        throw new Error(`Neo4j authentication failed: Please check your Neo4j username and password.`)
+      } else {
+        throw new Error(`Failed to initialize: ${error.message || error}`)
+      }
     }
   }
 
@@ -163,19 +181,19 @@ export class SecurityCopilotService {
   }
 
   async queryLLM(system: string, user: string, temperature: number = 0.2): Promise<string> {
-    if (!OPENROUTER_API_KEY) {
-      throw new Error('OPENROUTER_API_KEY is required for LLM queries')
+    if (!OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is required for LLM queries')
     }
 
     try {
-      const response = await fetch(OPENROUTER_URL, {
+      const response = await fetch(OPENAI_URL, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Authorization': `Bearer ${OPENAI_API_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: OPENROUTER_MODEL,
+          model: OPENAI_MODEL,
           messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },
@@ -338,6 +356,16 @@ Provide a clear analysis of these results in context of the email investigation.
         }
       }
 
+      // Check if Neo4j is available
+      if (!this.isInitialized) {
+        try {
+          await this.initialize()
+        } catch (error) {
+          console.warn('Neo4j not available, providing fallback response:', error)
+          return this.provideFallbackResponse(question, context)
+        }
+      }
+
       // Handle messageId-specific queries
       const messageId = context?.messageId || (typeof context === 'string' ? context : null)
       if (messageId) {
@@ -350,26 +378,79 @@ Provide a clear analysis of these results in context of the email investigation.
           this.queryCache.set(cacheKey, { result: response, timestamp: Date.now() })
           return result
         } catch (error) {
-          console.warn('Neo4j-based query failed, falling back to graph query:', error)
+          console.warn('Neo4j-based query failed, falling back to LLM-only response:', error)
+          return this.provideFallbackResponse(question, context)
         }
       }
       
       // Fallback to graph query
-      const { results, query } = await this.executeCypherWithRetry(question, context)
-      const summary = await this.summarizeResults(question, query, results)
-      
-      const result = {
-        response: summary,
-        confidence: 85,
+      try {
+        const { results, query } = await this.executeCypherWithRetry(question, context)
+        const summary = await this.summarizeResults(question, query, results)
+        
+        const result = {
+          response: summary,
+          confidence: 85,
+        }
+        
+        this.queryCache.set(cacheKey, { result: summary, timestamp: Date.now() })
+        return result
+      } catch (error) {
+        console.warn('Graph query failed, falling back to LLM-only response:', error)
+        return this.provideFallbackResponse(question, context)
       }
-      
-      this.queryCache.set(cacheKey, { result: summary, timestamp: Date.now() })
-      return result
       
     } catch (error: any) {
       console.error('Question processing failed:', error)
       return {
         response: `I encountered an error processing your question: ${error.message}. Please try rephrasing your question or ask something different.`,
+        error: error.message,
+        confidence: 0,
+      }
+    }
+  }
+
+  private async provideFallbackResponse(question: string, context?: any): Promise<LLMResponse> {
+    try {
+      console.log('🔄 Providing fallback response without Neo4j...')
+      
+      let contextInfo = ''
+      if (context?.subject) {
+        contextInfo = `
+Email Context:
+- Subject: ${context.subject}
+- Sender: ${context.sender || 'Unknown'}
+- Recipients: ${context.recipients?.join(', ') || 'Unknown'}
+- Date: ${context.date || 'Unknown'}
+`
+      }
+
+      const fallbackPrompt = `You are EncryptGate Copilot, a security analyst assistant. 
+${contextInfo}
+The user asked: "${question}"
+
+Since the email database is not currently accessible, provide general security guidance and analysis based on the available context. Focus on:
+- General email security best practices
+- Common threat patterns
+- Recommended investigation steps
+- Security recommendations
+
+Be helpful while noting that detailed database queries are not available.`
+
+      const response = await this.queryLLM(
+        'You are a helpful security analyst assistant.',
+        fallbackPrompt,
+        0.3
+      )
+
+      return {
+        response: `⚠️ Database connection unavailable. Here's general guidance:\n\n${response}`,
+        confidence: 60,
+        error: 'Neo4j database not accessible'
+      }
+    } catch (error: any) {
+      return {
+        response: `I'm currently unable to process your question due to system issues. Please ensure Neo4j is running and try again later.`,
         error: error.message,
         confidence: 0,
       }
