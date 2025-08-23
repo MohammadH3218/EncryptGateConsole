@@ -361,7 +361,7 @@ export default function UserManagementPage() {
 
   if (!services.length) {
     return (
-      <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={0}>
+      <AppLayout username="John Doe" notificationsCount={0}>
         <FadeInSection>
           <Alert>
             <Cloud className="mr-2 h-4 w-4" />
@@ -385,26 +385,26 @@ export default function UserManagementPage() {
   }
 
   return (
-    <AppLayout username="John Doe" onSearch={() => {}} notificationsCount={0}>
+    <AppLayout username="John Doe" notificationsCount={0}>
       <FadeInSection>
         <div className="space-y-8">
-          <Alert>
-            <AlertTitle>User Management</AlertTitle>
-            <AlertDescription>
+          <Alert className="bg-blue-900/20 border-blue-500/20 text-white">
+            <AlertTitle className="text-white">User Management</AlertTitle>
+            <AlertDescription className="text-gray-300">
               Manage security team users and organization employees. Security team users access this dashboard, while employees' emails are monitored for threats.
             </AlertDescription>
           </Alert>
 
           {/* Security Team Users Section */}
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Users className="h-5 w-5" />
+                  <CardTitle className="flex items-center gap-2 text-white">
+                    <Users className="h-5 w-5 text-white" />
                     Security Team Users
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-gray-400">
                     Manage users who have access to the security dashboard
                   </CardDescription>
                 </div>
@@ -413,15 +413,15 @@ export default function UserManagementPage() {
                   if (!open) resetUserDialogState()
                 }}>
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                       <UserPlus className="mr-2 h-4 w-4" />
                       Add User
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="max-w-md">
+                  <DialogContent className="max-w-md bg-[#0f0f0f] border-[#1f1f1f] text-white">
                     <DialogHeader>
-                      <DialogTitle>Add Security Team Users</DialogTitle>
-                      <DialogDescription>
+                      <DialogTitle className="text-white">Add Security Team Users</DialogTitle>
+                      <DialogDescription className="text-gray-400">
                         Select users from your Security Team Cognito user pool to add to the security team.
                       </DialogDescription>
                     </DialogHeader>
@@ -429,19 +429,20 @@ export default function UserManagementPage() {
                     <div className="space-y-4">
                       {/* Role Selection */}
                       <div className="space-y-2">
-                        <Label htmlFor="role">Assign Role</Label>
+                        <Label htmlFor="role" className="text-white">Assign Role</Label>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="w-full justify-between">
+                            <Button variant="outline" className="w-full justify-between bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                               {selectedRole}
                               <ChevronDown className="ml-2 h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent className="w-full">
+                          <DropdownMenuContent className="w-full bg-[#1f1f1f] border-[#1f1f1f]">
                             {availableRoles.map((role) => (
                               <DropdownMenuItem
                                 key={role}
                                 onClick={() => setSelectedRole(role)}
+                                className="text-white focus:bg-[#2a2a2a] focus:text-white"
                               >
                                 {role}
                               </DropdownMenuItem>
@@ -452,24 +453,24 @@ export default function UserManagementPage() {
 
                       {/* User Selection Dropdown */}
                       <div className="space-y-2">
-                        <Label>Select Users</Label>
+                        <Label className="text-white">Select Users</Label>
                         <DropdownMenu open={isUserDropdownOpen} onOpenChange={setIsUserDropdownOpen}>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="outline" className="w-full justify-between">
+                            <Button variant="outline" className="w-full justify-between bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                               {selectedUsers.length === 0 
                                 ? "Select users..." 
                                 : `${selectedUsers.length} user${selectedUsers.length > 1 ? 's' : ''} selected`}
                               <ChevronDown className="ml-2 h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent className="w-80 max-h-80 overflow-auto">
+                          <DropdownMenuContent className="w-80 max-h-80 overflow-auto bg-[#1f1f1f] border-[#1f1f1f]">
                             {/* Search */}
                             <div className="p-2">
                               <Input
                                 placeholder="Search users..."
                                 value={userSearchQuery}
                                 onChange={(e) => setUserSearchQuery(e.target.value)}
-                                className="h-8"
+                                className="h-8 bg-[#2a2a2a] border-[#2a2a2a] text-white placeholder:text-gray-400"
                               />
                             </div>
                             
@@ -586,7 +587,7 @@ export default function UserManagementPage() {
                     placeholder="Search users..."
                     value={searchUser}
                     onChange={(e) => setSearchUser(e.target.value)}
-                    className="max-w-sm"
+                    className="max-w-sm bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                   />
                   <Button
                     variant="outline"
@@ -596,6 +597,7 @@ export default function UserManagementPage() {
                       refreshPoolUsers()
                     }}
                     disabled={usersLoading || poolLoading}
+                    className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                   >
                     Refresh
                   </Button>
@@ -610,21 +612,21 @@ export default function UserManagementPage() {
 
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Last Login</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                    <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                      <TableHead className="text-white">Name</TableHead>
+                      <TableHead className="text-white">Email</TableHead>
+                      <TableHead className="text-white">Role</TableHead>
+                      <TableHead className="text-white">Status</TableHead>
+                      <TableHead className="text-white">Last Login</TableHead>
+                      <TableHead className="text-right text-white">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredUsers.length > 0 ? (
                       filteredUsers.map((user: User) => (
-                        <TableRow key={user.id}>
-                          <TableCell className="font-medium">{user.name}</TableCell>
-                          <TableCell>{user.email}</TableCell>
+                        <TableRow key={user.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                          <TableCell className="font-medium text-white">{user.name}</TableCell>
+                          <TableCell className="text-white">{user.email}</TableCell>
                           <TableCell>
                             <Badge variant="outline">{user.role}</Badge>
                           </TableCell>
@@ -691,12 +693,12 @@ export default function UserManagementPage() {
           </Card>
 
           {/* Organization Employees Section - UPDATED WITH DROPDOWN */}
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle>Organization Employees</CardTitle>
-                  <CardDescription>
+                  <CardTitle className="text-white">Organization Employees</CardTitle>
+                  <CardDescription className="text-gray-400">
                     Manage employees whose emails will be monitored for security threats. Select directly from AWS WorkMail.
                   </CardDescription>
                 </div>
@@ -706,15 +708,15 @@ export default function UserManagementPage() {
                     if (!open) resetEmpDialogState()
                   }}>
                     <DialogTrigger asChild>
-                      <Button variant="outline">
+                      <Button variant="outline" className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                         <UserPlus className="mr-2 h-4 w-4" />
                         Add Employee
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-md">
+                    <DialogContent className="max-w-md bg-[#0f0f0f] border-[#1f1f1f] text-white">
                       <DialogHeader>
-                        <DialogTitle>Add Employees to Monitoring</DialogTitle>
-                        <DialogDescription>
+                        <DialogTitle className="text-white">Add Employees to Monitoring</DialogTitle>
+                        <DialogDescription className="text-gray-400">
                           Select employees from your WorkMail organization to add to email monitoring.
                         </DialogDescription>
                       </DialogHeader>
@@ -722,24 +724,24 @@ export default function UserManagementPage() {
                       <div className="space-y-4">
                         {/* Employee Selection Dropdown */}
                         <div className="space-y-2">
-                          <Label>Select Employees</Label>
+                          <Label className="text-white">Select Employees</Label>
                           <DropdownMenu open={isEmpDropdownOpen} onOpenChange={setIsEmpDropdownOpen}>
                             <DropdownMenuTrigger asChild>
-                              <Button variant="outline" className="w-full justify-between">
+                              <Button variant="outline" className="w-full justify-between bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                                 {selectedEmployees.length === 0 
                                   ? "Select employees..." 
                                   : `${selectedEmployees.length} employee${selectedEmployees.length > 1 ? 's' : ''} selected`}
                                 <ChevronDown className="ml-2 h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent className="w-80 max-h-80 overflow-auto">
+                            <DropdownMenuContent className="w-80 max-h-80 overflow-auto bg-[#1f1f1f] border-[#1f1f1f]">
                               {/* Search */}
                               <div className="p-2">
                                 <Input
                                   placeholder="Search employees..."
                                   value={empSearchQuery}
                                   onChange={(e) => setEmpSearchQuery(e.target.value)}
-                                  className="h-8"
+                                  className="h-8 bg-[#2a2a2a] border-[#2a2a2a] text-white placeholder:text-gray-400"
                                 />
                               </div>
                               
@@ -855,6 +857,7 @@ export default function UserManagementPage() {
                     variant="default"
                     onClick={handleSyncFromWorkMail}
                     disabled={isWorkmailSyncing}
+                    className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                   >
                     {isWorkmailSyncing ? (
                       <>
@@ -874,10 +877,10 @@ export default function UserManagementPage() {
             <CardContent>
               <div className="space-y-4">
                 {/* WorkMail Connection Status */}
-                <Alert>
-                  <Info className="h-4 w-4" />
-                  <AlertTitle>AWS WorkMail Integration</AlertTitle>
-                  <AlertDescription>
+                <Alert className="bg-blue-900/20 border-blue-500/20 text-white">
+                  <Info className="h-4 w-4 text-blue-400" />
+                  <AlertTitle className="text-white">AWS WorkMail Integration</AlertTitle>
+                  <AlertDescription className="text-gray-300">
                     {workmailStatus?.connected ? (
                       <>
                         ✅ Connected to WorkMail Organization: <code>{workmailStatus.organizationAlias || workmailStatus.organizationId}</code>
@@ -895,7 +898,7 @@ export default function UserManagementPage() {
                     placeholder="Search employees..."
                     value={searchEmp}
                     onChange={(e) => setSearchEmp(e.target.value)}
-                    className="max-w-sm"
+                    className="max-w-sm bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                   />
                   <div className="flex gap-2">
                     <Button
@@ -906,6 +909,7 @@ export default function UserManagementPage() {
                         refreshWorkMailUsers()
                       }}
                       disabled={empLoading || workMailLoading}
+                      className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                     >
                       Refresh
                     </Button>
@@ -921,24 +925,24 @@ export default function UserManagementPage() {
 
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Department</TableHead>
-                      <TableHead>Job Title</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Last Sync</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                    <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                      <TableHead className="text-white">Name</TableHead>
+                      <TableHead className="text-white">Email</TableHead>
+                      <TableHead className="text-white">Department</TableHead>
+                      <TableHead className="text-white">Job Title</TableHead>
+                      <TableHead className="text-white">Status</TableHead>
+                      <TableHead className="text-white">Last Sync</TableHead>
+                      <TableHead className="text-right text-white">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredEmps.length > 0 ? (
                       filteredEmps.map((employee: Employee) => (
-                        <TableRow key={employee.id}>
-                          <TableCell className="font-medium">{employee.name || "Unknown User"}</TableCell>
-                          <TableCell>{employee.email}</TableCell>
-                          <TableCell>{employee.department || "—"}</TableCell>
-                          <TableCell>{employee.jobTitle || "—"}</TableCell>
+                        <TableRow key={employee.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                          <TableCell className="font-medium text-white">{employee.name || "Unknown User"}</TableCell>
+                          <TableCell className="text-white">{employee.email}</TableCell>
+                          <TableCell className="text-white">{employee.department || "—"}</TableCell>
+                          <TableCell className="text-white">{employee.jobTitle || "—"}</TableCell>
                           <TableCell>
                             <Badge
                               variant={employee.status === "active" ? "default" : "secondary"}
@@ -957,19 +961,19 @@ export default function UserManagementPage() {
                                 <Badge variant="outline" className="text-xs">
                                   WorkMail
                                 </Badge>
-                                <span className="text-xs text-muted-foreground">
+                                <span className="text-xs text-gray-400">
                                   {new Date(employee.syncedFromWorkMail).toLocaleDateString()}
                                 </span>
                               </div>
                             ) : (
-                              <span className="text-xs text-muted-foreground">Manual</span>
+                              <span className="text-xs text-gray-400">Manual</span>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="text-red-600"
+                              className="text-red-400 hover:bg-red-900/30 hover:text-red-300"
                               onClick={() => removeEmployee(employee.id)}
                             >
                               Remove
@@ -979,7 +983,7 @@ export default function UserManagementPage() {
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-6 text-gray-400">
                           {empLoading ? "Loading employees..." : "No employees being monitored. Use 'Add Employee' to select from WorkMail or 'Sync from WorkMail' to import all."}
                         </TableCell>
                       </TableRow>
