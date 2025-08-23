@@ -1,15 +1,15 @@
-// lib/neo4j.ts
+// lib/neo4j.ts - COMPLETE UPDATED VERSION
 import neo4j, { Driver, Session } from 'neo4j-driver'
 import { createHash } from 'crypto'
 
-// === Environment & Configuration ===
-const NEO4J_URI       = 'bolt://localhost:7687'
-const NEO4J_USER      = 'neo4j'
-const NEO4J_PASSWORD  = 'REDACTED_PASSWORD'
-const NEO4J_ENCRYPTED = false
+// === Environment & Configuration - USE ENV VARS ===
+const NEO4J_URI       = process.env.NEO4J_URI || 'bolt://localhost:7687'
+const NEO4J_USER      = process.env.NEO4J_USER || 'neo4j'
+const NEO4J_PASSWORD  = process.env.NEO4J_PASSWORD || 'REDACTED_PASSWORD'
+const NEO4J_ENCRYPTED = process.env.NEO4J_ENCRYPTED === 'true'
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const OPENAI_MODEL   = "gpt-4o-mini"
+const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini"
 const OPENAI_URL     = 'https://api.openai.com/v1/chat/completions'
 
 // === Constants ===
@@ -18,12 +18,61 @@ const MAX_RESULTS_FOR_SUMMARY  = 20
 const MAX_RETRY_ATTEMPTS       = 10
 const LLM_TIMEOUT_MS           = 30_000
 
-// === Neo4j Driver Setup ===
-export const driver: Driver = neo4j.driver(
-  NEO4J_URI,
-  neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD),
-  { encrypted: NEO4J_ENCRYPTED }
-)
+console.log('🔧 Neo4j Configuration:', {
+  uri: NEO4J_URI,
+  user: NEO4J_USER,
+  encrypted: NEO4J_ENCRYPTED,
+  hasOpenAIKey: !!OPENAI_API_KEY
+})
+
+// === Neo4j Driver Setup with Error Handling ===
+let driver: Driver | null = null
+
+function createNeo4jDriver(): Driver {
+  try {
+    return neo4j.driver(
+      NEO4J_URI,
+      neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD),
+      { 
+        encrypted: NEO4J_ENCRYPTED,
+        connectionTimeout: 10000, // 10 seconds
+        maxConnectionLifetime: 3600000, // 1 hour
+        maxConnectionPoolSize: 50,
+        connectionAcquisitionTimeout: 60000 // 1 minute
+      }
+    )
+  } catch (error) {
+    console.error('❌ Failed to create Neo4j driver:', error)
+    throw error
+  }
+}
+
+// Get or create driver
+export function getDriver(): Driver {
+  if (!driver) {
+    driver = createNeo4jDriver()
+  }
+  return driver
+}
+
+// Driver is available through getDriver() function for better control
+
+// Test connection
+export async function testNeo4jConnection(): Promise<boolean> {
+  try {
+    const testDriver = getDriver()
+    const session = testDriver.session()
+    
+    await session.run('RETURN 1 as test')
+    await session.close()
+    
+    console.log('✅ Neo4j connection successful')
+    return true
+  } catch (error) {
+    console.error('❌ Neo4j connection failed:', error)
+    return false
+  }
+}
 
 // === Neo4j Connection Interface ===
 interface Neo4jConnection {
@@ -33,7 +82,7 @@ interface Neo4jConnection {
 
 class Neo4jService implements Neo4jConnection {
   async runQuery(cypher: string, params: any = {}): Promise<any[]> {
-    const session: Session = driver.session()
+    const session: Session = getDriver().session()
     try {
       const result = await session.run(cypher, params)
       return result.records.map(record => record.toObject())
@@ -45,7 +94,10 @@ class Neo4jService implements Neo4jConnection {
   }
 
   async close(): Promise<void> {
-    await driver.close()
+    if (driver) {
+      await driver.close()
+      driver = null
+    }
   }
 }
 
@@ -54,6 +106,11 @@ let neo4jService: Neo4jService | null = null
 
 export async function ensureNeo4jConnection(): Promise<Neo4jConnection> {
   if (!neo4jService) {
+    // Test connection first
+    const isConnected = await testNeo4jConnection()
+    if (!isConnected) {
+      throw new Error('Cannot establish Neo4j connection. Please check your configuration.')
+    }
     neo4jService = new Neo4jService()
   }
   return neo4jService
@@ -124,7 +181,7 @@ const SYSTEM_ERROR_ANALYSIS_PROMPT = `
 You are EncryptGate Copilot, a security analyst assistant for Neo4j email investigations.
 
 All query attempts failed. Analyze:
-1. Why the queries couldn’t connect or ran empty.
+1. Why the queries couldn't connect or ran empty.
 2. What schema or data limitations might apply.
 3. How to rephrase the question for better results.
 4. Suggest concrete alternative approaches.
@@ -379,7 +436,7 @@ function cleanQueryForExecution(query: string): string | null {
 
 // === Execute Cypher ===
 async function runQuery(cypher: string): Promise<any[]> {
-  const session: Session = driver.session()
+  const session: Session = getDriver().session()
   try {
     const res = await session.run(cypher)
     await session.close()
@@ -395,28 +452,34 @@ async function runQuery(cypher: string): Promise<any[]> {
 
 // === Fetch Email Context ===
 export async function fetchEmailContext(messageId: string): Promise<string> {
-  const q = `
-MATCH (u:User)-[:WAS_SENT]->(e:Email {messageId:$m})
-OPTIONAL MATCH (e)-[:WAS_SENT_TO]->(r:User)
-RETURN u.email AS sender, collect(r.email) AS recipients,
-       e.sentDate AS date, e.subject AS subject, e.body AS body
-`
-  const session = driver.session()
-  const result = await session.run(q, { m: messageId })
-  await session.close()
-  if (result.records.length === 0) return ''
+  try {
+    const q = `
+    MATCH (u:User)-[:WAS_SENT]->(e:Email {messageId:$m})
+    OPTIONAL MATCH (e)-[:WAS_SENT_TO]->(r:User)
+    RETURN u.email AS sender, collect(r.email) AS recipients,
+           e.sentDate AS date, e.subject AS subject, e.body AS body
+    `
+    const session = getDriver().session()
+    const result = await session.run(q, { m: messageId })
+    await session.close()
+    
+    if (result.records.length === 0) return ''
 
-  const rec = result.records[0].toObject() as any
-  const snippet = (rec.body || '').replace(/\n/g,' ').slice(0,200)
-  return [
-    `Investigating Email:`,
-    `- Message-ID: ${messageId}`,
-    `- From: ${rec.sender}`,
-    `- To: ${rec.recipients.join(', ')}`,
-    `- Date: ${rec.date}`,
-    `- Subject: ${rec.subject}`,
-    `- Snippet: ${snippet}…`
-  ].join('\n')
+    const rec = result.records[0].toObject() as any
+    const snippet = (rec.body || '').replace(/\n/g,' ').slice(0,200)
+    return [
+      `Investigating Email:`,
+      `- Message-ID: ${messageId}`,
+      `- From: ${rec.sender}`,
+      `- To: ${rec.recipients.join(', ')}`,
+      `- Date: ${rec.date}`,
+      `- Subject: ${rec.subject}`,
+      `- Snippet: ${snippet}…`
+    ].join('\n')
+  } catch (error) {
+    console.error('❌ Failed to fetch email context:', error)
+    return ''
+  }
 }
 
 // === Summarize Results ===
@@ -478,70 +541,83 @@ export async function askCopilot(
   question: string,
   messageId: string
 ): Promise<string> {
-  const scenario = await fetchEmailContext(messageId)
-  if (!scenario) {
-    return `❌ No email found with Message-ID "${messageId}".`
-  }
-
-  const attempts: string[] = []
-  const errors:   string[] = []
-
-  // 1) Special‐case “most emails to recipient”
-  const [type,data] = analyzeQuestion(question, scenario)
-  if (type === 'most_emails_to_recipient' && data.recipient) {
-    const qtpl = QUERY_TEMPLATES.most_emails_to_recipient.replace(
-      '{recipient}', data.recipient
-    )
-    attempts.push(qtpl)
-    const res = await runQuery(qtpl)
-    if (res.length && !('error' in res[0])) {
-      return summarizeResults(question, qtpl, res)
-    } else {
-      errors.push(res[0].error || 'No results')
+  try {
+    // Test connection first
+    const isConnected = await testNeo4jConnection()
+    if (!isConnected) {
+      return '❌ Neo4j database connection failed. Please check your connection settings and ensure Neo4j is running.'
     }
-  }
 
-  // 2) General flow with retries
-  for (let i = 1; i <= MAX_RETRY_ATTEMPTS; i++) {
-    let q: string
-    if (i === 1) {
-      q = await generateCypher(question, scenario)
-    } else {
-      q = await autoCorrectCypher(
-        attempts[i-2],
-        errors[i-2],
-        i,
-        question,
-        scenario,
-        i > 5 ? attempts.slice(-3).map((q,j)=>[q, errors[errors.length-3+j]] as [string,string]) : null
+    const scenario = await fetchEmailContext(messageId)
+    if (!scenario) {
+      return `❌ No email found with Message-ID "${messageId}". Please verify the email exists in the database.`
+    }
+
+    const attempts: string[] = []
+    const errors:   string[] = []
+
+    // 1) Special‐case "most emails to recipient"
+    const [type,data] = analyzeQuestion(question, scenario)
+    if (type === 'most_emails_to_recipient' && data.recipient) {
+      const qtpl = QUERY_TEMPLATES.most_emails_to_recipient.replace(
+        '{recipient}', data.recipient
       )
+      attempts.push(qtpl)
+      const res = await runQuery(qtpl)
+      if (res.length && !('error' in res[0])) {
+        return summarizeResults(question, qtpl, res)
+      } else {
+        errors.push(res[0].error || 'No results')
+      }
     }
-    attempts.push(q)
 
-    const clean = cleanQueryForExecution(q)
-    if (!clean) {
-      errors.push('Invalid or empty query')
-      continue
+    // 2) General flow with retries
+    for (let i = 1; i <= MAX_RETRY_ATTEMPTS; i++) {
+      let q: string
+      if (i === 1) {
+        q = await generateCypher(question, scenario)
+      } else {
+        q = await autoCorrectCypher(
+          attempts[i-2],
+          errors[i-2],
+          i,
+          question,
+          scenario,
+          i > 5 ? attempts.slice(-3).map((q,j)=>[q, errors[errors.length-3+j]] as [string,string]) : null
+        )
+      }
+      attempts.push(q)
+
+      const clean = cleanQueryForExecution(q)
+      if (!clean) {
+        errors.push('Invalid or empty query')
+        continue
+      }
+
+      const res = await runQuery(clean)
+      if (res.length && !('error' in res[0])) {
+        return summarizeResults(question, clean, res)
+      } else {
+        errors.push(res[0].error || 'No results')
+      }
     }
 
-    const res = await runQuery(clean)
-    if (res.length && !('error' in res[0])) {
-      return summarizeResults(question, clean, res)
-    } else {
-      errors.push(res[0].error || 'No results')
-    }
+    // 3) All attempts failed
+    const explanation = await analyzeError(question, attempts, errors, scenario)
+
+    return [
+      `❌ Unable to generate a valid query after ${MAX_RETRY_ATTEMPTS} attempts.`,
+      '',
+      explanation,
+      '',
+      '**Troubleshooting Tips:**',
+      '- Ensure Neo4j has email data loaded',
+      '- Try simpler questions first',
+      '- Check if the email message ID exists in the database'
+    ].join('\n')
+
+  } catch (error: any) {
+    console.error('❌ Copilot error:', error)
+    return `❌ System Error: ${error.message}. Please check Neo4j connection and try again.`
   }
-
-  // 3) All attempts failed
-  const detail = attempts
-    .map((q,i)=>`Attempt ${i+1}:\n${q}\nError: ${errors[i]}`)
-    .join('\n\n')
-  const explanation = await analyzeError(question, attempts, errors, scenario)
-
-  return [
-    `❌ Unable to generate a valid query after ${MAX_RETRY_ATTEMPTS} attempts.`,
-    explanation,
-    '--- ATTEMPTS ---',
-    detail
-  ].join('\n\n')
 }

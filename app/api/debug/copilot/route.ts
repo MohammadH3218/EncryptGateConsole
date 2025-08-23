@@ -2,7 +2,7 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { driver } from '@/lib/neo4j';
+import { getDriver } from '@/lib/neo4j';
 
 export async function GET() {
   const diagnostics = {
@@ -24,6 +24,7 @@ export async function GET() {
 
   // Test Neo4j connection
   try {
+    const driver = getDriver();
     const session = driver.session();
     const result = await session.run('RETURN "Hello Neo4j" as message');
     await session.close();
@@ -57,6 +58,7 @@ export async function GET() {
   // Test for email data in Neo4j
   if (diagnostics.tests.neo4jConnection) {
     try {
+      const driver = getDriver();
       const session = driver.session();
       const result = await session.run('MATCH (e:Email) RETURN count(e) as emailCount');
       const emailCount = result.records[0]?.get('emailCount').toNumber() || 0;

@@ -1,5 +1,5 @@
-// lib/copilot.ts
-import { ensureNeo4jConnection } from './neo4j'
+// lib/copilot.ts - COMPLETE UPDATED VERSION
+import { ensureNeo4jConnection, testNeo4jConnection } from './neo4j'
 import { askCopilot, fetchEmailContext } from './neo4j'
 
 interface LLMResponse {
@@ -9,7 +9,7 @@ interface LLMResponse {
 }
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const OPENAI_MODEL = "gpt-4o-mini"
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 const SYSTEM_CYPHER_PROMPT = `You are EncryptGate Copilot, a Neo4j Cypher expert for email security analysis.
@@ -46,39 +46,68 @@ const MAX_RETRY_ATTEMPTS = 3
 export class SecurityCopilotService {
   private queryCache = new Map<string, { result: any, timestamp: number }>()
   private isInitialized = false
+  private initializationError: string | null = null
 
   constructor() {
-    this.initialize()
+    this.initialize().catch(error => {
+      console.error('❌ SecurityCopilotService initialization failed:', error)
+      this.initializationError = error.message
+    })
   }
 
   private async initialize() {
     try {
       console.log('🔄 Initializing Security Copilot...')
+      
+      // Check environment variables first
+      if (!OPENAI_API_KEY) {
+        throw new Error('OPENAI_API_KEY environment variable is required')
+      }
+
       console.log('🔗 Testing Neo4j connection...')
       
       // Test Neo4j connection with better error reporting
+      const isConnected = await testNeo4jConnection()
+      if (!isConnected) {
+        throw new Error('Neo4j connection test failed')
+      }
+      
+      // Test Neo4j query functionality
       const neo4j = await ensureNeo4jConnection()
       const result = await neo4j.runQuery('RETURN 1 as test')
       
       console.log('✅ Neo4j connection successful:', result)
       this.isInitialized = true
+      this.initializationError = null
       console.log('✅ Security Copilot initialized successfully')
+      
     } catch (error: any) {
       console.error('❌ Failed to initialize Security Copilot:', error)
-      console.error('❌ Error details:', {
-        message: error.message,
-        code: error.code,
-        name: error.name
-      })
+      this.isInitialized = false
+      this.initializationError = error.message
       
       // Provide more specific error messages
       if (error.message?.includes('ECONNREFUSED')) {
         throw new Error(`Neo4j connection failed: Cannot connect to Neo4j at bolt://localhost:7687. Please ensure Neo4j is running and accessible.`)
       } else if (error.message?.includes('authentication')) {
         throw new Error(`Neo4j authentication failed: Please check your Neo4j username and password.`)
+      } else if (error.message?.includes('OPENAI_API_KEY')) {
+        throw new Error(`OpenAI API key missing: Please set the OPENAI_API_KEY environment variable.`)
       } else {
         throw new Error(`Failed to initialize: ${error.message || error}`)
       }
+    }
+  }
+
+  // Force re-initialization
+  async reinitialize(): Promise<boolean> {
+    this.isInitialized = false
+    this.initializationError = null
+    try {
+      await this.initialize()
+      return true
+    } catch (error) {
+      return false
     }
   }
 
@@ -92,10 +121,20 @@ export class SecurityCopilotService {
     urls: string[];
   }): Promise<void> {
     if (!this.isInitialized) {
+      if (this.initializationError) {
+        throw new Error(`Copilot not initialized: ${this.initializationError}`)
+      }
       await this.initialize()
     }
 
     try {
+      console.log('📧 Adding email to Neo4j graph:', {
+        messageId: params.messageId,
+        sender: params.sender,
+        recipients: params.recipients.length,
+        urls: params.urls.length
+      })
+
       const neo4j = await ensureNeo4jConnection()
       
       // Create User nodes for sender and recipients in batches
@@ -174,9 +213,9 @@ export class SecurityCopilotService {
       
       console.log(`✅ Email added to Neo4j graph: ${params.messageId}`)
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Failed to add email to Neo4j graph:', error)
-      throw new Error(`Failed to add email to graph: ${error}`)
+      throw new Error(`Failed to add email to graph: ${error.message}`)
     }
   }
 
@@ -205,20 +244,20 @@ export class SecurityCopilotService {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        throw new Error(`LLM API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`)
+        throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`)
       }
 
       const data = await response.json()
       const content = data.choices?.[0]?.message?.content
       
       if (!content) {
-        throw new Error('No content received from LLM')
+        throw new Error('No content received from OpenAI')
       }
       
       return content
-    } catch (error) {
-      console.error('LLM query error:', error)
-      throw new Error(`Failed to query LLM: ${error}`)
+    } catch (error: any) {
+      console.error('OpenAI query error:', error)
+      throw new Error(`Failed to query OpenAI: ${error.message}`)
     }
   }
 
@@ -292,6 +331,9 @@ RETURN ONLY THE FIXED QUERY - NO EXPLANATIONS, NO MARKDOWN, NO BACKTICKS.`
 
   async executeCypherWithRetry(question: string, context?: any): Promise<{ results: any[], query: string }> {
     if (!this.isInitialized) {
+      if (this.initializationError) {
+        throw new Error(`Copilot not initialized: ${this.initializationError}`)
+      }
       await this.initialize()
     }
 
@@ -303,6 +345,11 @@ RETURN ONLY THE FIXED QUERY - NO EXPLANATIONS, NO MARKDOWN, NO BACKTICKS.`
       try {
         console.log(`🔍 Executing query (attempt ${attempt}):`, query)
         const records = await neo4j.runQuery(query)
+        
+        // Check if query returned error in results
+        if (records.length === 1 && records[0].error) {
+          throw new Error(records[0].error)
+        }
         
         return { results: records, query }
       } catch (error: any) {
@@ -320,7 +367,7 @@ RETURN ONLY THE FIXED QUERY - NO EXPLANATIONS, NO MARKDOWN, NO BACKTICKS.`
 
   async summarizeResults(question: string, query: string, results: any[]): Promise<string> {
     if (!results || results.length === 0) {
-      return "No results found for this query."
+      return "No results found for this query. This could mean:\n- The email data hasn't been loaded into the database\n- The query didn't match any existing data\n- Try rephrasing your question"
     }
 
     // Limit results for summarization
@@ -338,18 +385,21 @@ Provide a clear analysis of these results in context of the email investigation.
 
     try {
       return await this.queryLLM(SYSTEM_SUMMARY_PROMPT, summaryPrompt)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Summarization error:', error)
-      return `Query returned ${results.length} results. Unable to generate detailed summary due to: ${error}`
+      return `Query returned ${results.length} results. Unable to generate detailed summary due to: ${error.message}\n\nSample results: ${JSON.stringify(results.slice(0, 3), null, 2)}`
     }
   }
 
   async processQuestion(question: string, context?: any): Promise<LLMResponse> {
     try {
+      console.log('🤖 Processing question:', question)
+      
       // Check cache first
       const cacheKey = `${question}-${JSON.stringify(context)}`
       const cached = this.queryCache.get(cacheKey)
       if (cached && Date.now() - cached.timestamp < 60000) { // 1 minute cache
+        console.log('📋 Using cached result')
         return {
           response: cached.result,
           confidence: 90,
@@ -358,6 +408,10 @@ Provide a clear analysis of these results in context of the email investigation.
 
       // Check if Neo4j is available
       if (!this.isInitialized) {
+        if (this.initializationError) {
+          console.warn('Neo4j not available, providing fallback response:', this.initializationError)
+          return this.provideFallbackResponse(question, context)
+        }
         try {
           await this.initialize()
         } catch (error) {
@@ -370,6 +424,7 @@ Provide a clear analysis of these results in context of the email investigation.
       const messageId = context?.messageId || (typeof context === 'string' ? context : null)
       if (messageId) {
         try {
+          console.log('🔍 Using Neo4j askCopilot for messageId:', messageId)
           const response = await askCopilot(question, messageId)
           const result = {
             response: response,
@@ -378,13 +433,13 @@ Provide a clear analysis of these results in context of the email investigation.
           this.queryCache.set(cacheKey, { result: response, timestamp: Date.now() })
           return result
         } catch (error) {
-          console.warn('Neo4j-based query failed, falling back to LLM-only response:', error)
-          return this.provideFallbackResponse(question, context)
+          console.warn('Neo4j-based query failed, falling back to graph query:', error)
         }
       }
       
-      // Fallback to graph query
+      // Fallback to direct graph query
       try {
+        console.log('🔍 Using direct graph query execution')
         const { results, query } = await this.executeCypherWithRetry(question, context)
         const summary = await this.summarizeResults(question, query, results)
         
@@ -450,7 +505,13 @@ Be helpful while noting that detailed database queries are not available.`
       }
     } catch (error: any) {
       return {
-        response: `I'm currently unable to process your question due to system issues. Please ensure Neo4j is running and try again later.`,
+        response: `I'm currently unable to process your question due to system issues. Please ensure Neo4j is running and try again later.
+
+Troubleshooting steps:
+1. Check if Neo4j is running: \`neo4j status\`
+2. Test connection at http://localhost:7474
+3. Verify environment variables are set correctly
+4. Run diagnostic test at /api/copilot-test`,
         error: error.message,
         confidence: 0,
       }
@@ -460,6 +521,14 @@ Be helpful while noting that detailed database queries are not available.`
   async getEmailContext(messageId: string): Promise<any> {
     try {
       console.log('🔍 Fetching email context for:', messageId)
+      
+      if (!this.isInitialized) {
+        if (this.initializationError) {
+          throw new Error(`Copilot not initialized: ${this.initializationError}`)
+        }
+        await this.initialize()
+      }
+
       const contextString = await fetchEmailContext(messageId)
       
       if (!contextString) {
@@ -488,7 +557,7 @@ Be helpful while noting that detailed database queries are not available.`
       
       console.log('✅ Email context loaded:', context)
       return context
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error fetching email context:', error)
       return null
     }
@@ -498,14 +567,34 @@ Be helpful while noting that detailed database queries are not available.`
   async isHealthy(): Promise<boolean> {
     try {
       if (!this.isInitialized) {
+        if (this.initializationError) {
+          console.log('❌ Copilot not healthy - initialization error:', this.initializationError)
+          return false
+        }
         await this.initialize()
       }
+      
+      // Test Neo4j connection
       const neo4j = await ensureNeo4jConnection()
       await neo4j.runQuery('RETURN 1')
+      
+      // Test OpenAI if available
+      if (OPENAI_API_KEY) {
+        await this.queryLLM('You are a test assistant.', 'Reply with "OK"', 0)
+      }
+      
       return true
     } catch (error) {
       console.error('Health check failed:', error)
       return false
+    }
+  }
+
+  // Get initialization status
+  getStatus(): { initialized: boolean, error: string | null } {
+    return {
+      initialized: this.isInitialized,
+      error: this.initializationError
     }
   }
 }
