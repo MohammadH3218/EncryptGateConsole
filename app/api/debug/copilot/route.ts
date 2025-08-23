@@ -34,9 +34,15 @@ export async function GET() {
 
   // Test OpenAI API
   try {
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      diagnostics.errors.push('OPENAI_API_KEY environment variable not set');
+      return NextResponse.json(diagnostics);
+    }
+
     const response = await fetch('https://api.openai.com/v1/models', {
       headers: {
-        'Authorization': `Bearer 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`,
+        'Authorization': `Bearer ${openaiApiKey}`,
       },
     });
     if (response.ok) {

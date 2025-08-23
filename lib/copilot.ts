@@ -8,7 +8,7 @@ interface LLMResponse {
   error?: string
 }
 
-const OPENAI_API_KEY = "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"
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const OPENAI_MODEL = "gpt-4o-mini"
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
