@@ -1,6 +1,7 @@
 // lib/neo4j-inspector.ts
 
-import { driver } from './neo4j'
+import { getDriver } from './neo4j'
+import { Record } from 'neo4j-driver'
 
 export interface DatabaseStats {
   totalNodes: number
@@ -11,7 +12,7 @@ export interface DatabaseStats {
 }
 
 export async function inspectDatabase(): Promise<DatabaseStats> {
-  const session = driver.session()
+  const session = getDriver().session()
   
   try {
     // Get total nodes and relationships
@@ -33,7 +34,7 @@ export async function inspectDatabase(): Promise<DatabaseStats> {
     
     let nodeLabels: { label: string; count: number }[] = []
     try {
-      nodeLabels = labelsResult.records.map(record => ({
+      nodeLabels = labelsResult.records.map((record: Record) => ({
         label: record.get('label'),
         count: record.get('count').toNumber()
       }))
@@ -46,7 +47,7 @@ export async function inspectDatabase(): Promise<DatabaseStats> {
         LIMIT 10
       `)
       
-      nodeLabels = simpleLabelsResult.records.map(record => ({
+      nodeLabels = simpleLabelsResult.records.map((record: Record) => ({
         label: record.get('labels').join(':'),
         count: record.get('count').toNumber()
       }))
@@ -60,7 +61,7 @@ export async function inspectDatabase(): Promise<DatabaseStats> {
       LIMIT 10
     `)
     
-    const relationshipTypes = relTypesResult.records.map(record => ({
+    const relationshipTypes = relTypesResult.records.map((record: Record) => ({
       type: record.get('relType'),
       count: record.get('count').toNumber()
     }))
@@ -72,7 +73,7 @@ export async function inspectDatabase(): Promise<DatabaseStats> {
       LIMIT 5
     `)
     
-    const sampleNodes = sampleResult.records.map(record => {
+    const sampleNodes = sampleResult.records.map((record: Record) => {
       const node = record.get('n')
       return {
         id: node.identity.toNumber(),
@@ -101,7 +102,7 @@ export async function checkEmailData(): Promise<{
   userCount: number
   sampleEmails: any[]
 }> {
-  const session = driver.session()
+  const session = getDriver().session()
   
   try {
     // Check for email-related data
@@ -124,7 +125,7 @@ export async function checkEmailData(): Promise<{
     const emailCount = emailResult.records[0].get('emailCount').toNumber()
     const userCount = userResult.records[0].get('userCount').toNumber()
     
-    const sampleEmails = sampleEmailsResult.records.map(record => ({
+    const sampleEmails = sampleEmailsResult.records.map((record: Record) => ({
       sender: record.get('sender'),
       subject: record.get('subject'),
       date: record.get('date')
