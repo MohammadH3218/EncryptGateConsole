@@ -469,7 +469,7 @@ export default function CloudServicesPage() {
           </Alert>
 
           {/* ── Cognito Section ─────────────────────────────────────────────── */}
-          <Card className="bg-[#0f0f0f] border-none text-white">
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
@@ -492,7 +492,7 @@ export default function CloudServicesPage() {
                         Connect Cognito
                       </Button>
                     </DialogTrigger>
-                    <DialogContent className="bg-[#1f1f1f] border-[#1f1f1f] text-white">
+                    <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
                       <DialogHeader>
                         <DialogTitle className="text-white">Connect AWS Cognito</DialogTitle>
                         <DialogDescription className="text-gray-400">
@@ -756,15 +756,15 @@ export default function CloudServicesPage() {
           </Card>
 
           {/* ── WorkMail Section ─────────────────────────────────────────────── */}
-          <Card>
+          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
               <div className="flex justify-between items-center">
                 <div>
-                  <CardTitle className="flex items-center gap-2">
-                    <Mail className="h-5 w-5" />
+                  <CardTitle className="flex items-center gap-2 text-white">
+                    <Mail className="h-5 w-5 text-white" />
                     Employee Email Service
                   </CardTitle>
-                  <CardDescription>
+                  <CardDescription className="text-gray-400">
                     AWS WorkMail → monitor employee emails for threats.
                   </CardDescription>
                 </div>
@@ -774,35 +774,35 @@ export default function CloudServicesPage() {
                     onOpenChange={setIsWorkmailDialogOpen}
                   >
                     <DialogTrigger asChild>
-                      <Button>
+                      <Button className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                         <Plus className="mr-2 h-4 w-4" />
                         Connect WorkMail
                       </Button>
                     </DialogTrigger>
-                    <DialogContent>
+                    <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
                       <DialogHeader>
-                        <DialogTitle>Connect AWS WorkMail</DialogTitle>
-                        <DialogDescription>
+                        <DialogTitle className="text-white">Connect AWS WorkMail</DialogTitle>
+                        <DialogDescription className="text-gray-400">
                           Provide your Organization ID & Region.
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-4">
                         <Alert
                           variant="default"
-                          className="bg-blue-50 border-blue-200"
+                          className="bg-blue-900/20 border-blue-500/20 text-white"
                         >
-                          <Info className="h-4 w-4" />
-                          <AlertTitle>
+                          <Info className="h-4 w-4 text-blue-400" />
+                          <AlertTitle className="text-white">
                             WorkMail Configuration
                           </AlertTitle>
-                          <AlertDescription className="text-sm">
+                          <AlertDescription className="text-sm text-gray-300">
                             Find these in the AWS WorkMail Console.
                           </AlertDescription>
                         </Alert>
                         <div className="grid grid-cols-4 items-center gap-4">
                           <Label
                             htmlFor="organizationId"
-                            className="text-right"
+                            className="text-right text-white"
                           >
                             Org ID
                           </Label>
@@ -817,19 +817,20 @@ export default function CloudServicesPage() {
                                 }))
                               }
                               placeholder="m-xxxxxxxxxxxxxxxxx"
+                              className="bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                             />
-                            <p className="text-xs text-muted-foreground">
+                            <p className="text-xs text-gray-400">
                               must start with "m-"
                             </p>
                           </div>
                         </div>
                         <div className="grid grid-cols-4 items-center gap-4">
-                          <Label htmlFor="alias" className="text-right">
+                          <Label htmlFor="alias" className="text-right text-white">
                             Alias (opt.)
                           </Label>
                           <Input
                             id="alias"
-                            className="col-span-3"
+                            className="col-span-3 bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                             value={workmailDetails.alias}
                             onChange={(e) =>
                               setWorkmailDetails((p) => ({
@@ -843,7 +844,7 @@ export default function CloudServicesPage() {
                         <div className="grid grid-cols-4 items-center gap-4">
                           <Label
                             htmlFor="wm-region"
-                            className="text-right"
+                            className="text-right text-white"
                           >
                             Region
                           </Label>
@@ -896,6 +897,7 @@ export default function CloudServicesPage() {
                             })
                             setValidationResult(null)
                           }}
+                          className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                         >
                           Cancel
                         </Button>
@@ -903,6 +905,7 @@ export default function CloudServicesPage() {
                           variant="outline"
                           onClick={handleValidate}
                           disabled={isValidating || loading}
+                          className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                         >
                           {isValidating ? (
                             <>
@@ -916,6 +919,7 @@ export default function CloudServicesPage() {
                         <Button
                           onClick={handleConnectWorkmail}
                           disabled={loading || isValidating}
+                          className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                         >
                           {loading ? (
                             <>
@@ -1026,16 +1030,16 @@ export default function CloudServicesPage() {
             open={isEditDialogOpen}
             onOpenChange={setIsEditDialogOpen}
           >
-            <DialogContent>
+            <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
               <DialogHeader>
-                <DialogTitle>
+                <DialogTitle className="text-white">
                   Edit{' '}
                   {editingServiceType === 'aws-cognito'
                     ? 'AWS Cognito'
                     : 'AWS WorkMail'}
                   Configuration
                 </DialogTitle>
-                <DialogDescription>
+                <DialogDescription className="text-gray-400">
                   Update your{' '}
                   {editingServiceType === 'aws-cognito'
                     ? 'identity provider'
