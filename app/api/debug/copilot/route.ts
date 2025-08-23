@@ -34,9 +34,15 @@ export async function GET() {
 
   // Test OpenAI API
   try {
+    const openaiApiKey = process.env.OPENAI_API_KEY;
+    if (!openaiApiKey) {
+      diagnostics.errors.push('OPENAI_API_KEY environment variable not set');
+      return NextResponse.json(diagnostics);
+    }
+
     const response = await fetch('https://api.openai.com/v1/models', {
       headers: {
-        'Authorization': `Bearer REDACTED_OPENAI_API_KEY`,
+        'Authorization': `Bearer ${openaiApiKey}`,
       },
     });
     if (response.ok) {

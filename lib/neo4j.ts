@@ -8,7 +8,7 @@ const NEO4J_USER      = 'neo4j'
 const NEO4J_PASSWORD  = 'REDACTED_PASSWORD'
 const NEO4J_ENCRYPTED = false
 
-const OPENAI_API_KEY = "REDACTED_OPENAI_API_KEY"
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY
 const OPENAI_MODEL   = "gpt-4o-mini"
 const OPENAI_URL     = 'https://api.openai.com/v1/chat/completions'
 
@@ -149,6 +149,10 @@ async function askLLM(
   forceNew = false,
   temperature = 0.2
 ): Promise<string> {
+  if (!OPENAI_API_KEY) {
+    return 'Error: OPENAI_API_KEY environment variable not set'
+  }
+
   const asciiUser = user.replace(/\u2026/g,'...').replace(/[^\x00-\x7F]/g,'')
   const cacheKey = md5(system + asciiUser)
   if (!forceNew && promptCache.has(cacheKey)) {

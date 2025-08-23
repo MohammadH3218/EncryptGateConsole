@@ -16,7 +16,7 @@ const REGION             = process.env.AWS_REGION!;
 const ORG_ID             = process.env.ORGANIZATION_ID!;
 const EMAILS_TABLE       = process.env.EMAILS_TABLE_NAME!;
 const DETECTIONS_TABLE   = process.env.DETECTIONS_TABLE_NAME!;
-const OPENAI_API_KEY = "REDACTED_OPENAI_API_KEY";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL   = "gpt-4o-mini";
 const OPENAI_URL     = 'https://api.openai.com/v1/chat/completions';
 
@@ -134,6 +134,11 @@ export async function POST(request: Request) {
 // ─── LLM-BASED THREAT ANALYSIS ───────────────────────────────────────────────
 //
 async function analyzeThreatWithLLM(emailData: ThreatRequest): Promise<ThreatAnalysis> {
+  if (!OPENAI_API_KEY) {
+    console.warn('OPENAI_API_KEY not configured, falling back to rule-based analysis');
+    return fallbackThreatAnalysis(emailData);
+  }
+
   const emailContent = `
 Email Analysis Request:
 
