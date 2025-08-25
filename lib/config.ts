@@ -1,10 +1,19 @@
 // lib/config.ts - Dynamic configuration loading
 import { SSMClient, GetParameterCommand } from '@aws-sdk/client-ssm';
 
-// Cache for API keys to avoid repeated AWS calls
+// Cache for configuration to avoid repeated AWS calls
 let cachedOpenAIKey: string | null = null;
+let cachedNeo4jConfig: Neo4jConfig | null = null;
 let keyFetchTime: number = 0;
+let neo4jFetchTime: number = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+
+interface Neo4jConfig {
+  uri: string;
+  user: string;
+  password: string;
+  encrypted: boolean;
+}
 
 const ssmClient = new SSMClient({ 
   region: process.env.AWS_REGION || 'us-east-1' 
@@ -111,16 +120,93 @@ export function validateOpenAIKey(key: string): boolean {
 }
 
 /**
+ * Get Neo4j configuration from Parameter Store or environment variables
+ */
+export async function getNeo4jConfig(): Promise<Neo4jConfig> {
+  // Check cache first
+  if (cachedNeo4jConfig && Date.now() - neo4jFetchTime < CACHE_TTL) {
+    console.log('🔑 Using cached Neo4j config');
+    return cachedNeo4jConfig;
+  }
+
+  try {
+    // Try environment variables first (for local development)
+    if (process.env.NEO4J_URI && process.env.NEO4J_USER && process.env.NEO4J_PASSWORD) {
+      console.log('🔑 Using Neo4j config from environment variables');
+      const config = {
+        uri: process.env.NEO4J_URI,
+        user: process.env.NEO4J_USER,
+        password: process.env.NEO4J_PASSWORD,
+        encrypted: process.env.NEO4J_ENCRYPTED === 'true'
+      };
+      
+      cachedNeo4jConfig = config;
+      neo4jFetchTime = Date.now();
+      return config;
+    }
+
+    // Fetch from Parameter Store
+    console.log('🔑 Fetching Neo4j config from AWS Parameter Store...');
+    
+    const uriCommand = new GetParameterCommand({
+      Name: 'encryptgate-neo4j-uri',
+      WithDecryption: false
+    });
+    
+    const userCommand = new GetParameterCommand({
+      Name: 'encryptgate-neo4j-user',
+      WithDecryption: false
+    });
+    
+    const passwordCommand = new GetParameterCommand({
+      Name: 'encryptgate-neo4j-password',
+      WithDecryption: true
+    });
+
+    const [uriResponse, userResponse, passwordResponse] = await Promise.all([
+      ssmClient.send(uriCommand),
+      ssmClient.send(userCommand),
+      ssmClient.send(passwordCommand)
+    ]);
+
+    if (!uriResponse.Parameter?.Value || !userResponse.Parameter?.Value || !passwordResponse.Parameter?.Value) {
+      throw new Error('One or more Neo4j parameters not found in Parameter Store');
+    }
+
+    const config = {
+      uri: uriResponse.Parameter.Value,
+      user: userResponse.Parameter.Value,
+      password: passwordResponse.Parameter.Value,
+      encrypted: false // Default to false for most EC2 setups
+    };
+
+    cachedNeo4jConfig = config;
+    neo4jFetchTime = Date.now();
+    
+    console.log('✅ Neo4j config successfully loaded from Parameter Store');
+    console.log(`🔍 URI: ${config.uri}`);
+    console.log(`🔍 User: ${config.user}`);
+    
+    return config;
+
+  } catch (error: any) {
+    console.error('❌ Failed to get Neo4j config:', error);
+    
+    if (error.name === 'ParameterNotFound') {
+      throw new Error('Neo4j parameters not found in Parameter Store. Please create parameters: encryptgate-neo4j-uri, encryptgate-neo4j-user, encryptgate-neo4j-password');
+    } else if (error.name === 'AccessDenied') {
+      throw new Error('Access denied to Parameter Store. Check IAM permissions for SSM GetParameter');
+    } else {
+      throw new Error(`Failed to load Neo4j config: ${error.message}`);
+    }
+  }
+}
+
+/**
  * Get other configuration values
  */
 export function getConfig() {
   return {
-    neo4j: {
-      uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
-      user: process.env.NEO4J_USER || 'neo4j',
-      password: process.env.NEO4J_PASSWORD || 'Qwe!1234',
-      encrypted: process.env.NEO4J_ENCRYPTED === 'true'
-    },
     openai: {
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       url: 'https://api.openai.com/v1/chat/completions'
@@ -138,4 +224,22 @@ export function clearApiKeyCache(): void {
   cachedOpenAIKey = null;
   keyFetchTime = 0;
   console.log('🗑️ OpenAI API key cache cleared');
+}
+
+/**
+ * Clear the cached Neo4j config (useful for error recovery)
+ */
+export function clearNeo4jConfigCache(): void {
+  cachedNeo4jConfig = null;
+  neo4jFetchTime = 0;
+  console.log('🗑️ Neo4j config cache cleared');
+}
+
+/**
+ * Clear all cached configuration
+ */
+export function clearAllCache(): void {
+  clearApiKeyCache();
+  clearNeo4jConfigCache();
+  console.log('🗑️ All configuration cache cleared');
 }
