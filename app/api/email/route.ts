@@ -18,25 +18,26 @@ console.log('📧 Email API initialized:', { REGION, ORG_ID, EMAILS_TABLE, EMPLO
 
 const ddb = new DynamoDBClient({ region: REGION });
 
-// GET /api/email?limit=50&lastKey=<encoded>&search=<query>
+// GET /api/email?limit=20&page=1&search=<query>
 export async function GET(request: Request) {
   try {
     console.log('📧 GET /api/email - Loading emails from database');
     const url = new URL(request.url);
-    const rawLim = url.searchParams.get('limit') || '50';
-    const rawKey = url.searchParams.get('lastKey') || undefined;
+    const rawLim = url.searchParams.get('limit') || '20';
+    const rawPage = url.searchParams.get('page') || '1';
     const searchQuery = url.searchParams.get('search') || '';
 
-    // Parse & clamp limit for server-side pagination
-    const limit = Math.min(100, Math.max(1, parseInt(rawLim, 10) || 50));
-    console.log(`🔍 Query parameters: limit=${limit}, hasLastKey=${!!rawKey}, searchQuery="${searchQuery}"`);
+    // Parse parameters
+    const limit = Math.min(100, Math.max(1, parseInt(rawLim, 10) || 20));
+    const page = Math.max(1, parseInt(rawPage, 10) || 1);
+    console.log(`🔍 Query parameters: limit=${limit}, page=${page}, searchQuery="${searchQuery}"`);
 
     // Handle search mode vs pagination mode
     let allEmails: any[] = [];
-    let lastEvaluatedKey: any = undefined;
+    let hasMorePages = false;
     
     if (searchQuery.trim()) {
-      // Search mode: scan entire table and filter server-side
+      // Search mode: scan entire table, filter, sort, then paginate
       console.log('🔍 Search mode: scanning entire table for search query');
       let searchResults: any[] = [];
       let scanLastKey: any = undefined;
@@ -101,40 +102,64 @@ export async function GET(request: Request) {
         return timeB.localeCompare(timeA);
       });
       
-      // Apply pagination to search results
-      const startIdx = rawKey ? parseInt(rawKey, 10) || 0 : 0;
+      // Apply page-based pagination to search results
+      const startIdx = (page - 1) * limit;
       const endIdx = startIdx + limit;
       allEmails = searchResults.slice(startIdx, endIdx);
-      
-      // For search, lastKey is just the next start index
-      lastEvaluatedKey = endIdx < searchResults.length ? endIdx.toString() : undefined;
+      hasMorePages = endIdx < searchResults.length;
       
     } else {
-      // Pagination mode: normal scanning with pagination
-      console.log('📋 Pagination mode: scanning emails table with pagination...');
+      // Pagination mode: scan and collect enough data for page-based pagination
+      console.log('📋 Pagination mode: scanning emails table...');
+      let allScanResults: any[] = [];
+      let scanLastKey: any = undefined;
+      let scanCount = 0;
       
-      const scanParams: ScanCommandInput = { 
-        TableName: EMAILS_TABLE, 
-        Limit: limit 
-      };
+      // Scan enough to get to the requested page
+      const neededItems = page * limit;
+      
+      do {
+        const scanParams: ScanCommandInput = { 
+          TableName: EMAILS_TABLE,
+          Limit: Math.min(1000, neededItems - allScanResults.length + limit) // Get a bit extra to check for more pages
+        };
 
-      if (rawKey) {
-        try {
-          scanParams.ExclusiveStartKey = JSON.parse(decodeURIComponent(rawKey));
-          console.log('⏭️ Resuming pagination with lastKey');
-        } catch (e) {
-          console.warn('⚠️ Invalid lastKey, ignoring:', rawKey);
+        if (scanLastKey) {
+          scanParams.ExclusiveStartKey = scanLastKey;
         }
-      }
-
-      console.log(`📋 DynamoDB scan with limit: ${limit}`);
-      const resp = await ddb.send(new ScanCommand(scanParams));
+        
+        console.log(`📋 Scan iteration ${++scanCount}, current total: ${allScanResults.length}, target: ${neededItems}`);
+        const resp = await ddb.send(new ScanCommand(scanParams));
+        
+        if (resp.Items) {
+          allScanResults.push(...resp.Items);
+        }
+        
+        scanLastKey = resp.LastEvaluatedKey;
+        
+        // Safety check
+        if (scanCount > 50) {
+          console.warn('⚠️ Scan limit reached, stopping');
+          break;
+        }
+        
+      } while (scanLastKey && allScanResults.length < neededItems + limit);
       
-      allEmails = resp.Items || [];
-      lastEvaluatedKey = resp.LastEvaluatedKey;
+      // Sort all results by timestamp (newest first)
+      allScanResults.sort((a, b) => {
+        const timeA = a.receivedAt?.S || a.timestamp?.S || '0';
+        const timeB = b.receivedAt?.S || b.timestamp?.S || '0';
+        return timeB.localeCompare(timeA);
+      });
+      
+      // Apply page-based pagination
+      const startIdx = (page - 1) * limit;
+      const endIdx = startIdx + limit;
+      allEmails = allScanResults.slice(startIdx, endIdx);
+      hasMorePages = endIdx < allScanResults.length || !!scanLastKey;
     }
     
-    console.log(`✅ ${searchQuery ? 'Search' : 'Pagination'} complete: ${allEmails.length} emails retrieved, hasMore: ${!!lastEvaluatedKey}`);
+    console.log(`✅ ${searchQuery ? 'Search' : 'Pagination'} complete: ${allEmails.length} emails retrieved for page ${page}, hasMore: ${hasMorePages}`);
 
     // Get list of monitored employees for debugging/stats (but don't filter by them)
     let monitoredEmployees: string[] = [];
@@ -282,13 +307,14 @@ export async function GET(request: Request) {
 
     const response = {
       emails,
-      lastKey: lastEvaluatedKey ? (searchQuery ? lastEvaluatedKey : encodeURIComponent(JSON.stringify(lastEvaluatedKey))) : null,
-      hasMore: !!lastEvaluatedKey,
+      currentPage: page,
+      hasMore: hasMorePages,
       debug: {
         orgId: ORG_ID,
         tableName: EMAILS_TABLE,
         totalItems: emails.length,
-        hasMore: !!lastEvaluatedKey,
+        currentPage: page,
+        hasMore: hasMorePages,
         monitoredEmployees: monitoredEmployees.length,
         queryMethod: searchQuery ? 'search_paginated' : 'scan_paginated',
         searchQuery: searchQuery || undefined
@@ -298,7 +324,6 @@ export async function GET(request: Request) {
     console.log('📤 Returning response:', {
       emailCount: emails.length,
       hasMore: response.hasMore,
-      hasLastKey: !!response.lastKey,
       queryMethod: response.debug.queryMethod
     });
 

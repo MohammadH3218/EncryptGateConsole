@@ -77,15 +77,15 @@ interface Email {
 
 interface EmailsResponse {
   emails: Email[]
-  lastKey: string | null
+  currentPage: number
   hasMore: boolean
   message?: string
   debug?: {
     orgId: string
     tableName: string
     totalItems?: number
-    scannedCount?: number
-    itemCount?: number
+    currentPage?: number
+    hasMore?: boolean
   }
 }
 
@@ -106,13 +106,9 @@ export default function AdminAllEmailsPage() {
 
   // Loading & pagination
   const [loading, setLoading] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(0)
-  const [totalEmails, setTotalEmails] = useState(0)
-  const [lastKey, setLastKey] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
   const ITEMS_PER_PAGE = 20
 
@@ -165,30 +161,23 @@ export default function AdminAllEmailsPage() {
     }
   }, [infoMessage])
 
-  // Fetch emails with pagination
+  // Fetch emails for specific page
   const loadEmails = useCallback(
-    async (loadMore: boolean = false, searchTerm?: string) => {
+    async (page: number = 1, searchTerm?: string) => {
       // Use provided search term or current search query
       const currentSearchQuery = searchTerm !== undefined ? searchTerm : searchQuery;
       
-      if (loadMore) {
-        setLoadingMore(true);
-      } else {
-        setLoading(true);
-        setError(null);
-        setEmails([]); // Clear existing emails for fresh load
-        setLastKey(null);
-        setHasMore(true);
-      }
+      setLoading(true);
+      setError(null);
 
-      console.log(`📧 ${loadMore ? 'Loading more' : 'Loading initial'} emails...${currentSearchQuery ? ` with search: "${currentSearchQuery}"` : ''}`);
+      console.log(`📧 Loading emails for page ${page}${currentSearchQuery ? ` with search: "${currentSearchQuery}"` : ''}`);
 
       try {
-        // Load emails with server-side pagination
-        const params = new URLSearchParams({ limit: '50' }); // Smaller batches for better performance
-        if (loadMore && lastKey) {
-          params.set('lastKey', lastKey);
-        }
+        // Load emails with page-based pagination
+        const params = new URLSearchParams({ 
+          limit: '20', // Standard page size
+          page: page.toString()
+        });
         if (currentSearchQuery.trim()) {
           params.set('search', currentSearchQuery.trim());
         }
@@ -214,7 +203,6 @@ export default function AdminAllEmailsPage() {
         });
 
         setDebugInfo(data.debug);
-        setLastKey(data.lastKey);
         setHasMore(data.hasMore || false);
 
         if (data.emails && data.emails.length > 0) {
@@ -264,26 +252,19 @@ export default function AdminAllEmailsPage() {
             });
           }
 
-          if (loadMore) {
-            // Append new emails to existing ones
-            setEmails(prevEmails => [...prevEmails, ...processedEmails]);
-            setTotalEmails(prevTotal => prevTotal + processedEmails.length);
-          } else {
-            // Replace emails for initial load
-            setEmails(processedEmails);
-            setTotalEmails(processedEmails.length);
-          }
+          // Always replace emails for page-based navigation
+          setEmails(processedEmails);
+          setCurrentPage(data.currentPage);
 
           console.log('✅ Emails loaded successfully:', {
-            newEmails: processedEmails.length,
-            loadMore,
+            emailsOnPage: processedEmails.length,
+            currentPage: data.currentPage,
             hasMore: data.hasMore
           });
-        } else if (!loadMore) {
+        } else {
           console.log('ℹ️ No emails in response');
           setEmails([]);
-          setTotalEmails(0);
-          setTotalPages(0);
+          setCurrentPage(page);
         }
 
       } catch (e: any) {
@@ -294,16 +275,15 @@ export default function AdminAllEmailsPage() {
         setError(e.message || "Failed to load emails");
       } finally {
         setLoading(false);
-        setLoadingMore(false);
       }
     },
-    [lastKey, searchQuery]
+    [searchQuery]
   );
 
   // Initial load
   useEffect(() => {
     console.log('🚀 All Emails page mounted, loading initial data...');
-    loadEmails(false, ''); // Initial load with empty search
+    loadEmails(1, ''); // Initial load with empty search
   }, []); // Only run once on mount
 
   // Auto-refresh every 30 seconds to show new emails automatically
@@ -314,7 +294,7 @@ export default function AdminAllEmailsPage() {
     const intervalId = setInterval(() => {
       if (!loading) {
         console.log('🔄 Auto-refreshing emails...');
-        loadEmails(false, searchQuery); // Preserve search during auto-refresh
+        loadEmails(1, searchQuery); // Preserve search during auto-refresh
       }
     }, 30000); // 30 seconds
 
@@ -324,34 +304,18 @@ export default function AdminAllEmailsPage() {
     };
   }, [loadEmails, autoRefreshEnabled, loading]);
 
-  // Infinite scroll functionality
-  useEffect(() => {
-    const handleScroll = () => {
-      if (window.innerHeight + document.documentElement.scrollTop !== document.documentElement.offsetHeight) {
-        return;
-      }
-      
-      // Load more when user reaches bottom and there are more emails
-      if (hasMore && !loading && !loadingMore) {
-        console.log('📜 User reached bottom, loading more emails...');
-        loadEmails(true);
-      }
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [hasMore, loading, loadingMore, loadEmails]);
 
   // Handle search changes - trigger new API call when search query changes
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      // When search query changes, reload emails with search
+      // When search query changes, reload emails with search and reset to page 1
       console.log('🔍 Search query changed, reloading emails...', searchQuery);
-      loadEmails(false, searchQuery);
+      setCurrentPage(1);
+      loadEmails(1, searchQuery);
     }, 500); // Debounce search for 500ms
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
+  }, [searchQuery, loadEmails]);
 
   // Apply filters (excluding search since it's handled server-side now)
   useEffect(() => {
@@ -413,11 +377,6 @@ export default function AdminAllEmailsPage() {
     });
 
     setFilteredEmails(list);
-    setTotalPages(Math.ceil(list.length / ITEMS_PER_PAGE));
-    // Reset to first page when filters change
-    if (currentPage > Math.ceil(list.length / ITEMS_PER_PAGE)) {
-      setCurrentPage(1);
-    }
   }, [
     emails,
     employeeFilter,
@@ -499,21 +458,14 @@ export default function AdminAllEmailsPage() {
 
   const refreshEmails = () => {
     console.log('🔄 Manual refresh triggered');
-    setCurrentPage(1);
-    loadEmails(false, searchQuery); // Preserve current search when refreshing
-  };
-
-  // Get current page emails
-  const getCurrentPageEmails = () => {
-    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    const endIndex = startIndex + ITEMS_PER_PAGE;
-    return filteredEmails.slice(startIndex, endIndex);
+    loadEmails(currentPage, searchQuery); // Preserve current page and search when refreshing
   };
 
   // Page navigation
   const goToPage = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
+    if (page >= 1) {
+      console.log(`📄 Navigating to page ${page}`);
+      loadEmails(page, searchQuery);
     }
   };
 
@@ -523,15 +475,13 @@ export default function AdminAllEmailsPage() {
     const totalToShow = 7; // Show up to 7 page numbers
     const halfRange = Math.floor(totalToShow / 2);
     
+    // We don't know total pages, so show current page ± range
     let start = Math.max(1, currentPage - halfRange);
-    let end = Math.min(totalPages, currentPage + halfRange);
+    let end = currentPage + halfRange;
     
-    // Adjust if we're near the beginning or end
+    // Add extra pages at the beginning if we're near the start
     if (currentPage <= halfRange) {
-      end = Math.min(totalPages, totalToShow);
-    }
-    if (currentPage > totalPages - halfRange) {
-      start = Math.max(1, totalPages - totalToShow + 1);
+      end = totalToShow;
     }
     
     for (let i = start; i <= end; i++) {
@@ -1057,75 +1007,63 @@ export default function AdminAllEmailsPage() {
             <div className="flex justify-between items-center">
               <CardTitle className="text-white">Email List</CardTitle>
               <div className="text-sm text-gray-400">
-                Page {currentPage} of {totalPages} ({filteredEmails.length} total emails)
+                Page {currentPage} ({filteredEmails.length} emails)
+                {hasMore && <span className="text-blue-400"> • More available</span>}
               </div>
             </div>
             
             {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="flex justify-center items-center gap-2 pt-4">
-                {/* First Page */}
+            <div className="flex justify-center items-center gap-2 pt-4">
+              {/* First Page */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => goToPage(1)}
+                disabled={currentPage === 1}
+                className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+              >
+                ««
+              </Button>
+              
+              {/* Previous Page */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage === 1}
+                className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+              >
+                ‹ Previous
+              </Button>
+              
+              {/* Page Numbers */}
+              {getPageNumbers().map(pageNum => (
                 <Button
-                  variant="ghost"
+                  key={pageNum}
+                  variant={currentPage === pageNum ? "default" : "ghost"}
                   size="sm"
-                  onClick={() => goToPage(1)}
-                  disabled={currentPage === 1}
-                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+                  onClick={() => goToPage(pageNum)}
+                  className={
+                    currentPage === pageNum 
+                      ? "bg-blue-600 text-white hover:bg-blue-700" 
+                      : "text-white hover:bg-[#2a2a2a]"
+                  }
                 >
-                  ««
+                  {pageNum}
                 </Button>
-                
-                {/* Previous Page */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => goToPage(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
-                >
-                  ‹
-                </Button>
-                
-                {/* Page Numbers */}
-                {getPageNumbers().map(pageNum => (
-                  <Button
-                    key={pageNum}
-                    variant={currentPage === pageNum ? "default" : "ghost"}
-                    size="sm"
-                    onClick={() => goToPage(pageNum)}
-                    className={
-                      currentPage === pageNum 
-                        ? "bg-blue-600 text-white hover:bg-blue-700" 
-                        : "text-white hover:bg-[#2a2a2a]"
-                    }
-                  >
-                    {pageNum}
-                  </Button>
-                ))}
-                
-                {/* Next Page */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => goToPage(currentPage + 1)}
-                  disabled={currentPage === totalPages}
-                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
-                >
-                  ›
-                </Button>
-                
-                {/* Last Page */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => goToPage(totalPages)}
-                  disabled={currentPage === totalPages}
-                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
-                >
-                  »»
-                </Button>
-              </div>
-            )}
+              ))}
+              
+              {/* Next Page */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={!hasMore}
+                className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+              >
+                Next ›
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             {(loading && emails.length === 0) ? (
@@ -1187,7 +1125,7 @@ export default function AdminAllEmailsPage() {
                       </TableRow>
                     </TableHeader>
                   <TableBody>
-                    {getCurrentPageEmails().map(email => (
+                    {filteredEmails.map(email => (
                       <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
                         <TableCell className="font-medium text-white">
                           <div className="w-48">
@@ -1294,20 +1232,12 @@ export default function AdminAllEmailsPage() {
                   </Table>
                 </div>
 
-                {/* Loading more indicator */}
-                {loadingMore && (
-                  <div className="text-center py-4 border-t border-[#1f1f1f] mt-4">
-                    <RefreshCw className="animate-spin mx-auto h-6 w-6 mb-2 text-white" />
-                    <p className="text-white">Loading more emails...</p>
-                  </div>
-                )}
-                
                 {/* Pagination info at bottom */}
                 {filteredEmails.length > 0 && (
                   <div className="text-center py-4 text-gray-400 border-t border-[#1f1f1f] mt-4">
                     <div className="text-sm">
-                      Showing {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filteredEmails.length)}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredEmails.length)} of {filteredEmails.length} emails loaded
-                      {hasMore && <span className="text-blue-400"> (scroll down for more)</span>}
+                      Showing {filteredEmails.length} emails on page {currentPage}
+                      {hasMore && <span className="text-blue-400"> • More pages available</span>}
                     </div>
                   </div>
                 )}
