@@ -172,7 +172,7 @@ export default function AdminAllEmailsPage() {
 
       try {
         // Load all emails without limit for client-side pagination
-        const params = new URLSearchParams({ limit: '1000' }); // Get a large number to load all
+        const params = new URLSearchParams({ limit: '10000' }); // Get all emails (increased from 1000)
         const apiUrl = `/api/email?${params}`;
         console.log('🔗 Fetching from:', apiUrl);
 

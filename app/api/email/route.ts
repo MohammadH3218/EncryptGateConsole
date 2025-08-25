@@ -26,8 +26,8 @@ export async function GET(request: Request) {
     const rawLim = url.searchParams.get('limit') || '50';
     const rawKey = url.searchParams.get('lastKey') || undefined;
 
-    // Parse & clamp limit
-    const limit = Math.min(1000, Math.max(1, parseInt(rawLim, 10) || 50));
+    // Parse & clamp limit (increased max to handle all emails)
+    const limit = Math.min(25000, Math.max(1, parseInt(rawLim, 10) || 50));
     console.log(`🔍 Query parameters: limit=${limit}, hasLastKey=${!!rawKey}`);
 
     // Scan the entire table to get all emails (including manually added ones)
