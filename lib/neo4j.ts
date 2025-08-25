@@ -1,40 +1,38 @@
-// lib/neo4j.ts - COMPLETE UPDATED VERSION
+// lib/neo4j.ts - UPDATED WITH PARAMETER STORE SUPPORT
 import neo4j, { Driver, Session } from 'neo4j-driver'
 import { createHash } from 'crypto'
-
-// === Environment & Configuration - USE ENV VARS ===
-const NEO4J_URI       = process.env.NEO4J_URI || 'bolt://localhost:7687'
-const NEO4J_USER      = process.env.NEO4J_USER || 'neo4j'
-const NEO4J_PASSWORD  = process.env.NEO4J_PASSWORD || 'REDACTED_PASSWORD'
-const NEO4J_ENCRYPTED = process.env.NEO4J_ENCRYPTED === 'true'
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const OPENAI_MODEL   = process.env.OPENAI_MODEL || "gpt-4o-mini"
-const OPENAI_URL     = 'https://api.openai.com/v1/chat/completions'
+import { getNeo4jConfig, getOpenAIApiKey } from './config'
 
 // === Constants ===
 const MAX_RESULTS_TO_RETURN    = 50
 const MAX_RESULTS_FOR_SUMMARY  = 20
 const MAX_RETRY_ATTEMPTS       = 10
 const LLM_TIMEOUT_MS           = 30_000
+const OPENAI_MODEL            = process.env.OPENAI_MODEL || "gpt-4o-mini"
+const OPENAI_URL              = 'https://api.openai.com/v1/chat/completions'
 
-console.log('🔧 Neo4j Configuration:', {
-  uri: NEO4J_URI,
-  user: NEO4J_USER,
-  encrypted: NEO4J_ENCRYPTED,
-  hasOpenAIKey: !!OPENAI_API_KEY
-})
-
-// === Neo4j Driver Setup with Error Handling ===
+// === Neo4j Driver Setup with Parameter Store Support ===
 let driver: Driver | null = null
+let currentConfig: any = null
 
-function createNeo4jDriver(): Driver {
+async function createNeo4jDriver(): Promise<Driver> {
   try {
+    console.log('🔧 Loading Neo4j configuration from Parameter Store...')
+    const config = await getNeo4jConfig()
+    
+    console.log('🔧 Creating Neo4j driver with config:', {
+      uri: config.uri,
+      user: config.user,
+      encrypted: config.encrypted
+    })
+    
+    currentConfig = config
+    
     return neo4j.driver(
-      NEO4J_URI,
-      neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD),
+      config.uri,
+      neo4j.auth.basic(config.user, config.password),
       { 
-        encrypted: NEO4J_ENCRYPTED,
+        encrypted: config.encrypted,
         connectionTimeout: 10000, // 10 seconds
         maxConnectionLifetime: 3600000, // 1 hour
         maxConnectionPoolSize: 50,
@@ -47,29 +45,61 @@ function createNeo4jDriver(): Driver {
   }
 }
 
-// Get or create driver
-export function getDriver(): Driver {
+// Get or create driver (async now)
+export async function getDriver(): Promise<Driver> {
   if (!driver) {
-    driver = createNeo4jDriver()
+    driver = await createNeo4jDriver()
   }
   return driver
 }
 
 // Driver is available through getDriver() function for better control
 
-// Test connection
+// Test connection with detailed error reporting
 export async function testNeo4jConnection(): Promise<boolean> {
   try {
-    const testDriver = getDriver()
+    console.log('🔍 Testing Neo4j connection with Parameter Store config...')
+    const testDriver = await getDriver()
     const session = testDriver.session()
     
-    await session.run('RETURN 1 as test')
-    await session.close()
+    const result = await session.run('RETURN 1 as test, datetime() as time')
+    const record = result.records[0]
     
     console.log('✅ Neo4j connection successful')
+    console.log(`  Server time: ${record.get('time')}`)
+    if (currentConfig) {
+      console.log(`  Connected to: ${currentConfig.uri}`)
+      console.log(`  User: ${currentConfig.user}`)
+    }
+    
+    await session.close()
     return true
-  } catch (error) {
-    console.error('❌ Neo4j connection failed:', error)
+  } catch (error: any) {
+    console.error('❌ Neo4j connection failed:', {
+      config: currentConfig,
+      error: error.message,
+      code: error.code
+    })
+    
+    // Provide specific error guidance
+    if (error.message?.includes('ECONNREFUSED')) {
+      console.error('💡 Connection refused - Neo4j is not accessible')
+      console.error('   Please check:')
+      console.error('   - Neo4j is running on your EC2 instance')
+      console.error('   - Security group allows port 7687')
+      console.error('   - Parameter Store has correct URI (encryptgate-neo4j-uri)')
+    } else if (error.message?.includes('authentication')) {
+      console.error('💡 Authentication failed - check Parameter Store credentials')
+      console.error('   - encryptgate-neo4j-user')
+      console.error('   - encryptgate-neo4j-password')
+    } else if (error.message?.includes('timeout')) {
+      console.error('💡 Connection timeout - check network connectivity')
+    } else if (error.message?.includes('Parameter')) {
+      console.error('💡 Parameter Store issue - check AWS configuration')
+      console.error('   - IAM permissions for SSM GetParameter')
+      console.error('   - Parameters exist in correct region')
+    }
+    
     return false
   }
 }
@@ -82,7 +112,8 @@ interface Neo4jConnection {
 
 class Neo4jService implements Neo4jConnection {
   async runQuery(cypher: string, params: any = {}): Promise<any[]> {
-    const session: Session = getDriver().session()
+    const driverInstance = await getDriver()
+    const session: Session = driverInstance.session()
     try {
       const result = await session.run(cypher, params)
       return result.records.map(record => record.toObject())
@@ -97,6 +128,7 @@ class Neo4jService implements Neo4jConnection {
     if (driver) {
       await driver.close()
       driver = null
+      currentConfig = null
     }
   }
 }
@@ -206,8 +238,14 @@ async function askLLM(
   forceNew = false,
   temperature = 0.2
 ): Promise<string> {
-  if (!OPENAI_API_KEY) {
-    return 'Error: OPENAI_API_KEY environment variable not set'
+  let apiKey: string;
+  try {
+    apiKey = await getOpenAIApiKey();
+    if (!apiKey) {
+      return 'Error: OpenAI API key not available from Parameter Store or environment'
+    }
+  } catch (error: any) {
+    return `Error: Failed to get OpenAI API key: ${error.message}`
   }
 
   const asciiUser = user.replace(/\u2026/g,'...').replace(/[^\x00-\x7F]/g,'')
@@ -229,7 +267,7 @@ async function askLLM(
     const resp = await fetch(OPENAI_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type':  'application/json'
       },
       body: JSON.stringify({
@@ -436,7 +474,8 @@ function cleanQueryForExecution(query: string): string | null {
 
 // === Execute Cypher ===
 async function runQuery(cypher: string): Promise<any[]> {
-  const session: Session = getDriver().session()
+  const driver = await getDriver()
+  const session: Session = driver.session()
   try {
     const res = await session.run(cypher)
     await session.close()
@@ -459,7 +498,8 @@ export async function fetchEmailContext(messageId: string): Promise<string> {
     RETURN u.email AS sender, collect(r.email) AS recipients,
            e.sentDate AS date, e.subject AS subject, e.body AS body
     `
-    const session = getDriver().session()
+    const driver = await getDriver()
+    const session = driver.session()
     const result = await session.run(q, { m: messageId })
     await session.close()
     

@@ -2,19 +2,32 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { getOpenAIApiKey, validateOpenAIKey, getConfig } from '@/lib/config';
+import { getOpenAIApiKey, validateOpenAIKey, getConfig, getNeo4jConfig } from '@/lib/config';
 
 export async function GET() {
   const config = getConfig();
+  
+  // Load Neo4j config separately since it's now from Parameter Store
+  let neo4jConfig;
+  try {
+    neo4jConfig = await getNeo4jConfig();
+  } catch (error: any) {
+    neo4jConfig = {
+      uri: 'Error loading from Parameter Store',
+      user: 'Error loading from Parameter Store',
+      password: null,
+      encrypted: false
+    };
+  }
   
   const diagnostics = {
     timestamp: new Date().toISOString(),
     environment: {
       neo4j: {
-        uri: config.neo4j.uri,
-        user: config.neo4j.user,
-        password: config.neo4j.password ? '***SET***' : 'Not set',
-        encrypted: config.neo4j.encrypted.toString(),
+        uri: neo4jConfig.uri,
+        user: neo4jConfig.user,
+        password: neo4jConfig.password ? '***SET***' : 'Not set',
+        encrypted: neo4jConfig.encrypted.toString(),
       },
       openai: {
         apiKey: 'Loading...',
@@ -92,7 +105,7 @@ export async function GET() {
       
       // Test basic query
       try {
-        const driver = getDriver();
+        const driver = await getDriver();
         const session = driver.session();
         const result = await session.run('MATCH (n) RETURN count(n) as nodeCount LIMIT 1');
         const nodeCount = result.records[0]?.get('nodeCount')?.toNumber() || 0;

@@ -273,8 +273,8 @@ export function SecurityCopilotEnhanced({
     : `flex flex-col h-full ${className}`
 
   return (
-    <Card className={cardClassName}>
-      <CardHeader className="pb-3">
+    <Card className={`${cardClassName} bg-[#0f0f0f] border-[#2a2a2a]`}>
+      <CardHeader className="pb-3 bg-[#0f0f0f]">
         <CardTitle className="flex items-center gap-2 text-lg text-white">
           <Bot className="h-5 w-5 text-blue-400" />
           Security Copilot
@@ -323,19 +323,19 @@ export function SecurityCopilotEnhanced({
         )}
       </CardHeader>
       
-      <CardContent className="flex-1 flex flex-col p-0">
-        <ScrollArea className="flex-1 px-4">
-          <div className="space-y-4 pb-4">
+      <CardContent className="flex-1 flex flex-col p-0 bg-[#0f0f0f]">
+        <ScrollArea className="flex-1 px-4 bg-[#0f0f0f]">
+          <div className="space-y-4 pb-4 bg-[#0f0f0f]">
             {messages.map((message) => (
               <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] rounded-lg p-3 ${
                   message.type === 'user'
                     ? 'bg-blue-600 text-white'
                     : message.type === 'system'
-                    ? 'bg-[#1a1a1a] border border-[#2a2a2a] text-white'
+                    ? 'bg-[#0f0f0f] border border-[#2a2a2a] text-white'
                     : message.type === 'error'
                     ? 'bg-red-900/20 border border-red-500/20 text-red-300'
-                    : 'bg-[#1a1a1a] text-white'
+                    : 'bg-[#0f0f0f] text-white border border-[#2a2a2a]'
                 }`}>
                   <div className="flex items-start gap-2">
                     {message.isLoading && (
@@ -379,7 +379,7 @@ export function SecurityCopilotEnhanced({
 
         {/* Suggested Questions */}
         {messages.length <= 1 && isConnected && (
-          <div className="px-4 py-2 border-t border-[#2a2a2a]">
+          <div className="px-4 py-2 border-t border-[#2a2a2a] bg-[#0f0f0f]">
             <p className="text-xs text-gray-400 mb-2">Suggested questions:</p>
             <div className="flex flex-col gap-1">
               {suggestedQuestions.slice(0, 3).map((question, index) => (
@@ -387,7 +387,7 @@ export function SecurityCopilotEnhanced({
                   key={index}
                   variant="ghost"
                   size="sm"
-                  className="justify-start h-auto py-2 px-2 text-xs text-gray-300 hover:bg-[#2a2a2a] hover:text-white"
+                  className="justify-start h-auto py-2 px-2 text-xs text-gray-300 hover:bg-[#1a1a1a] hover:text-white bg-[#0f0f0f]"
                   onClick={() => handleSuggestedQuestion(question)}
                   disabled={isLoading || !isConnected}
                 >
@@ -400,7 +400,7 @@ export function SecurityCopilotEnhanced({
 
         {/* Context Info */}
         {context && isConnected && (
-          <div className="px-4 py-2 border-t border-[#2a2a2a]">
+          <div className="px-4 py-2 border-t border-[#2a2a2a] bg-[#0f0f0f]">
             <div className="flex items-center gap-1 mb-1">
               <Info className="h-3 w-3 text-blue-400" />
               <span className="text-xs font-medium text-gray-400">Email Context Loaded</span>
@@ -414,7 +414,7 @@ export function SecurityCopilotEnhanced({
         )}
 
         {/* Input */}
-        <div className="p-4 border-t border-[#2a2a2a]">
+        <div className="p-4 border-t border-[#2a2a2a] bg-[#0f0f0f]">
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={input}
@@ -427,7 +427,7 @@ export function SecurityCopilotEnhanced({
                     : "Ask about email security..."
               }
               disabled={isLoading || !isConnected}
-              className="flex-1 bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-gray-400"
+              className="flex-1 bg-[#0f0f0f] border-[#2a2a2a] text-white placeholder:text-gray-400 focus:bg-[#0f0f0f] focus:border-[#2a2a2a]"
             />
             <Button 
               type="submit" 
