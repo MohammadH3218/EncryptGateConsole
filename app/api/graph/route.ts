@@ -1,8 +1,9 @@
-// app/api/graph/route.ts - COMPLETE UPDATED VERSION
+// app/api/graph/route.ts - Updated to use Parameter Store configuration
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { getOpenAIApiKey, validateOpenAIKey } from '@/lib/config';
 
 // Validation schemas
 const GraphRequestSchema = z.object({
@@ -26,8 +27,8 @@ async function getCopilotService() {
     // More specific error messages
     if (error.message?.includes('Neo4j')) {
       throw new Error('Neo4j connection failed. Please ensure Neo4j is running and accessible.');
-    } else if (error.message?.includes('OPENAI')) {
-      throw new Error('OpenAI API key missing or invalid. Please check your environment variables.');
+    } else if (error.message?.includes('OpenAI') || error.message?.includes('Parameter Store')) {
+      throw new Error(`OpenAI configuration failed: ${error.message}`);
     } else if (error.message?.includes('ECONNREFUSED')) {
       throw new Error('Database connection refused. Please check Neo4j is running on bolt://localhost:7687');
     } else {
@@ -39,97 +40,109 @@ async function getCopilotService() {
 // Enhanced health check function
 async function performHealthCheck() {
   try {
-    console.log('🏥 Starting health check...');
+    console.log('🏥 Starting comprehensive health check...');
     
-    // Check environment variables first
-    const envCheck = {
-      hasNeo4jUri: !!process.env.NEO4J_URI,
-      hasNeo4jUser: !!process.env.NEO4J_USER,
-      hasNeo4jPassword: !!process.env.NEO4J_PASSWORD,
-      hasOpenAIKey: !!process.env.OPENAI_API_KEY,
-      neo4jEncrypted: process.env.NEO4J_ENCRYPTED
+    const healthStatus = {
+      healthy: false,
+      status: 'error',
+      timestamp: new Date().toISOString(),
+      services: {
+        neo4j: false,
+        llm: false,
+        parameterStore: false
+      },
+      environment: {},
+      error: null as string | null
     };
-    
-    console.log('🔧 Environment check:', envCheck);
-    
-    if (!envCheck.hasOpenAIKey) {
-      return {
-        healthy: false,
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        error: 'OPENAI_API_KEY environment variable is missing',
-        environment: envCheck,
-        services: {
-          neo4j: false,
-          llm: false,
-        }
-      };
+
+    // Check OpenAI configuration first
+    try {
+      console.log('🔑 Testing OpenAI configuration...');
+      const apiKey = await getOpenAIApiKey();
+      
+      if (!validateOpenAIKey(apiKey)) {
+        throw new Error('Invalid OpenAI API key format');
+      }
+      
+      // Test actual API call
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: 'Test' }],
+          max_tokens: 5,
+        }),
+      });
+
+      if (response.ok) {
+        healthStatus.services.llm = true;
+        healthStatus.services.parameterStore = true;
+        console.log('✅ OpenAI API test passed');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+      }
+      
+    } catch (openaiError: any) {
+      console.error('❌ OpenAI configuration test failed:', openaiError);
+      healthStatus.error = `OpenAI configuration failed: ${openaiError.message}`;
+      
+      // Determine if it's a parameter store issue or API issue
+      if (openaiError.message?.includes('Parameter') || openaiError.message?.includes('not found')) {
+        healthStatus.services.parameterStore = false;
+      } else if (openaiError.message?.includes('401') || openaiError.message?.includes('Invalid')) {
+        healthStatus.services.parameterStore = true; // We could load it, but it's invalid
+      }
+      
+      return healthStatus;
     }
 
-    // Test Neo4j connection directly first
+    // Test Neo4j connection
     try {
+      console.log('🔗 Testing Neo4j connection...');
       const { testNeo4jConnection } = await import('@/lib/neo4j');
       const neo4jHealthy = await testNeo4jConnection();
       
       if (!neo4jHealthy) {
-        return {
-          healthy: false,
-          status: 'error',
-          timestamp: new Date().toISOString(),
-          error: 'Neo4j connection failed',
-          environment: envCheck,
-          services: {
-            neo4j: false,
-            llm: true,
-          }
-        };
+        throw new Error('Neo4j connection test failed');
       }
       
+      healthStatus.services.neo4j = true;
       console.log('✅ Neo4j connection test passed');
+      
     } catch (neo4jError: any) {
       console.error('❌ Neo4j connection test failed:', neo4jError);
-      return {
-        healthy: false,
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        error: `Neo4j error: ${neo4jError.message}`,
-        environment: envCheck,
-        services: {
-          neo4j: false,
-          llm: true,
-        }
-      };
+      healthStatus.error = `Neo4j error: ${neo4jError.message}`;
+      return healthStatus;
     }
 
-    // Test copilot service
+    // Test copilot service integration
     try {
+      console.log('🤖 Testing copilot service integration...');
       const copilot = await getCopilotService();
       const isHealthy = await copilot.isHealthy();
       
-      return {
-        healthy: isHealthy,
-        status: isHealthy ? 'operational' : 'degraded',
-        timestamp: new Date().toISOString(),
-        environment: envCheck,
-        services: {
-          neo4j: isHealthy,
-          llm: true,
-        }
-      };
+      if (isHealthy) {
+        healthStatus.healthy = true;
+        healthStatus.status = 'operational';
+        healthStatus.error = null;
+        console.log('✅ All health checks passed');
+      } else {
+        healthStatus.status = 'degraded';
+        healthStatus.error = 'Copilot service health check failed';
+      }
+      
     } catch (copilotError: any) {
       console.error('❌ Copilot service test failed:', copilotError);
-      return {
-        healthy: false,
-        status: 'error',
-        timestamp: new Date().toISOString(),
-        error: copilotError.message,
-        environment: envCheck,
-        services: {
-          neo4j: false,
-          llm: true,
-        }
-      };
+      healthStatus.status = 'degraded';
+      healthStatus.error = `Copilot service error: ${copilotError.message}`;
     }
+    
+    return healthStatus;
     
   } catch (error: any) {
     console.error('❌ Health check failed:', error);
@@ -141,6 +154,7 @@ async function performHealthCheck() {
       services: {
         neo4j: false,
         llm: false,
+        parameterStore: false
       }
     };
   }
@@ -191,7 +205,7 @@ export async function POST(req: Request) {
           troubleshooting: [
             'Ensure Neo4j is running: `neo4j start` or check Neo4j Desktop',
             'Verify Neo4j connection settings in environment variables',
-            'Check OPENAI_API_KEY is set correctly',
+            'Check OpenAI API key is configured in Parameter Store',
             'Test Neo4j connection manually at http://localhost:7474',
             'Run diagnostic test at /api/copilot-test'
           ]
@@ -329,9 +343,9 @@ export async function POST(req: Request) {
           } else if (error.message.includes('connection') || error.message.includes('Neo4j')) {
             errorMessage = 'Database connection error. Please try again.';
             userResponse = 'I cannot connect to the email database right now. Please ensure Neo4j is running and try again.';
-          } else if (error.message.includes('OPENAI') || error.message.includes('API')) {
-            errorMessage = 'AI service error. Please try again.';
-            userResponse = 'The AI service is temporarily unavailable. Please try again in a moment.';
+          } else if (error.message.includes('OpenAI') || error.message.includes('API') || error.message.includes('Parameter Store')) {
+            errorMessage = 'AI service configuration error. Please try again.';
+            userResponse = 'The AI service configuration has an issue. Please check the OpenAI API key configuration.';
           } else if (error.message.includes('ECONNREFUSED')) {
             errorMessage = 'Neo4j connection refused';
             userResponse = 'Cannot connect to Neo4j database. Please ensure Neo4j is running on port 7687.';
@@ -423,12 +437,16 @@ export async function GET() {
         POST: 'Main endpoint for graph operations',
         GET: 'Health check endpoint'
       },
-      version: '2.1.0-fixed',
+      version: '3.0.0-parameter-store',
       documentation: {
         healthCheck: 'POST with action: "health_check"',
         addEmail: 'POST with action: "add_email" and email data',
         queryCopilot: 'POST with action: "query_copilot" and question',
         getContext: 'POST with action: "get_email_context" and messageId'
+      },
+      configuration: {
+        openaiSource: 'AWS Parameter Store',
+        parameterName: 'encryptgate-openai-key'
       }
     });
   } catch (error) {
