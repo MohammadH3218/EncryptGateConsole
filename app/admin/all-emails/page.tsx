@@ -106,12 +106,12 @@ export default function AdminAllEmailsPage() {
 
   // Loading & pagination
   const [loading, setLoading] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<any>(null)
-  const [lastKey, setLastKey] = useState<string | null>(null)
-  const [hasMore, setHasMore] = useState(true)
-  const ITEMS_PER_PAGE = 25
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  const [totalEmails, setTotalEmails] = useState(0)
+  const ITEMS_PER_PAGE = 20
 
   // Email viewing & flagging
   const [selectedEmail, setSelectedEmail] = useState<Email | null>(null)
@@ -162,26 +162,17 @@ export default function AdminAllEmailsPage() {
     }
   }, [infoMessage])
 
-  // Fetch emails
+  // Fetch all emails for pagination
   const loadEmails = useCallback(
-    async (reset = false) => {
-      const isInitialLoad = reset;
-      isInitialLoad ? setLoading(true) : setLoadingMore(true);
+    async () => {
+      setLoading(true);
       setError(null);
 
-      console.log('📧 Loading emails...', { 
-        reset, 
-        currentCount: emails.length, 
-        lastKey: reset ? null : lastKey 
-      });
+      console.log('📧 Loading all emails for pagination...');
 
       try {
-        const params = new URLSearchParams({ limit: ITEMS_PER_PAGE.toString() });
-        if (!reset && lastKey) {
-          params.set("lastKey", lastKey);
-          console.log('⏭️ Using pagination with lastKey');
-        }
-
+        // Load all emails without limit for client-side pagination
+        const params = new URLSearchParams({ limit: '1000' }); // Get a large number to load all
         const apiUrl = `/api/email?${params}`;
         console.log('🔗 Fetching from:', apiUrl);
 
@@ -197,7 +188,6 @@ export default function AdminAllEmailsPage() {
         const data: EmailsResponse = await res.json();
         console.log('📊 API Response data:', {
           emailCount: data.emails?.length || 0,
-          hasMore: data.hasMore,
           message: data.message,
           debug: data.debug
         });
@@ -205,10 +195,19 @@ export default function AdminAllEmailsPage() {
         setDebugInfo(data.debug);
 
         if (data.emails && data.emails.length > 0) {
-          console.log('📋 Sample emails received:', data.emails.slice(0, 3).map(e => ({
+          // Process recipients to handle different formats
+          const processedEmails = data.emails.map(email => ({
+            ...email,
+            recipients: Array.isArray(email.recipients) ? email.recipients :
+                       typeof email.recipients === 'string' ? [email.recipients] :
+                       email.recipients ? Object.values(email.recipients).filter(r => typeof r === 'string') : []
+          }));
+          
+          console.log('📋 Sample emails received:', processedEmails.slice(0, 3).map(e => ({
             id: e.id,
             subject: e.subject,
             sender: e.sender,
+            recipients: e.recipients,
             timestamp: e.timestamp,
             flaggedCategory: e.flaggedCategory,
             flaggedSeverity: e.flaggedSeverity,
@@ -222,16 +221,16 @@ export default function AdminAllEmailsPage() {
           })));
           
           // Check all emails for body content
-          const emailsWithBody = data.emails.filter(e => e.body && e.body.trim().length > 0);
-          const emailsWithHtml = data.emails.filter(e => e.bodyHtml && e.bodyHtml.trim().length > 0);
-          const emailsWithoutContent = data.emails.filter(e => !e.body || e.body.trim().length === 0);
+          const emailsWithBody = processedEmails.filter(e => e.body && e.body.trim().length > 0);
+          const emailsWithHtml = processedEmails.filter(e => e.bodyHtml && e.bodyHtml.trim().length > 0);
+          const emailsWithoutContent = processedEmails.filter(e => !e.body || e.body.trim().length === 0);
           
           console.log('📊 Body content analysis:', {
-            totalEmails: data.emails.length,
+            totalEmails: processedEmails.length,
             emailsWithBody: emailsWithBody.length,
             emailsWithHtml: emailsWithHtml.length,
             emailsWithoutBody: emailsWithoutContent.length,
-            contentCoverage: `${Math.round((emailsWithBody.length / data.emails.length) * 100)}%`
+            contentCoverage: `${Math.round((emailsWithBody.length / processedEmails.length) * 100)}%`
           });
           
           // Log examples of emails without content for debugging
@@ -241,18 +240,21 @@ export default function AdminAllEmailsPage() {
               console.warn(`  ${i + 1}. ${email.subject} (${email.messageId}) - body: "${email.body}"`);
             });
           }
+
+          setEmails(processedEmails);
+          setTotalEmails(processedEmails.length);
+          setTotalPages(Math.ceil(processedEmails.length / ITEMS_PER_PAGE));
+
+          console.log('✅ All emails loaded successfully:', {
+            totalEmails: processedEmails.length,
+            totalPages: Math.ceil(processedEmails.length / ITEMS_PER_PAGE)
+          });
         } else {
           console.log('ℹ️ No emails in response');
+          setEmails([]);
+          setTotalEmails(0);
+          setTotalPages(0);
         }
-
-        setEmails(prev => (reset ? data.emails : [...prev, ...data.emails]));
-        setLastKey(data.lastKey);
-        setHasMore(data.hasMore);
-
-        console.log('✅ Emails loaded successfully:', {
-          totalEmails: reset ? data.emails.length : emails.length + data.emails.length,
-          hasMore: data.hasMore
-        });
 
       } catch (e: any) {
         console.error("❌ loadEmails error details:", {
@@ -262,17 +264,16 @@ export default function AdminAllEmailsPage() {
         setError(e.message || "Failed to load emails");
       } finally {
         setLoading(false);
-        setLoadingMore(false);
       }
     },
-    [lastKey, emails.length]
+    []
   );
 
   // Initial load
   useEffect(() => {
     console.log('🚀 All Emails page mounted, loading initial data...');
-    loadEmails(true);
-  }, []);
+    loadEmails();
+  }, [loadEmails]);
 
   // Auto-refresh every 30 seconds to show new emails automatically
   useEffect(() => {
@@ -280,9 +281,9 @@ export default function AdminAllEmailsPage() {
 
     console.log('⏰ Setting up auto-refresh every 30 seconds');
     const intervalId = setInterval(() => {
-      if (!loading && !loadingMore) {
+      if (!loading) {
         console.log('🔄 Auto-refreshing emails...');
-        loadEmails(true);
+        loadEmails();
       }
     }, 30000); // 30 seconds
 
@@ -290,24 +291,9 @@ export default function AdminAllEmailsPage() {
       console.log('⏰ Cleaning up auto-refresh interval');
       clearInterval(intervalId);
     };
-  }, [loadEmails, autoRefreshEnabled, loading, loadingMore]);
+  }, [loadEmails, autoRefreshEnabled, loading]);
 
-  // Infinite scroll
-  useEffect(() => {
-    const onScroll = () => {
-      if (
-        window.innerHeight + window.scrollY >=
-        document.documentElement.scrollHeight - 300
-      ) {
-        if (hasMore && !loading && !loadingMore) {
-          console.log('📜 Infinite scroll triggered');
-          loadEmails(false);
-        }
-      }
-    };
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, [hasMore, loading, loadingMore, loadEmails]);
+  // Remove infinite scroll functionality - replaced with pagination
 
   // Apply filters
   useEffect(() => {
@@ -379,6 +365,11 @@ export default function AdminAllEmailsPage() {
     });
 
     setFilteredEmails(list);
+    setTotalPages(Math.ceil(list.length / ITEMS_PER_PAGE));
+    // Reset to first page when filters change
+    if (currentPage > Math.ceil(list.length / ITEMS_PER_PAGE)) {
+      setCurrentPage(1);
+    }
   }, [
     emails,
     searchQuery,
@@ -387,7 +378,8 @@ export default function AdminAllEmailsPage() {
     threatFilter,
     statusFilter,
     flaggedFilter,
-    investigationFilter
+    investigationFilter,
+    currentPage
   ]);
 
   // Badge renderers
@@ -460,7 +452,46 @@ export default function AdminAllEmailsPage() {
 
   const refreshEmails = () => {
     console.log('🔄 Manual refresh triggered');
-    loadEmails(true);
+    setCurrentPage(1);
+    loadEmails();
+  };
+
+  // Get current page emails
+  const getCurrentPageEmails = () => {
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    return filteredEmails.slice(startIndex, endIndex);
+  };
+
+  // Page navigation
+  const goToPage = (page: number) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
+
+  // Generate page numbers for display
+  const getPageNumbers = () => {
+    const pages = [];
+    const totalToShow = 7; // Show up to 7 page numbers
+    const halfRange = Math.floor(totalToShow / 2);
+    
+    let start = Math.max(1, currentPage - halfRange);
+    let end = Math.min(totalPages, currentPage + halfRange);
+    
+    // Adjust if we're near the beginning or end
+    if (currentPage <= halfRange) {
+      end = Math.min(totalPages, totalToShow);
+    }
+    if (currentPage > totalPages - halfRange) {
+      start = Math.max(1, totalPages - totalToShow + 1);
+    }
+    
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    
+    return pages;
   };
 
   const viewEmail = (email: Email) => {
@@ -552,7 +583,7 @@ export default function AdminAllEmailsPage() {
       }
 
       // Refresh emails to update the UI
-      await loadEmails(true);
+      await loadEmails();
       
     } catch (err: any) {
       console.error('❌ Failed to flag email:', err);
@@ -615,7 +646,7 @@ export default function AdminAllEmailsPage() {
         setSuccessMessage('Email unflagged successfully and marked as clean.');
       }
 
-      await loadEmails(true);
+      await loadEmails();
       
     } catch (err: any) {
       console.error('❌ Failed to unflag email:', err);
@@ -976,7 +1007,78 @@ export default function AdminAllEmailsPage() {
         {/* Email Table */}
         <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
-            <CardTitle className="text-white">Email List</CardTitle>
+            <div className="flex justify-between items-center">
+              <CardTitle className="text-white">Email List</CardTitle>
+              <div className="text-sm text-gray-400">
+                Page {currentPage} of {totalPages} ({filteredEmails.length} total emails)
+              </div>
+            </div>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex justify-center items-center gap-2 pt-4">
+                {/* First Page */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => goToPage(1)}
+                  disabled={currentPage === 1}
+                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+                >
+                  ««
+                </Button>
+                
+                {/* Previous Page */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => goToPage(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+                >
+                  ‹
+                </Button>
+                
+                {/* Page Numbers */}
+                {getPageNumbers().map(pageNum => (
+                  <Button
+                    key={pageNum}
+                    variant={currentPage === pageNum ? "default" : "ghost"}
+                    size="sm"
+                    onClick={() => goToPage(pageNum)}
+                    className={
+                      currentPage === pageNum 
+                        ? "bg-blue-600 text-white hover:bg-blue-700" 
+                        : "text-white hover:bg-[#2a2a2a]"
+                    }
+                  >
+                    {pageNum}
+                  </Button>
+                ))}
+                
+                {/* Next Page */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => goToPage(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+                >
+                  ›
+                </Button>
+                
+                {/* Last Page */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => goToPage(totalPages)}
+                  disabled={currentPage === totalPages}
+                  className="text-white hover:bg-[#2a2a2a] disabled:opacity-50"
+                >
+                  »»
+                </Button>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             {(loading && emails.length === 0) ? (
@@ -1038,7 +1140,7 @@ export default function AdminAllEmailsPage() {
                       </TableRow>
                     </TableHeader>
                   <TableBody>
-                    {filteredEmails.map(email => (
+                    {getCurrentPageEmails().map(email => (
                       <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
                         <TableCell className="font-medium text-white">
                           <div className="w-48">
@@ -1145,16 +1247,12 @@ export default function AdminAllEmailsPage() {
                   </Table>
                 </div>
 
-                {/* Load more indicator */}
-                {loadingMore && (
-                  <div className="text-center py-4">
-                    <RefreshCw className="animate-spin mx-auto h-5 w-5 mb-2 text-white" />
-                    <p className="text-sm text-gray-400">Loading more emails...</p>
-                  </div>
-                )}
-                {!hasMore && !loadingMore && emails.length > 0 && (
-                  <div className="text-center py-4 text-gray-400">
-                    <div className="text-sm">All emails loaded ({emails.length} total)</div>
+                {/* Pagination info at bottom */}
+                {filteredEmails.length > 0 && (
+                  <div className="text-center py-4 text-gray-400 border-t border-[#1f1f1f] mt-4">
+                    <div className="text-sm">
+                      Showing {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filteredEmails.length)}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredEmails.length)} of {filteredEmails.length} emails
+                    </div>
                   </div>
                 )}
               </>

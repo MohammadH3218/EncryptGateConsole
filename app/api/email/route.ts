@@ -123,7 +123,19 @@ export async function GET(request: Request) {
         messageId: item.messageId?.S || '',
         subject: item.subject?.S || 'No Subject',
         sender: item.sender?.S || '',
-        recipients: item.recipients?.SS || [],
+        recipients: (() => {
+          // Handle different formats: SS (string set), S (comma-separated string), or array
+          if (item.recipients?.SS) {
+            return item.recipients.SS;
+          } else if (item.recipients?.S) {
+            // Handle comma-separated string
+            return item.recipients.S.split(',').map(r => r.trim()).filter(Boolean);
+          } else if (item.recipients?.L) {
+            // Handle list format
+            return item.recipients.L.map((r: any) => r.S || '').filter(Boolean);
+          }
+          return [];
+        })(),
         timestamp: timestamp,
         body: item.body?.S || '',
         bodyHtml: item.bodyHtml?.S,
