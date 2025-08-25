@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { InteractiveLineChart } from "@/components/dashboard/interactive-line-chart"
@@ -9,109 +9,220 @@ import { AutoBlockedEmails } from "@/components/dashboard/auto-blocked-emails"
 import { AssignmentsOverview } from "@/components/dashboard/assignments-overview"
 import { AssignedDetections } from "@/components/dashboard/assigned-detections"
 import type { CompletedDetection } from "@/components/dashboard/completed-detections"
-import { Mail, Send, Shield } from "lucide-react"
+import { Mail, Send, Shield, RefreshCw } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+
+interface Email {
+  id: string
+  direction: "inbound" | "outbound"
+  timestamp: string
+  status: string
+  threatLevel: string
+  flaggedCategory: string
+  sender: string
+  recipients: string[]
+}
+
+interface Detection {
+  id: string
+  name: string
+  severity: string
+  status: string
+  assignedTo: string[]
+  sentBy: string
+  timestamp: string
+  createdAt: string
+}
 
 export default function DashboardPage() {
-  // ——— Stats state ———
-  const [stats] = useState({
-    totalIncomingEmails: 1245,
-    totalOutgoingEmails: 876,
-    totalDetections: 32,
-    assignedDetections: 8,
+  // ——— Real data state ———
+  const [emails, setEmails] = useState<Email[]>([])
+  const [detections, setDetections] = useState<Detection[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  
+  // ——— Computed stats from real data ———
+  const stats = {
+    totalIncomingEmails: emails.filter(e => e.direction === "inbound").length,
+    totalOutgoingEmails: emails.filter(e => e.direction === "outbound").length,
+    totalDetections: detections.length,
+    assignedDetections: detections.filter(d => d.assignedTo.length > 0).length,
+    // Note: Previous week comparison not available without historical data
     previousWeek: {
-      totalIncomingEmails: 1003,
-      totalOutgoingEmails: 992,
-      totalDetections: 28,
+      totalIncomingEmails: 0,
+      totalOutgoingEmails: 0,
+      totalDetections: 0,
     },
     severityBreakdown: {
-      critical: 5,
-      high: 12,
-      medium: 10,
-      low: 5,
+      critical: detections.filter(d => d.severity.toLowerCase() === 'critical').length,
+      high: detections.filter(d => d.severity.toLowerCase() === 'high').length,
+      medium: detections.filter(d => d.severity.toLowerCase() === 'medium').length,
+      low: detections.filter(d => d.severity.toLowerCase() === 'low').length,
     },
-  })
+  }
 
-  // ——— Weekly detection trend data for line chart ———
-  const [detectionTrendData] = useState([
-    { day: "Mon", value: 8 },
-    { day: "Tue", value: 12 },
-    { day: "Wed", value: 15 },
-    { day: "Thu", value: 9 },
-    { day: "Fri", value: 18 },
-    { day: "Sat", value: 6 },
-    { day: "Sun", value: 4 },
-  ])
+  // ——— Detection trend data (last 7 days) ———
+  const getDetectionTrendData = () => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const today = new Date()
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const date = new Date(today)
+      date.setDate(today.getDate() - (6 - i))
+      return date
+    })
 
-  // ——— Completed detections table ———
-  const [completedDetections] = useState<CompletedDetection[]>([
-    {
-      id: "1",
-      name: "Phishing Attempt",
-      severity: "Critical",
-      resolvedBy: "John Doe",
-      completedAt: "2024-01-31T14:30:00Z",
-    },
-    {
-      id: "2",
-      name: "Suspicious Login",
-      severity: "High",
-      resolvedBy: "Jane Smith",
-      completedAt: "2024-01-31T12:15:00Z",
-    },
-    {
-      id: "3",
-      name: "Malware Detection",
-      severity: "Critical",
-      resolvedBy: "John Doe",
-      completedAt: "2024-01-31T10:45:00Z",
-    },
-  ])
+    return last7Days.map(date => {
+      const dayDetections = detections.filter(d => {
+        const detectionDate = new Date(d.createdAt || d.timestamp)
+        return detectionDate.toDateString() === date.toDateString()
+      })
+      return {
+        day: days[date.getDay()],
+        value: dayDetections.length
+      }
+    })
+  }
 
-  // ——— Auto-blocked emails list ———
-  const [autoBlockedEmails] = useState({
-    total: 24,
-    data: [
-      {
-        sender: "malicious@phishing.com",
-        reason: "Known phishing domain",
-        timestamp: "2024-01-31T15:20:00Z",
-      },
-      {
-        sender: "suspicious@unknown.net",
-        reason: "Suspicious attachment",
-        timestamp: "2024-01-31T14:10:00Z",
-      },
-      {
-        sender: "spam@marketing.biz",
-        reason: "Spam content detected",
-        timestamp: "2024-01-31T12:30:00Z",
-      },
-    ],
-  })
+  // ——— Completed detections (resolved status) ———
+  const completedDetections: CompletedDetection[] = detections
+    .filter(d => d.status === 'resolved')
+    .slice(0, 10)
+    .map(d => ({
+      id: d.id,
+      name: d.name,
+      severity: d.severity,
+      resolvedBy: d.assignedTo[0] || 'Security Team',
+      completedAt: d.timestamp || d.createdAt
+    }))
+
+  // ——— Auto-blocked emails (blocked status) ———
+  const autoBlockedEmails = {
+    total: emails.filter(e => e.status === 'blocked' || e.status === 'quarantined').length,
+    data: emails
+      .filter(e => e.status === 'blocked' || e.status === 'quarantined')
+      .slice(0, 5)
+      .map(e => ({
+        sender: e.sender,
+        reason: e.status === 'blocked' ? 'Automatically blocked' : 'Quarantined for review',
+        timestamp: e.timestamp
+      }))
+  }
+
+  // ——— Data fetching functions ———
+  const loadEmails = useCallback(async () => {
+    try {
+      console.log('📧 Dashboard: Loading emails...')
+      const response = await fetch('/api/email?limit=1000')
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const data = await response.json()
+      setEmails(data.emails || [])
+      console.log(`✅ Dashboard: Loaded ${data.emails?.length || 0} emails`)
+    } catch (err: any) {
+      console.error('❌ Dashboard: Failed to load emails:', err)
+      setError(`Failed to load emails: ${err.message}`)
+    }
+  }, [])
+
+  const loadDetections = useCallback(async () => {
+    try {
+      console.log('🚨 Dashboard: Loading detections...')
+      const response = await fetch('/api/detections?limit=1000')
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+      
+      const data = await response.json()
+      setDetections(Array.isArray(data) ? data : [])
+      console.log(`✅ Dashboard: Loaded ${Array.isArray(data) ? data.length : 0} detections`)
+    } catch (err: any) {
+      console.error('❌ Dashboard: Failed to load detections:', err)
+      setError(`Failed to load detections: ${err.message}`)
+    }
+  }, [])
+
+  const loadAllData = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    
+    try {
+      console.log('🔄 Dashboard: Loading all data...')
+      await Promise.all([loadEmails(), loadDetections()])
+      console.log('✅ Dashboard: All data loaded successfully')
+    } catch (err: any) {
+      console.error('❌ Dashboard: Error loading data:', err)
+      setError('Failed to load dashboard data')
+    } finally {
+      setLoading(false)
+    }
+  }, [loadEmails, loadDetections])
+
+  // ——— Effects ———
+  useEffect(() => {
+    console.log('🚀 Dashboard: Component mounted, loading data...')
+    loadAllData()
+  }, [loadAllData])
+
+  // Auto-refresh every 60 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      console.log('🔄 Dashboard: Auto-refreshing data...')
+      loadAllData()
+    }, 60000) // 60 seconds
+
+    return () => clearInterval(interval)
+  }, [loadAllData])
+
+  // Show loading state
+  if (loading) {
+    return (
+      <AppLayout username="John Doe" notificationsCount={5}>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <RefreshCw className="animate-spin mx-auto h-8 w-8 mb-4 text-white" />
+            <p className="text-white">Loading dashboard data...</p>
+          </div>
+        </div>
+      </AppLayout>
+    )
+  }
 
   return (
     <AppLayout username="John Doe" notificationsCount={5}>
+      {/* Error Alert */}
+      {error && (
+        <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20">
+          <Shield className="h-4 w-4" />
+          <AlertTitle>Dashboard Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <StatCard
           title="Incoming Emails"
           value={stats.totalIncomingEmails}
-          description="Total emails sent to employees"
-          previousValue={stats.previousWeek.totalIncomingEmails}
+          description="Total emails received by employees"
+          previousValue={stats.previousWeek.totalIncomingEmails || undefined}
           icon={<Mail className="w-6 h-6" />}
         />
         <StatCard
           title="Outgoing Emails"
           value={stats.totalOutgoingEmails}
           description="Total emails sent by employees"
-          previousValue={stats.previousWeek.totalOutgoingEmails}
+          previousValue={stats.previousWeek.totalOutgoingEmails || undefined}
           icon={<Send className="w-6 h-6" />}
         />
         <StatCard
           title="Total Detections"
           value={stats.totalDetections}
           description="Suspicious emails detected"
-          previousValue={stats.previousWeek.totalDetections}
+          previousValue={stats.previousWeek.totalDetections || undefined}
           icon={<Shield className="w-6 h-6" />}
         />
       </div>
@@ -123,14 +234,18 @@ export default function DashboardPage() {
           <AssignmentsOverview username="John Doe" />
         </div>
 
-        {/* Severity Chart */}
+        {/* Detection Trends Chart */}
         <div>
-          <InteractiveLineChart title="Detection Trends" data={detectionTrendData} color="#3b82f6" />
+          <InteractiveLineChart 
+            title="Detection Trends (7 days)" 
+            data={getDetectionTrendData()} 
+            color="#3b82f6" 
+          />
         </div>
 
         {/* Assigned Detections */}
         <div>
-          <AssignedDetections count={15} />
+          <AssignedDetections count={stats.assignedDetections} />
         </div>
 
         {/* Completed Detections */}
@@ -142,6 +257,11 @@ export default function DashboardPage() {
         <div>
           <AutoBlockedEmails data={autoBlockedEmails.data} total={autoBlockedEmails.total} />
         </div>
+      </div>
+
+      {/* Data Summary Footer */}
+      <div className="mt-6 text-center text-sm text-gray-400">
+        Showing data for {emails.length} emails and {detections.length} detections • Auto-refresh every 60s
       </div>
     </AppLayout>
   )

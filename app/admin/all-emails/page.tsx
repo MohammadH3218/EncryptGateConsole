@@ -121,6 +121,7 @@ export default function AdminAllEmailsPage() {
   // Success/info messages
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [infoMessage, setInfoMessage] = useState<string | null>(null)
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true)
 
   // Email viewer state
   const [emailViewerTab, setEmailViewerTab] = useState<"content" | "html" | "headers" | "debug">("content")
@@ -272,6 +273,24 @@ export default function AdminAllEmailsPage() {
     console.log('🚀 All Emails page mounted, loading initial data...');
     loadEmails(true);
   }, []);
+
+  // Auto-refresh every 30 seconds to show new emails automatically
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+
+    console.log('⏰ Setting up auto-refresh every 30 seconds');
+    const intervalId = setInterval(() => {
+      if (!loading && !loadingMore) {
+        console.log('🔄 Auto-refreshing emails...');
+        loadEmails(true);
+      }
+    }, 30000); // 30 seconds
+
+    return () => {
+      console.log('⏰ Cleaning up auto-refresh interval');
+      clearInterval(intervalId);
+    };
+  }, [loadEmails, autoRefreshEnabled, loading, loadingMore]);
 
   // Infinite scroll
   useEffect(() => {
@@ -711,16 +730,30 @@ export default function AdminAllEmailsPage() {
               <Badge variant="outline" className="bg-white/20 text-white border-white/20">Filter: {employeeFilter}</Badge>
             )}
           </h2>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={refreshEmails}
-            disabled={loading}
-            className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
-          >
-            <RefreshCw className={`mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-400 whitespace-nowrap">Auto-refresh:</label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+                className={`p-2 ${autoRefreshEnabled ? 'text-green-400 hover:text-green-300' : 'text-gray-400 hover:text-gray-300'}`}
+                title={autoRefreshEnabled ? 'Auto-refresh enabled (every 30s)' : 'Auto-refresh disabled'}
+              >
+                {autoRefreshEnabled ? '🟢' : '⭕'}
+              </Button>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={refreshEmails}
+              disabled={loading}
+              className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
+            >
+              <RefreshCw className={`mr-2 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Debug Info */}
