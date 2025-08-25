@@ -30,7 +30,28 @@ export async function GET(request: Request) {
     const limit = Math.min(1000, Math.max(1, parseInt(rawLim, 10) || 50));
     console.log(`🔍 Query parameters: limit=${limit}, hasLastKey=${!!rawKey}`);
 
-    // Get list of monitored employees
+    // Scan the entire table to get all emails (including manually added ones)
+    console.log('📋 Scanning entire emails table to include all data...');
+    
+    const scanParams: ScanCommandInput = { 
+      TableName: EMAILS_TABLE, 
+      Limit: limit 
+    };
+
+    if (rawKey) {
+      try {
+        scanParams.ExclusiveStartKey = JSON.parse(decodeURIComponent(rawKey));
+        console.log('⏭️ Resuming pagination with lastKey');
+      } catch (e) {
+        console.warn('⚠️ Invalid lastKey, ignoring:', rawKey);
+      }
+    }
+
+    const resp = await ddb.send(new ScanCommand(scanParams));
+    let allEmails = resp.Items || [];
+    let lastEvaluatedKey = resp.LastEvaluatedKey;
+
+    // Get list of monitored employees for debugging/stats (but don't filter by them)
     let monitoredEmployees: string[] = [];
     try {
       if (ORG_ID !== 'default-org') {
@@ -42,63 +63,10 @@ export async function GET(request: Request) {
           }
         }));
         monitoredEmployees = (empResp.Items || []).map(item => item.email?.S).filter(Boolean) as string[];
-        console.log(`👥 Found ${monitoredEmployees.length} monitored employees:`, monitoredEmployees);
+        console.log(`👥 Found ${monitoredEmployees.length} monitored employees (for stats only):`, monitoredEmployees);
       }
     } catch (empError) {
-      console.warn('⚠️ Could not fetch monitored employees:', empError);
-    }
-
-    let allEmails: any[] = [];
-    let lastEvaluatedKey: any = undefined;
-
-    // If we have monitored employees, query by userId for each one
-    if (monitoredEmployees.length > 0) {
-      console.log('📋 Querying emails for each monitored employee...');
-      
-      for (const employeeEmail of monitoredEmployees) {
-        try {
-          const queryParams: any = {
-            TableName: EMAILS_TABLE,
-            KeyConditionExpression: 'userId = :userId',
-            ExpressionAttributeValues: {
-              ':userId': { S: employeeEmail }
-            },
-            ScanIndexForward: false, // Get newest first
-            Limit: Math.ceil(limit / monitoredEmployees.length) // Distribute limit across employees
-          };
-
-          console.log(`🔍 Querying emails for employee: ${employeeEmail}`);
-          const result = await ddb.send(new QueryCommand(queryParams));
-          
-          if (result.Items && result.Items.length > 0) {
-            allEmails.push(...result.Items);
-            console.log(`📧 Found ${result.Items.length} emails for ${employeeEmail}`);
-          }
-        } catch (queryError: any) {
-          console.warn(`⚠️ Error querying emails for ${employeeEmail}:`, queryError.message);
-        }
-      }
-    } else {
-      // Fallback: scan the entire table if no monitored employees
-      console.log('📋 No monitored employees found, scanning entire table...');
-      
-      const scanParams: ScanCommandInput = { 
-        TableName: EMAILS_TABLE, 
-        Limit: limit 
-      };
-
-      if (rawKey) {
-        try {
-          scanParams.ExclusiveStartKey = JSON.parse(decodeURIComponent(rawKey));
-          console.log('⏭️ Resuming pagination with lastKey');
-        } catch (e) {
-          console.warn('⚠️ Invalid lastKey, ignoring:', rawKey);
-        }
-      }
-
-      const resp = await ddb.send(new ScanCommand(scanParams));
-      allEmails = resp.Items || [];
-      lastEvaluatedKey = resp.LastEvaluatedKey;
+      console.warn('⚠️ Could not fetch monitored employees (continuing anyway):', empError);
     }
 
     console.log(`✅ Retrieved ${allEmails.length} total emails`);
@@ -110,9 +78,7 @@ export async function GET(request: Request) {
         emails: [],
         lastKey: null,
         hasMore: false,
-        message: monitoredEmployees.length === 0 
-          ? 'No monitored employees configured. Please add employees to monitoring first.'
-          : 'No emails found for monitored employees. Make sure WorkMail webhook is configured and employees are receiving emails.',
+        message: 'No emails found in the Emails table. This could mean the table is empty or there may be a connection issue.',
         debug: {
           orgId: ORG_ID,
           tableName: EMAILS_TABLE,
@@ -229,7 +195,7 @@ export async function GET(request: Request) {
         totalItems: emails.length,
         hasMore: Boolean(lastEvaluatedKey),
         monitoredEmployees: monitoredEmployees.length,
-        queryMethod: monitoredEmployees.length > 0 ? 'query_by_userId' : 'scan_table'
+        queryMethod: 'scan_table'
       }
     };
 
