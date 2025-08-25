@@ -1,16 +1,13 @@
-// lib/copilot.ts - COMPLETE UPDATED VERSION
+// lib/copilot.ts - Updated to use Parameter Store configuration
 import { ensureNeo4jConnection, testNeo4jConnection } from './neo4j'
 import { askCopilot, fetchEmailContext } from './neo4j'
+import { getOpenAIApiKey, validateOpenAIKey, getConfig, clearApiKeyCache } from './config'
 
 interface LLMResponse {
   response: string
   confidence?: number
   error?: string
 }
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY
-const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"
-const OPENAI_URL = 'https://api.openai.com/v1/chat/completions'
 
 const SYSTEM_CYPHER_PROMPT = `You are EncryptGate Copilot, a Neo4j Cypher expert for email security analysis.
 Use only these labels and relationship types exactly as listed:
@@ -47,6 +44,7 @@ export class SecurityCopilotService {
   private queryCache = new Map<string, { result: any, timestamp: number }>()
   private isInitialized = false
   private initializationError: string | null = null
+  private openaiApiKey: string | null = null
 
   constructor() {
     this.initialize().catch(error => {
@@ -59,14 +57,18 @@ export class SecurityCopilotService {
     try {
       console.log('🔄 Initializing Security Copilot...')
       
-      // Check environment variables first
-      if (!OPENAI_API_KEY) {
-        throw new Error('OPENAI_API_KEY environment variable is required')
-      }
-
-      console.log('🔗 Testing Neo4j connection...')
+      // Load OpenAI API key dynamically
+      console.log('🔑 Loading OpenAI API key from configuration...')
+      this.openaiApiKey = await getOpenAIApiKey()
       
-      // Test Neo4j connection with better error reporting
+      if (!validateOpenAIKey(this.openaiApiKey)) {
+        throw new Error('Invalid OpenAI API key format after loading')
+      }
+      
+      console.log('✅ OpenAI API key loaded and validated')
+
+      // Test Neo4j connection
+      console.log('🔗 Testing Neo4j connection...')
       const isConnected = await testNeo4jConnection()
       if (!isConnected) {
         throw new Error('Neo4j connection test failed')
@@ -91,18 +93,21 @@ export class SecurityCopilotService {
         throw new Error(`Neo4j connection failed: Cannot connect to Neo4j at bolt://localhost:7687. Please ensure Neo4j is running and accessible.`)
       } else if (error.message?.includes('authentication')) {
         throw new Error(`Neo4j authentication failed: Please check your Neo4j username and password.`)
-      } else if (error.message?.includes('OPENAI_API_KEY')) {
-        throw new Error(`OpenAI API key missing: Please set the OPENAI_API_KEY environment variable.`)
+      } else if (error.message?.includes('OpenAI') || error.message?.includes('Parameter Store')) {
+        throw new Error(`OpenAI configuration failed: ${error.message}`)
       } else {
         throw new Error(`Failed to initialize: ${error.message || error}`)
       }
     }
   }
 
-  // Force re-initialization
+  // Force re-initialization (useful after configuration changes)
   async reinitialize(): Promise<boolean> {
     this.isInitialized = false
     this.initializationError = null
+    this.openaiApiKey = null
+    clearApiKeyCache() // Clear the cached API key
+    
     try {
       await this.initialize()
       return true
@@ -220,19 +225,47 @@ export class SecurityCopilotService {
   }
 
   async queryLLM(system: string, user: string, temperature: number = 0.2): Promise<string> {
-    if (!OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is required for LLM queries')
+    // Ensure we have the API key
+    if (!this.openaiApiKey) {
+      try {
+        console.log('🔄 Loading OpenAI API key...')
+        this.openaiApiKey = await getOpenAIApiKey()
+      } catch (error: any) {
+        throw new Error(`OpenAI API key not available: ${error.message}`)
+      }
     }
 
+    if (!validateOpenAIKey(this.openaiApiKey)) {
+      // Try to reload the key once
+      try {
+        clearApiKeyCache()
+        this.openaiApiKey = await getOpenAIApiKey()
+        if (!validateOpenAIKey(this.openaiApiKey)) {
+          throw new Error('Invalid OpenAI API key format after reload')
+        }
+      } catch (error: any) {
+        throw new Error(`OpenAI API key validation failed: ${error.message}`)
+      }
+    }
+
+    const config = getConfig()
+
     try {
-      const response = await fetch(OPENAI_URL, {
+      console.log('🤖 Querying OpenAI with model:', config.openai.model)
+      console.log('🔍 API key validation:', {
+        hasKey: !!this.openaiApiKey,
+        keyLength: this.openaiApiKey?.length,
+        keyPrefix: this.openaiApiKey?.substring(0, 15) + '...'
+      })
+      
+      const response = await fetch(config.openai.url, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          'Authorization': `Bearer ${this.openaiApiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: OPENAI_MODEL,
+          model: config.openai.model,
           messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },
@@ -244,7 +277,35 @@ export class SecurityCopilotService {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}))
-        throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`)
+        
+        // Log detailed error for debugging
+        console.error('🚨 OpenAI API Error Details:', {
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
+          keyLength: this.openaiApiKey?.length,
+          keyPrefix: this.openaiApiKey?.substring(0, 15) + '...',
+          requestUrl: config.openai.url
+        })
+        
+        // Handle specific error cases
+        if (response.status === 401) {
+          // Clear the cached key and try to reload it once
+          console.log('🔄 API key authentication failed, attempting to reload...')
+          try {
+            clearApiKeyCache()
+            this.openaiApiKey = await getOpenAIApiKey()
+            throw new Error('API key authentication failed. Key has been reloaded, please try again.')
+          } catch (reloadError) {
+            throw new Error(`API key authentication failed: ${errorData.error?.message || 'Invalid API key'}`)
+          }
+        } else if (response.status === 429) {
+          throw new Error(`Rate limit exceeded: ${errorData.error?.message || 'Too many requests'}`)
+        } else if (response.status === 400) {
+          throw new Error(`Bad request: ${errorData.error?.message || 'Invalid request format'}`)
+        } else {
+          throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`)
+        }
       }
 
       const data = await response.json()
@@ -254,9 +315,10 @@ export class SecurityCopilotService {
         throw new Error('No content received from OpenAI')
       }
       
+      console.log('✅ OpenAI query successful')
       return content
     } catch (error: any) {
-      console.error('OpenAI query error:', error)
+      console.error('❌ OpenAI query error:', error)
       throw new Error(`Failed to query OpenAI: ${error.message}`)
     }
   }
@@ -579,7 +641,7 @@ Troubleshooting steps:
       await neo4j.runQuery('RETURN 1')
       
       // Test OpenAI if available
-      if (OPENAI_API_KEY) {
+      if (this.openaiApiKey || await getOpenAIApiKey()) {
         await this.queryLLM('You are a test assistant.', 'Reply with "OK"', 0)
       }
       
