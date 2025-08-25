@@ -41,27 +41,6 @@ const S3ProcessedEmailSchema = z.object({
   }).optional()
 });
 
-// Enhanced Lambda Webhook Schema - handles direct Lambda webhook calls
-const LambdaWebhookEmailSchema = z.object({
-  messageId: z.string().nonempty(),
-  subject: z.string(),
-  sender: z.string().email(),
-  recipients: z.array(z.string().email()).min(1),
-  timestamp: z.string().refine((d) => !isNaN(Date.parse(d)), {
-    message: 'Invalid ISO timestamp',
-  }),
-  body: z.string(),
-  bodyHtml: z.string().optional(),
-  extractionMethod: z.string().optional(),
-  s3Bucket: z.string().optional(),
-  s3Key: z.string().optional(),
-  direction: z.enum(['inbound', 'outbound']).default('inbound'),
-  size: z.number().nonnegative().default(0),
-  headers: z.record(z.string(), z.string()).optional(),
-  urls: z.array(z.string()).optional(),
-  attachments: z.array(z.string()).optional()
-});
-
 const RawEmailSchema = z.object({
   type: z.literal('raw_email'),
   messageId: z.string().nonempty(),
@@ -88,7 +67,7 @@ const EmailRequestSchema = z.discriminatedUnion('type', [
   S3ProcessedEmailSchema,
   RawEmailSchema,
   MockEmailSchema,
-]).or(LambdaWebhookEmailSchema); // Allow Lambda webhook format without type field
+]);
 
 type EmailRequest = z.infer<typeof EmailRequestSchema>;
 
@@ -96,7 +75,7 @@ type EmailRequest = z.infer<typeof EmailRequestSchema>;
 // ─── STORE EMAIL IN DYNAMODB ─────────────────────────────────────────────────
 //
 async function storeEmail(email: EmailRequest) {
-  console.log('💾 Storing email in DynamoDB:', 'type' in email ? email.type : 'lambda_webhook');
+  console.log('💾 Storing email in DynamoDB:', email.type);
 
   const emailId = `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   
@@ -106,18 +85,6 @@ async function storeEmail(email: EmailRequest) {
     : email.recipients && email.recipients.length > 0 
       ? email.recipients[0] 
       : email.sender;
-
-  console.log('📧 Email processing details for debugging:', {
-    messageId: email.messageId,
-    subject: email.subject,
-    sender: email.sender,
-    recipients: email.recipients,
-    direction: email.direction,
-    userId: userId,
-    timestamp: email.timestamp,
-    bodyLength: email.body?.length || 0,
-    bodyPreview: email.body?.substring(0, 100) || 'NO BODY'
-  });
 
   console.log('👤 Using userId for email storage:', userId);
 
@@ -158,21 +125,13 @@ async function storeEmail(email: EmailRequest) {
   }
 
   // Add processing info for S3-processed emails
-  if ('type' in email && email.type === 's3_processed_email' && email.processingInfo) {
+  if (email.type === 's3_processed_email' && email.processingInfo) {
     item.processingMethod = { S: email.processingInfo.extractionMethod };
     if (email.processingInfo.s3Bucket) {
       item.s3Bucket = { S: email.processingInfo.s3Bucket };
     }
     if (email.processingInfo.s3Key) {
       item.s3Key = { S: email.processingInfo.s3Key };
-    }
-  } else if ('extractionMethod' in email && email.extractionMethod) {
-    item.processingMethod = { S: email.extractionMethod };
-    if (email.s3Bucket) {
-      item.s3Bucket = { S: email.s3Bucket };
-    }
-    if (email.s3Key) {
-      item.s3Key = { S: email.s3Key };
     }
   }
 
@@ -181,7 +140,7 @@ async function storeEmail(email: EmailRequest) {
       new PutItemCommand({
         TableName: EMAILS_TABLE,
         Item: item,
-        // Remove condition to allow overwrites for testing
+        // Temporarily disable duplicate check to debug the issue
         // ConditionExpression: 'attribute_not_exists(messageId)'
       })
     );
@@ -189,8 +148,7 @@ async function storeEmail(email: EmailRequest) {
     console.log('✅ Email stored successfully in DynamoDB');
   } catch (err: any) {
     if (err.name === 'ConditionalCheckFailedException') {
-      console.log('ℹ️ Email already exists, skipping duplicate:', email.messageId);
-      console.log('⚠️ DUPLICATE EMAIL DETECTED - this might be why it\'s not appearing in UI');
+      console.log('ℹ️ Email already exists, skipping duplicate:', email.messageId)
       return;
     }
     
@@ -206,7 +164,8 @@ export async function POST(req: Request) {
   let payload: EmailRequest;
   try {
     const rawPayload = await req.json();
-    console.log('📥 [email-processor] Received payload structure:', {
+    
+    console.log('📥 [email-processor] Received payload:', {
       hasType: !!rawPayload.type,
       hasMessageId: !!rawPayload.messageId,
       hasSubject: !!rawPayload.subject,
@@ -214,41 +173,12 @@ export async function POST(req: Request) {
       hasRecipients: !!rawPayload.recipients,
       hasBody: !!rawPayload.body,
       hasTimestamp: !!rawPayload.timestamp,
-      extractionMethod: rawPayload.extractionMethod,
-      topLevelKeys: Object.keys(rawPayload)
+      payloadKeys: Object.keys(rawPayload)
     });
-
-    // Try to parse the payload, if Lambda format convert to expected format
-    if (!rawPayload.type && rawPayload.messageId) {
-      console.log('🔄 Converting Lambda webhook format to standard format');
-      const lambdaPayload = {
-        type: 's3_processed_email',
-        messageId: rawPayload.messageId,
-        subject: rawPayload.subject || 'No Subject',
-        sender: rawPayload.sender,
-        recipients: rawPayload.recipients,
-        timestamp: rawPayload.timestamp,
-        body: rawPayload.body || '',
-        bodyHtml: rawPayload.bodyHtml,
-        direction: rawPayload.direction || 'inbound',
-        size: rawPayload.size || rawPayload.body?.length || 0,
-        urls: rawPayload.urls || [],
-        attachments: rawPayload.attachments || [],
-        headers: rawPayload.headers || {},
-        processingInfo: {
-          extractionMethod: rawPayload.extractionMethod || 'SES_S3_ENHANCED',
-          s3Bucket: rawPayload.s3Bucket,
-          s3Key: rawPayload.s3Key,
-          bodyLength: rawPayload.body?.length || 0
-        }
-      };
-      payload = EmailRequestSchema.parse(lambdaPayload);
-    } else {
-      payload = EmailRequestSchema.parse(rawPayload);
-    }
+    
+    payload = EmailRequestSchema.parse(rawPayload);
   } catch (err: any) {
     console.error('❌ [email-processor] Invalid payload:', err);
-    // Note: req.json() can only be called once, so we can't re-read it here
     return NextResponse.json(
       { error: 'Invalid payload', details: err.errors || err.message },
       { status: 400 }
@@ -256,10 +186,10 @@ export async function POST(req: Request) {
   }
 
   try {
-    console.log('📧 Processing email payload:', 'type' in payload ? payload.type : 'lambda_webhook');
+    console.log('📧 Processing email payload:', payload.type);
     
     // Log important details for S3-processed emails
-    if ('type' in payload && payload.type === 's3_processed_email') {
+    if (payload.type === 's3_processed_email') {
       console.log('📧 S3-processed email details:', {
         messageId: payload.messageId,
         subject: payload.subject,
@@ -268,16 +198,6 @@ export async function POST(req: Request) {
         s3Bucket: payload.processingInfo?.s3Bucket,
         s3Key: payload.processingInfo?.s3Key,
         hasRealContent: payload.body && payload.body.length > 10 && !payload.body.includes('No email content available')
-      });
-    } else if ('extractionMethod' in payload) {
-      console.log('📧 Lambda webhook email details:', {
-        messageId: payload.messageId,
-        subject: payload.subject,
-        bodyLength: payload.body?.length || 0,
-        extractionMethod: payload.extractionMethod,
-        s3Bucket: payload.s3Bucket,
-        s3Key: payload.s3Key,
-        hasRealContent: payload.body && payload.body.length > 10
       });
     }
     
@@ -288,23 +208,16 @@ export async function POST(req: Request) {
     return NextResponse.json({
       status: 'processed',
       messageId: payload.messageId,
-      type: 'type' in payload ? payload.type : 'lambda_webhook',
+      type: payload.type,
       bodyLength: payload.body?.length || 0,
       hasContent: payload.body && payload.body.length > 10,
-      message: `Email ${'type' in payload ? payload.type : 'lambda_webhook'} processed successfully`,
+      message: `Email ${payload.type} processed successfully`,
       timestamp: new Date().toISOString(),
-      ...('type' in payload && payload.type === 's3_processed_email' && {
+      ...(payload.type === 's3_processed_email' && {
         extractionMethod: payload.processingInfo?.extractionMethod,
         s3Info: {
           bucket: payload.processingInfo?.s3Bucket,
           key: payload.processingInfo?.s3Key
-        }
-      }),
-      ...('extractionMethod' in payload && {
-        extractionMethod: payload.extractionMethod,
-        s3Info: {
-          bucket: payload.s3Bucket,
-          key: payload.s3Key
         }
       })
     });
@@ -312,7 +225,7 @@ export async function POST(req: Request) {
     console.error('❌ [email-processor] Processing error:', {
       message: err.message,
       messageId: payload?.messageId || 'unknown',
-      type: payload && 'type' in payload ? payload.type : 'lambda_webhook'
+      type: payload?.type || 'unknown'
     });
     
     return NextResponse.json(
@@ -320,7 +233,7 @@ export async function POST(req: Request) {
         error: 'Failed to process email', 
         message: err.message,
         messageId: payload?.messageId || 'unknown',
-        type: payload && 'type' in payload ? payload.type : 'lambda_webhook'
+        type: payload?.type || 'unknown'
       },
       { status: 500 }
     );

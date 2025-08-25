@@ -161,7 +161,8 @@ async function storeEmailInDynamoDB(emailData: any, userId: string): Promise<voi
     await ddb.send(new PutItemCommand({
       TableName: EMAILS_TABLE,
       Item: dbItem,
-      ConditionExpression: 'attribute_not_exists(messageId)'
+      // TEMPORARILY DISABLE DUPLICATE CHECK FOR DEBUGGING
+      // ConditionExpression: 'attribute_not_exists(messageId)'
     }))
     
     console.log('✅ Email stored successfully in DynamoDB')
@@ -247,19 +248,15 @@ export async function POST(req: Request) {
         
         const hasMonitoredParticipant = senderMonitored || recipientsMonitored.some(Boolean)
         
+        // TEMPORARILY DISABLE MONITORING CHECK FOR DEBUGGING
         if (!hasMonitoredParticipant) {
-          console.log('ℹ️ No monitored participants, skipping email', {
+          console.log('⚠️ No monitored participants found, but processing anyway for debugging:', {
             sender: emailData.sender,
-            recipients: emailData.recipients
+            recipients: emailData.recipients,
+            senderMonitored,
+            recipientsMonitored
           })
-          return NextResponse.json({
-            status: 'skipped',
-            reason: 'no-monitored-users',
-            participants: { 
-              sender: emailData.sender, 
-              recipients: emailData.recipients 
-            }
-          })
+          // Continue processing instead of skipping
         }
         
         // Determine userId
@@ -373,12 +370,10 @@ export async function POST(req: Request) {
         
         const hasMonitoredParticipant = senderMonitored || recipientsMonitored.some(Boolean)
         
+        // TEMPORARILY DISABLE MONITORING CHECK FOR DEBUGGING  
         if (!hasMonitoredParticipant) {
-          console.log('ℹ️ No monitored participants in WorkMail event')
-          return NextResponse.json({
-            status: 'skipped',
-            reason: 'no-monitored-users'
-          })
+          console.log('⚠️ No monitored participants in WorkMail event, but processing anyway for debugging')
+          // Continue processing instead of skipping
         }
         
         const userId = senderMonitored 
