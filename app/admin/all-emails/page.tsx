@@ -106,11 +106,14 @@ export default function AdminAllEmailsPage() {
 
   // Loading & pagination
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [debugInfo, setDebugInfo] = useState<any>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [totalEmails, setTotalEmails] = useState(0)
+  const [lastKey, setLastKey] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(true)
   const ITEMS_PER_PAGE = 20
 
   // Email viewing & flagging
@@ -162,17 +165,34 @@ export default function AdminAllEmailsPage() {
     }
   }, [infoMessage])
 
-  // Fetch all emails for pagination
+  // Fetch emails with pagination
   const loadEmails = useCallback(
-    async () => {
-      setLoading(true);
-      setError(null);
+    async (loadMore: boolean = false, searchTerm?: string) => {
+      // Use provided search term or current search query
+      const currentSearchQuery = searchTerm !== undefined ? searchTerm : searchQuery;
+      
+      if (loadMore) {
+        setLoadingMore(true);
+      } else {
+        setLoading(true);
+        setError(null);
+        setEmails([]); // Clear existing emails for fresh load
+        setLastKey(null);
+        setHasMore(true);
+      }
 
-      console.log('📧 Loading all emails for pagination...');
+      console.log(`📧 ${loadMore ? 'Loading more' : 'Loading initial'} emails...${currentSearchQuery ? ` with search: "${currentSearchQuery}"` : ''}`);
 
       try {
-        // Load all emails without limit for client-side pagination
-        const params = new URLSearchParams({ limit: '10000' }); // Get all emails (increased from 1000)
+        // Load emails with server-side pagination
+        const params = new URLSearchParams({ limit: '50' }); // Smaller batches for better performance
+        if (loadMore && lastKey) {
+          params.set('lastKey', lastKey);
+        }
+        if (currentSearchQuery.trim()) {
+          params.set('search', currentSearchQuery.trim());
+        }
+        
         const apiUrl = `/api/email?${params}`;
         console.log('🔗 Fetching from:', apiUrl);
 
@@ -188,11 +208,14 @@ export default function AdminAllEmailsPage() {
         const data: EmailsResponse = await res.json();
         console.log('📊 API Response data:', {
           emailCount: data.emails?.length || 0,
+          hasMore: data.hasMore,
           message: data.message,
           debug: data.debug
         });
 
         setDebugInfo(data.debug);
+        setLastKey(data.lastKey);
+        setHasMore(data.hasMore || false);
 
         if (data.emails && data.emails.length > 0) {
           // Process recipients to handle different formats
@@ -241,15 +264,22 @@ export default function AdminAllEmailsPage() {
             });
           }
 
-          setEmails(processedEmails);
-          setTotalEmails(processedEmails.length);
-          setTotalPages(Math.ceil(processedEmails.length / ITEMS_PER_PAGE));
+          if (loadMore) {
+            // Append new emails to existing ones
+            setEmails(prevEmails => [...prevEmails, ...processedEmails]);
+            setTotalEmails(prevTotal => prevTotal + processedEmails.length);
+          } else {
+            // Replace emails for initial load
+            setEmails(processedEmails);
+            setTotalEmails(processedEmails.length);
+          }
 
-          console.log('✅ All emails loaded successfully:', {
-            totalEmails: processedEmails.length,
-            totalPages: Math.ceil(processedEmails.length / ITEMS_PER_PAGE)
+          console.log('✅ Emails loaded successfully:', {
+            newEmails: processedEmails.length,
+            loadMore,
+            hasMore: data.hasMore
           });
-        } else {
+        } else if (!loadMore) {
           console.log('ℹ️ No emails in response');
           setEmails([]);
           setTotalEmails(0);
@@ -264,16 +294,17 @@ export default function AdminAllEmailsPage() {
         setError(e.message || "Failed to load emails");
       } finally {
         setLoading(false);
+        setLoadingMore(false);
       }
     },
-    []
+    [lastKey, searchQuery]
   );
 
   // Initial load
   useEffect(() => {
     console.log('🚀 All Emails page mounted, loading initial data...');
-    loadEmails();
-  }, [loadEmails]);
+    loadEmails(false, ''); // Initial load with empty search
+  }, []); // Only run once on mount
 
   // Auto-refresh every 30 seconds to show new emails automatically
   useEffect(() => {
@@ -283,7 +314,7 @@ export default function AdminAllEmailsPage() {
     const intervalId = setInterval(() => {
       if (!loading) {
         console.log('🔄 Auto-refreshing emails...');
-        loadEmails();
+        loadEmails(false, searchQuery); // Preserve search during auto-refresh
       }
     }, 30000); // 30 seconds
 
@@ -293,12 +324,38 @@ export default function AdminAllEmailsPage() {
     };
   }, [loadEmails, autoRefreshEnabled, loading]);
 
-  // Remove infinite scroll functionality - replaced with pagination
-
-  // Apply filters
+  // Infinite scroll functionality
   useEffect(() => {
-    console.log('🔍 Applying filters...', {
-      searchQuery,
+    const handleScroll = () => {
+      if (window.innerHeight + document.documentElement.scrollTop !== document.documentElement.offsetHeight) {
+        return;
+      }
+      
+      // Load more when user reaches bottom and there are more emails
+      if (hasMore && !loading && !loadingMore) {
+        console.log('📜 User reached bottom, loading more emails...');
+        loadEmails(true);
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [hasMore, loading, loadingMore, loadEmails]);
+
+  // Handle search changes - trigger new API call when search query changes
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      // When search query changes, reload emails with search
+      console.log('🔍 Search query changed, reloading emails...', searchQuery);
+      loadEmails(false, searchQuery);
+    }, 500); // Debounce search for 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  // Apply filters (excluding search since it's handled server-side now)
+  useEffect(() => {
+    console.log('🔍 Applying client-side filters...', {
       employeeFilter,
       directionFilter,
       threatFilter,
@@ -310,16 +367,7 @@ export default function AdminAllEmailsPage() {
 
     let list = [...emails];
 
-    // Text search
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(e =>
-        e.subject.toLowerCase().includes(q) ||
-        e.sender.toLowerCase().includes(q) ||
-        e.recipients.some(r => r.toLowerCase().includes(q)) ||
-        e.body.toLowerCase().includes(q)
-      );
-    }
+    // Note: Text search is now handled server-side, so we skip it here
 
     // Employee filter
     if (employeeFilter) {
@@ -372,7 +420,6 @@ export default function AdminAllEmailsPage() {
     }
   }, [
     emails,
-    searchQuery,
     employeeFilter,
     directionFilter,
     threatFilter,
@@ -453,7 +500,7 @@ export default function AdminAllEmailsPage() {
   const refreshEmails = () => {
     console.log('🔄 Manual refresh triggered');
     setCurrentPage(1);
-    loadEmails();
+    loadEmails(false, searchQuery); // Preserve current search when refreshing
   };
 
   // Get current page emails
@@ -1247,11 +1294,20 @@ export default function AdminAllEmailsPage() {
                   </Table>
                 </div>
 
+                {/* Loading more indicator */}
+                {loadingMore && (
+                  <div className="text-center py-4 border-t border-[#1f1f1f] mt-4">
+                    <RefreshCw className="animate-spin mx-auto h-6 w-6 mb-2 text-white" />
+                    <p className="text-white">Loading more emails...</p>
+                  </div>
+                )}
+                
                 {/* Pagination info at bottom */}
                 {filteredEmails.length > 0 && (
                   <div className="text-center py-4 text-gray-400 border-t border-[#1f1f1f] mt-4">
                     <div className="text-sm">
-                      Showing {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filteredEmails.length)}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredEmails.length)} of {filteredEmails.length} emails
+                      Showing {Math.min((currentPage - 1) * ITEMS_PER_PAGE + 1, filteredEmails.length)}-{Math.min(currentPage * ITEMS_PER_PAGE, filteredEmails.length)} of {filteredEmails.length} emails loaded
+                      {hasMore && <span className="text-blue-400"> (scroll down for more)</span>}
                     </div>
                   </div>
                 )}
