@@ -18,64 +18,123 @@ console.log('📧 Email API initialized:', { REGION, ORG_ID, EMAILS_TABLE, EMPLO
 
 const ddb = new DynamoDBClient({ region: REGION });
 
-// GET /api/email?limit=50&lastKey=<encoded>
+// GET /api/email?limit=50&lastKey=<encoded>&search=<query>
 export async function GET(request: Request) {
   try {
     console.log('📧 GET /api/email - Loading emails from database');
     const url = new URL(request.url);
     const rawLim = url.searchParams.get('limit') || '50';
     const rawKey = url.searchParams.get('lastKey') || undefined;
+    const searchQuery = url.searchParams.get('search') || '';
 
-    // Parse & clamp limit (increased max to handle all emails)
-    const limit = Math.min(25000, Math.max(1, parseInt(rawLim, 10) || 50));
-    console.log(`🔍 Query parameters: limit=${limit}, hasLastKey=${!!rawKey}`);
+    // Parse & clamp limit for server-side pagination
+    const limit = Math.min(100, Math.max(1, parseInt(rawLim, 10) || 50));
+    console.log(`🔍 Query parameters: limit=${limit}, hasLastKey=${!!rawKey}, searchQuery="${searchQuery}"`);
 
-    // Scan the entire table to get all emails (including manually added ones)
-    console.log('📋 Scanning entire emails table to include all data...');
-    
-    const scanParams: ScanCommandInput = { 
-      TableName: EMAILS_TABLE, 
-      Limit: limit 
-    };
-
-    if (rawKey) {
-      try {
-        scanParams.ExclusiveStartKey = JSON.parse(decodeURIComponent(rawKey));
-        console.log('⏭️ Resuming pagination with lastKey');
-      } catch (e) {
-        console.warn('⚠️ Invalid lastKey, ignoring:', rawKey);
-      }
-    }
-
-    // Continue scanning until we get all emails (handle 1MB DynamoDB limit)
+    // Handle search mode vs pagination mode
     let allEmails: any[] = [];
     let lastEvaluatedKey: any = undefined;
-    let scanCount = 0;
     
-    do {
-      if (lastEvaluatedKey) {
-        scanParams.ExclusiveStartKey = lastEvaluatedKey;
-      }
+    if (searchQuery.trim()) {
+      // Search mode: scan entire table and filter server-side
+      console.log('🔍 Search mode: scanning entire table for search query');
+      let searchResults: any[] = [];
+      let scanLastKey: any = undefined;
+      let scanCount = 0;
       
-      console.log(`📋 DynamoDB scan iteration ${++scanCount}, current total: ${allEmails.length}`);
+      do {
+        const searchScanParams: ScanCommandInput = { 
+          TableName: EMAILS_TABLE,
+          Limit: 1000 // Higher limit for search to be more efficient
+        };
+
+        if (scanLastKey) {
+          searchScanParams.ExclusiveStartKey = scanLastKey;
+        }
+        
+        console.log(`🔍 Search scan iteration ${++scanCount}`);
+        const searchResp = await ddb.send(new ScanCommand(searchScanParams));
+        
+        if (searchResp.Items) {
+          // Filter items server-side based on search query
+          const filteredItems = searchResp.Items.filter(item => {
+            const q = searchQuery.toLowerCase();
+            const subject = (item.subject?.S || '').toLowerCase();
+            const sender = (item.sender?.S || '').toLowerCase();
+            const body = (item.body?.S || '').toLowerCase();
+            
+            // Handle recipients (can be SS, S, or L format)
+            let recipientsText = '';
+            if (item.recipients?.SS) {
+              recipientsText = item.recipients.SS.join(' ').toLowerCase();
+            } else if (item.recipients?.S) {
+              recipientsText = item.recipients.S.toLowerCase();
+            } else if (item.recipients?.L) {
+              recipientsText = item.recipients.L.map((r: any) => r.S || '').join(' ').toLowerCase();
+            }
+            
+            return subject.includes(q) || 
+                   sender.includes(q) || 
+                   recipientsText.includes(q) || 
+                   body.includes(q);
+          });
+          
+          searchResults.push(...filteredItems);
+        }
+        
+        scanLastKey = searchResp.LastEvaluatedKey;
+        
+        // Safety check for search
+        if (scanCount > 100) {
+          console.warn('⚠️ Search scan limit reached, stopping');
+          break;
+        }
+        
+      } while (scanLastKey);
+      
+      console.log(`✅ Search complete: ${searchResults.length} matching emails found`);
+      
+      // Sort search results by timestamp (newest first)
+      searchResults.sort((a, b) => {
+        const timeA = a.receivedAt?.S || a.timestamp?.S || '0';
+        const timeB = b.receivedAt?.S || b.timestamp?.S || '0';
+        return timeB.localeCompare(timeA);
+      });
+      
+      // Apply pagination to search results
+      const startIdx = rawKey ? parseInt(rawKey, 10) || 0 : 0;
+      const endIdx = startIdx + limit;
+      allEmails = searchResults.slice(startIdx, endIdx);
+      
+      // For search, lastKey is just the next start index
+      lastEvaluatedKey = endIdx < searchResults.length ? endIdx.toString() : undefined;
+      
+    } else {
+      // Pagination mode: normal scanning with pagination
+      console.log('📋 Pagination mode: scanning emails table with pagination...');
+      
+      const scanParams: ScanCommandInput = { 
+        TableName: EMAILS_TABLE, 
+        Limit: limit 
+      };
+
+      if (rawKey) {
+        try {
+          scanParams.ExclusiveStartKey = JSON.parse(decodeURIComponent(rawKey));
+          console.log('⏭️ Resuming pagination with lastKey');
+        } catch (e) {
+          console.warn('⚠️ Invalid lastKey, ignoring:', rawKey);
+        }
+      }
+
+      console.log(`📋 DynamoDB scan with limit: ${limit}`);
       const resp = await ddb.send(new ScanCommand(scanParams));
       
-      if (resp.Items) {
-        allEmails.push(...resp.Items);
-      }
-      
+      allEmails = resp.Items || [];
       lastEvaluatedKey = resp.LastEvaluatedKey;
-      console.log(`📋 Scan iteration ${scanCount} complete: +${resp.Items?.length || 0} items, total: ${allEmails.length}, hasMore: ${!!lastEvaluatedKey}`);
-      
-      // Safety check to prevent infinite loops
-      if (scanCount > 50) {
-        console.warn('⚠️ Maximum scan iterations reached, stopping scan');
-        break;
-      }
-      
-    } while (lastEvaluatedKey && allEmails.length < limit);
+    }
     
-    console.log(`✅ DynamoDB scan complete: ${allEmails.length} total emails retrieved in ${scanCount} iterations`);
+    console.log(`✅ ${searchQuery ? 'Search' : 'Pagination'} complete: ${allEmails.length} emails retrieved, hasMore: ${!!lastEvaluatedKey}`);
 
     // Get list of monitored employees for debugging/stats (but don't filter by them)
     let monitoredEmployees: string[] = [];
@@ -121,8 +180,8 @@ export async function GET(request: Request) {
       return timeB.localeCompare(timeA);
     });
 
-    // Limit results
-    const limitedEmails = allEmails.slice(0, limit);
+    // All emails are already limited by DynamoDB scan
+    const limitedEmails = allEmails;
 
     // Map DynamoDB items into plain JSON
     const emails = limitedEmails.map((item, index) => {
@@ -223,17 +282,16 @@ export async function GET(request: Request) {
 
     const response = {
       emails,
-      lastKey: null, // Client-side pagination, no server-side pagination needed
-      hasMore: false, // All emails loaded
+      lastKey: lastEvaluatedKey ? (searchQuery ? lastEvaluatedKey : encodeURIComponent(JSON.stringify(lastEvaluatedKey))) : null,
+      hasMore: !!lastEvaluatedKey,
       debug: {
         orgId: ORG_ID,
         tableName: EMAILS_TABLE,
         totalItems: emails.length,
-        totalScannedItems: allEmails.length,
-        scanIterations: scanCount,
-        hasMore: false,
+        hasMore: !!lastEvaluatedKey,
         monitoredEmployees: monitoredEmployees.length,
-        queryMethod: 'scan_table'
+        queryMethod: searchQuery ? 'search_paginated' : 'scan_paginated',
+        searchQuery: searchQuery || undefined
       }
     };
 
