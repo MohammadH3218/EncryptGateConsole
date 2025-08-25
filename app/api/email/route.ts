@@ -47,9 +47,35 @@ export async function GET(request: Request) {
       }
     }
 
-    const resp = await ddb.send(new ScanCommand(scanParams));
-    let allEmails = resp.Items || [];
-    let lastEvaluatedKey = resp.LastEvaluatedKey;
+    // Continue scanning until we get all emails (handle 1MB DynamoDB limit)
+    let allEmails: any[] = [];
+    let lastEvaluatedKey: any = undefined;
+    let scanCount = 0;
+    
+    do {
+      if (lastEvaluatedKey) {
+        scanParams.ExclusiveStartKey = lastEvaluatedKey;
+      }
+      
+      console.log(`📋 DynamoDB scan iteration ${++scanCount}, current total: ${allEmails.length}`);
+      const resp = await ddb.send(new ScanCommand(scanParams));
+      
+      if (resp.Items) {
+        allEmails.push(...resp.Items);
+      }
+      
+      lastEvaluatedKey = resp.LastEvaluatedKey;
+      console.log(`📋 Scan iteration ${scanCount} complete: +${resp.Items?.length || 0} items, total: ${allEmails.length}, hasMore: ${!!lastEvaluatedKey}`);
+      
+      // Safety check to prevent infinite loops
+      if (scanCount > 50) {
+        console.warn('⚠️ Maximum scan iterations reached, stopping scan');
+        break;
+      }
+      
+    } while (lastEvaluatedKey && allEmails.length < limit);
+    
+    console.log(`✅ DynamoDB scan complete: ${allEmails.length} total emails retrieved in ${scanCount} iterations`);
 
     // Get list of monitored employees for debugging/stats (but don't filter by them)
     let monitoredEmployees: string[] = [];
@@ -129,7 +155,7 @@ export async function GET(request: Request) {
             return item.recipients.SS;
           } else if (item.recipients?.S) {
             // Handle comma-separated string
-            return item.recipients.S.split(',').map(r => r.trim()).filter(Boolean);
+            return item.recipients.S.split(',').map((r: string) => r.trim()).filter(Boolean);
           } else if (item.recipients?.L) {
             // Handle list format
             return item.recipients.L.map((r: any) => r.S || '').filter(Boolean);
@@ -197,15 +223,15 @@ export async function GET(request: Request) {
 
     const response = {
       emails,
-      lastKey: lastEvaluatedKey 
-        ? encodeURIComponent(JSON.stringify(lastEvaluatedKey))
-        : null,
-      hasMore: Boolean(lastEvaluatedKey),
+      lastKey: null, // Client-side pagination, no server-side pagination needed
+      hasMore: false, // All emails loaded
       debug: {
         orgId: ORG_ID,
         tableName: EMAILS_TABLE,
         totalItems: emails.length,
-        hasMore: Boolean(lastEvaluatedKey),
+        totalScannedItems: allEmails.length,
+        scanIterations: scanCount,
+        hasMore: false,
         monitoredEmployees: monitoredEmployees.length,
         queryMethod: 'scan_table'
       }
