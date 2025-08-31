@@ -16,17 +16,18 @@ export function middleware(request: NextRequest) {
   const isPublicPath = 
     path === '/login' || 
     path === '/' ||
+    path === '/logout' ||
+    path === '/setup' ||
     path.startsWith('/_next/') ||
     path === '/favicon.ico'
   
-  // Check for authentication token
-  const token = request.cookies.get('access_token')?.value
+  // Since tokens are stored in localStorage (client-side), we can't check them in middleware
+  // Instead, we'll let protected routes handle their own authentication checks
+  // The middleware will only redirect users from login if they're already authenticated
   
-  // Redirect logic - only apply to non-API, non-public paths
-  if (!isPublicPath && !token) {
-    // If user is on a protected path but has no token, redirect to login
-    return NextResponse.redirect(new URL('/login', request.url))
-  }
+  // For now, just allow all paths and let individual pages handle auth
+  // The login page will redirect to dashboard if user is already logged in
+  // Protected pages will redirect to login if user is not authenticated
   
   return NextResponse.next()
 }

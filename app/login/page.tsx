@@ -14,7 +14,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { LogoText } from "@/components/ui/logo-text"
 import { fetchWithRetry, getAdjustedTime } from "@/utils/auth"
 import {
   Dialog,
@@ -25,7 +24,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2 } from "lucide-react"
+import { Loader2, ArrowRight, Lock, Mail, CheckCircle } from "lucide-react"
 
 type UserType = "admin" | "employee"
 
@@ -59,7 +58,6 @@ export default function LoginPage() {
   // MFA states
   const [showMFA, setShowMFA] = useState(false)
   const [mfaCode, setMfaCode] = useState("")
-  const [mfaRecoveryCodes, setMfaRecoveryCodes] = useState<string[]>([])
 
   // Password change states
   const [showPasswordChange, setShowPasswordChange] = useState(false)
@@ -71,7 +69,6 @@ export default function LoginPage() {
   const [mfaSecretCode, setMfaSecretCode] = useState("")
   const [setupMfaCode, setSetupMfaCode] = useState("")
   const [qrCodeUrl, setQrCodeUrl] = useState("")
-  const [validMfaCodes, setValidMfaCodes] = useState<string[]>([])
 
   // Forgot-password states
   const [showForgotPassword, setShowForgotPassword] = useState(false)
@@ -99,33 +96,27 @@ export default function LoginPage() {
     if (base) fetchServerTime(base)
   }, [])
 
+  // Check if user is already logged in
+  useEffect(() => {
+    const token = localStorage.getItem("access_token")
+    if (token) {
+      // User is already logged in, redirect to dashboard
+      router.push("/admin/dashboard")
+    }
+  }, [router])
+
   // fetch server time & offset
   const fetchServerTime = async (base: string) => {
     try {
-      const res = await fetchWithRetry(
-        `${base}/api/auth/test-mfa-code`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            secret: mfaSecretCode || "AAAAAAAAAA",
-            client_time: new Date().toISOString(),
-            adjusted_time: getAdjustedTime()?.toISOString(),
-          }),
-        }
-      )
+      const res = await fetchWithRetry(`${base}/api/auth/server-time`, {})
       const data = await res.json()
       if (data.server_time) {
         setServerTime(data.server_time)
         const offset = new Date(data.server_time).getTime() - Date.now()
         localStorage.setItem("server_time_offset", offset.toString())
-        if (Math.abs(offset) > 10000) {
-          console.warn(`Time sync difference: ${Math.round(Math.abs(offset)/1000)}s`)
-        }
       }
     } catch (e) {
-      console.error("Failed to sync server time")
+      // Silently fail - server time sync is not critical
     }
   }
 
@@ -144,7 +135,6 @@ export default function LoginPage() {
   const getServerGeneratedCodes = async (populate = false) => {
     if (!apiBaseUrl || !mfaSecretCode) return
     try {
-      const adjusted = getAdjustedTime()
       const res = await fetchWithRetry(
         `${apiBaseUrl}/api/auth/test-mfa-code`,
         {
@@ -154,21 +144,16 @@ export default function LoginPage() {
           body: JSON.stringify({
             secret: mfaSecretCode,
             client_time: new Date().toISOString(),
-            adjusted_time: adjusted?.toISOString(),
+            adjusted_time: getAdjustedTime()?.toISOString(),
           }),
         }
       )
       const d = await res.json()
-      if (d.current_code) {
-        if (populate) setSetupMfaCode(d.current_code)
-        if (d.time_windows) {
-          setValidMfaCodes(d.time_windows.map((w: any) => w.code))
-        } else if (d.validCodes) {
-          setValidMfaCodes(d.validCodes)
-        }
+      if (d.current_code && populate) {
+        setSetupMfaCode(d.current_code)
       }
     } catch (e) {
-      console.error("Error fetching MFA codes")
+      // Silently fail
     }
   }
 
@@ -189,7 +174,6 @@ export default function LoginPage() {
     const pwToUse = stored || password
 
     try {
-      // Authenticating user
       const resp = await fetchWithRetry(
         `${apiBaseUrl}/api/auth/authenticate`,
         {
@@ -201,7 +185,6 @@ export default function LoginPage() {
         }
       )
       const data: LoginResponse = await resp.json()
-      // Processing authentication response
 
       if (!resp.ok) {
         throw new Error(data.detail || `Authentication failed (${resp.status})`)
@@ -249,9 +232,6 @@ export default function LoginPage() {
               localStorage.setItem("temp_access_token", data.access_token)
               localStorage.setItem("temp_id_token", data.id_token||"")
               localStorage.setItem("temp_refresh_token", data.refresh_token||"")
-              if (m.validCodes) {
-                setValidMfaCodes(Array.isArray(m.validCodes) ? m.validCodes : [m.validCodes])
-              }
               setShowMFASetup(true)
               return
             }
@@ -265,7 +245,6 @@ export default function LoginPage() {
         throw new Error("Unexpected authentication response")
       }
     } catch (e: any) {
-      console.error("Authentication failed:", e.message)
       setError(e.message || "Login failed")
     } finally {
       setIsLoading(false)
@@ -302,7 +281,6 @@ export default function LoginPage() {
     setError("")
 
     try {
-      // Processing password change challenge
       const res = await fetchWithRetry(
         `${apiBaseUrl}/api/auth/respond-to-challenge`,
         {
@@ -320,7 +298,6 @@ export default function LoginPage() {
         1
       )
       const d = await res.json()
-      // Processing password change response
       if (!res.ok) {
         throw new Error(d.detail || `Failed to change password (${res.status})`)
       }
@@ -351,9 +328,6 @@ export default function LoginPage() {
               localStorage.setItem("temp_access_token", d.access_token)
               localStorage.setItem("temp_id_token", d.id_token||"")
               localStorage.setItem("temp_refresh_token", d.refresh_token||"")
-              if (m.validCodes) {
-                setValidMfaCodes(Array.isArray(m.validCodes)?m.validCodes:[m.validCodes])
-              }
               setShowMFASetup(true)
               return
             }
@@ -378,7 +352,6 @@ export default function LoginPage() {
         await handleLogin()
       }
     } catch (e: any) {
-      console.error("Password change failed:", e.message)
       setError(e.message || "Failed to change password")
     } finally {
       setIsLoading(false)
@@ -424,7 +397,6 @@ export default function LoginPage() {
         2
       )
       const d = await resp.json()
-      // Processing MFA setup verification
       if (!resp.ok) {
         // handle expired-code as success
         if (
@@ -457,7 +429,6 @@ export default function LoginPage() {
       localStorage.removeItem("temp_refresh_token")
       router.push("/admin/dashboard")
     } catch (e: any) {
-      console.error("MFA setup failed:", e.message)
       setError(e.message || "MFA setup failed")
     } finally {
       setIsLoading(false)
@@ -476,8 +447,6 @@ export default function LoginPage() {
     setError("")
     setSuccessMessage("")
     try {
-      await fetchServerTime(apiBaseUrl)
-      const adjusted = getAdjustedTime()
       const resp = await fetchWithRetry(
         `${apiBaseUrl}/api/auth/verify-mfa`,
         {
@@ -489,44 +458,15 @@ export default function LoginPage() {
             username: email,
             session,
             code: mfaCode,
-            client_time: new Date().toISOString(),
-            adjusted_time: adjusted?.toISOString(),
           }),
-        },
-        2
+        }
       )
       const d = await resp.json()
       if (!resp.ok) {
-        // try server-generated code
-        if (d.serverGeneratedCode) {
-          const retry = await fetchWithRetry(
-            `${apiBaseUrl}/api/auth/verify-mfa`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Accept: "application/json" },
-              credentials: "include",
-              mode: "cors",
-              body: JSON.stringify({
-                username: email,
-                session,
-                code: d.serverGeneratedCode,
-                client_time: new Date().toISOString(),
-                adjusted_time: adjusted?.toISOString(),
-              }),
-            }
-          )
-          if (retry.ok) {
-            const r2 = await retry.json()
-            finalizeLogin(r2.access_token||"", r2.id_token||"", r2.refresh_token||"")
-            return
-          }
-        }
-        throw new Error(d.detail || "MFA verify failed")
+        throw new Error(d.detail || "MFA verification failed")
       }
-      // success
       finalizeLogin(d.access_token||"", d.id_token||"", d.refresh_token||"")
     } catch (e: any) {
-      console.error("MFA verification failed:", e.message)
       setError(e.message || "MFA verification failed")
     } finally {
       setIsLoading(false)
@@ -565,7 +505,7 @@ export default function LoginPage() {
     if (!forgotPasswordCode) return setForgotPasswordError("Enter code")
     if (!newForgotPassword) return setForgotPasswordError("Enter new password")
     if (newForgotPassword !== confirmForgotPassword)
-      return setForgotPasswordError("Passwords don’t match")
+      return setForgotPasswordError("Passwords don't match")
 
     setIsForgotPasswordLoading(true)
     setForgotPasswordError("")
@@ -605,24 +545,27 @@ export default function LoginPage() {
   // RENDER
   // ------------------------------
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-4">
-          <div className="flex justify-center items-center gap-2">
-            <div className="w-8 h-8">
-              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path
-                  d="M16 2C8.268 2 2 8.268 2 16s6.268 14 14 14 14-6.268 14-14S23.732 2 16 2zm0 25.2c-6.188 0-11.2-5.012-11.2-11.2S9.812 4.8 16 4.8 27.2 9.812 27.2 16 22.188 27.2 16 27.2z"
-                  fill="currentColor"
-                />
-              </svg>
+    <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4 relative overflow-hidden">
+      <div className="absolute inset-0 overflow-hidden">
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/5 rounded-full blur-3xl animate-pulse delay-1000"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/3 rounded-full blur-3xl animate-pulse delay-500"></div>
+      </div>
+
+      <Card className="w-full max-w-md bg-[#0f0f0f] border-[#1f1f1f] shadow-2xl backdrop-blur-sm relative z-10 transition-all duration-300 hover:shadow-3xl hover:border-[#2f2f2f]">
+        <CardHeader className="space-y-6 pb-8">
+          <div className="flex justify-center items-center gap-3 group">
+            <div className="transition-transform duration-300 group-hover:scale-110">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
+                <Lock className="w-6 h-6 text-white" />
+              </div>
             </div>
-            <LogoText>EncryptGate</LogoText>
           </div>
-          <CardTitle className="text-2xl font-bold text-center">Sign in</CardTitle>
-          <CardDescription className="text-center">
-            Choose your account type to access the security dashboard
-          </CardDescription>
+
+          <div className="text-center space-y-2">
+            <CardTitle className="text-2xl font-bold text-white">Welcome Back</CardTitle>
+            <CardDescription className="text-gray-400">Sign in to access your security dashboard</CardDescription>
+          </div>
         </CardHeader>
 
         <form
@@ -637,114 +580,144 @@ export default function LoginPage() {
               onValueChange={(v: UserType) => setUserType(v)}
               className="grid gap-4"
             >
-              <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
+              <div className="relative flex items-center space-x-4 rounded-lg border border-[#2f2f2f] p-4 hover:border-blue-500/50 bg-[#1a1a1a]/50 transition-colors">
                 <RadioGroupItem value="admin" id="admin" />
-                <Label htmlFor="admin" className="flex-1 cursor-pointer">
+                <Label htmlFor="admin" className="flex-1 cursor-pointer text-white">
                   Admin
                 </Label>
               </div>
-              <div className="relative flex items-center space-x-4 rounded-lg border p-4 hover:border-primary">
+              <div className="relative flex items-center space-x-4 rounded-lg border border-[#2f2f2f] p-4 hover:border-blue-500/50 bg-[#1a1a1a]/50 transition-colors">
                 <RadioGroupItem value="employee" id="employee" />
-                <Label htmlFor="employee" className="flex-1 cursor-pointer">
+                <Label htmlFor="employee" className="flex-1 cursor-pointer text-white">
                   Employee
                 </Label>
               </div>
             </RadioGroup>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="name@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-white text-sm font-medium">
+                  Email Address
+                </Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="name@company.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-white text-sm font-medium">
+                  Password
+                </Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    id="password"
+                    type="password"
+                    placeholder="Enter your password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => setShowForgotPassword(true)}
+                className="text-blue-400 hover:text-blue-300 text-sm font-normal transition-colors"
+              >
+                Forgot your password?
+              </button>
             </div>
 
             {error && (
-              <Alert variant="destructive">
-                <AlertDescription className="text-sm">{error}</AlertDescription>
+              <Alert
+                variant="destructive"
+                className="bg-red-500/10 border-red-500/20 animate-in slide-in-from-top-2 duration-300"
+              >
+                <AlertDescription className="text-sm text-red-200">{error}</AlertDescription>
               </Alert>
             )}
             {successMessage && (
-              <Alert>
+              <Alert className="bg-green-500/10 border-green-500/20 text-green-200 animate-in slide-in-from-top-2 duration-300">
                 <AlertDescription className="text-sm">{successMessage}</AlertDescription>
               </Alert>
             )}
           </CardContent>
 
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={isLoading}>
+          <CardFooter className="flex flex-col space-y-4 pt-6">
+            <Button
+              type="submit"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed group"
+              disabled={isLoading}
+            >
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Please wait...
+                  Signing in...
                 </>
               ) : (
-                "Sign In"
+                <>
+                  Sign In
+                  <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+                </>
               )}
             </Button>
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => setShowForgotPassword(true)}
-                className="text-sm text-muted-foreground hover:text-primary"
-              >
-                Forgot Password?
-              </button>
-            </div>
+
+            <p className="text-center text-xs text-gray-500">Secure access to your email security dashboard</p>
           </CardFooter>
         </form>
       </Card>
 
-      {/* Password Change */}
+      {/* Password Change Dialog */}
       <Dialog open={showPasswordChange} onOpenChange={(o) => o && setShowPasswordChange(o)}>
-        <DialogContent>
+        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
           <DialogHeader>
-            <DialogTitle>Change Password Required</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-white">Change Password Required</DialogTitle>
+            <DialogDescription className="text-gray-400">
               Your account requires a password change. Please create a new password.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="new-password">New Password</Label>
+              <Label htmlFor="new-password" className="text-white">New Password</Label>
               <Input
                 id="new-password"
                 type="password"
                 placeholder="Enter new password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
+                className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm-password">Confirm Password</Label>
+              <Label htmlFor="confirm-password" className="text-white">Confirm Password</Label>
               <Input
                 id="confirm-password"
                 type="password"
                 placeholder="Confirm new password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
+                className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
               />
             </div>
             {error && (
-              <Alert variant="destructive">
-                <AlertDescription className="text-sm">{error}</AlertDescription>
+              <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
+                <AlertDescription className="text-sm text-red-200">{error}</AlertDescription>
               </Alert>
             )}
-            <Alert>
-              <AlertDescription>
+            <Alert className="bg-blue-500/10 border-blue-500/20">
+              <AlertDescription className="text-blue-200">
                 Password must be at least 8 characters, include uppercase, lowercase, numbers, and special characters.
               </AlertDescription>
             </Alert>
@@ -758,7 +731,7 @@ export default function LoginPage() {
                 !confirmPassword ||
                 newPassword !== confirmPassword
               }
-              className="w-full"
+              className="w-full bg-blue-600 hover:bg-blue-700"
             >
               {isLoading ? (
                 <>
@@ -773,73 +746,57 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MFA Setup */}
+      {/* MFA Setup Dialog */}
       <Dialog open={showMFASetup} onOpenChange={(o) => o && setShowMFASetup(o)}>
-        <DialogContent>
+        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
           <DialogHeader>
-            <DialogTitle>Setup Two-Factor Authentication</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-white">Setup Two-Factor Authentication</DialogTitle>
+            <DialogDescription className="text-gray-400">
               For additional security, please set up Google Authenticator.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <Alert>
-              <AlertDescription>
+            <Alert className="bg-blue-500/10 border-blue-500/20">
+              <AlertDescription className="text-blue-200">
                 <ol className="list-decimal list-inside">
                   <li>Install Google Authenticator</li>
                   <li>Scan the QR code below</li>
                   <li>Enter the 6-digit code</li>
-                  <li>Click “Verify & Complete”</li>
+                  <li>Click "Verify & Complete"</li>
                 </ol>
               </AlertDescription>
             </Alert>
             {qrCodeUrl && (
               <div className="flex flex-col items-center space-y-2">
-                <Label>Scan QR Code</Label>
+                <Label className="text-white">Scan QR Code</Label>
                 <img src={qrCodeUrl} alt="MFA QR" className="w-48 h-48" />
               </div>
             )}
             {mfaSecretCode && (
               <div className="text-center space-y-2">
-                <Label>Secret Key</Label>
-                <div className="font-mono">{mfaSecretCode}</div>
+                <Label className="text-white">Secret Key</Label>
+                <div className="font-mono text-gray-300 bg-[#1f1f1f] p-2 rounded">{mfaSecretCode}</div>
               </div>
             )}
             <div className="space-y-2">
-              <Label htmlFor="setup-mfa-code">Verification Code</Label>
+              <Label htmlFor="setup-mfa-code" className="text-white">Verification Code</Label>
               <Input
                 id="setup-mfa-code"
                 placeholder="6-digit code"
                 value={setupMfaCode}
                 onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                 maxLength={6}
-                className="text-center text-2xl tracking-widest"
+                className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white"
               />
-              {validMfaCodes.length > 0 && (
-                <details className="text-xs text-muted-foreground">
-                  <summary>Need help?</summary>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {validMfaCodes.slice(0, 5).map((c, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setSetupMfaCode(c)}
-                        className="px-2 py-1 border rounded"
-                      >
-                        {c}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              )}
             </div>
             {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+              <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
+                <AlertDescription className="text-red-200">{error}</AlertDescription>
               </Alert>
             )}
           </div>
           <DialogFooter>
-            <Button onClick={handleMFASetup} disabled={isLoading} className="w-full">
+            <Button onClick={handleMFASetup} disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700">
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -853,47 +810,31 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
 
-      {/* MFA Verify */}
+      {/* MFA Verify Dialog */}
       <Dialog open={showMFA} onOpenChange={(o) => o && setShowMFA(o)}>
-        <DialogContent>
+        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
           <DialogHeader>
-            <DialogTitle>Enter Authentication Code</DialogTitle>
-            <DialogDescription>Enter the 6-digit code from your authenticator app</DialogDescription>
+            <DialogTitle className="text-white">Enter Authentication Code</DialogTitle>
+            <DialogDescription className="text-gray-400">Enter the 6-digit code from your authenticator app</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <Label htmlFor="mfa-code">Code</Label>
+            <Label htmlFor="mfa-code" className="text-white">Code</Label>
             <Input
               id="mfa-code"
               placeholder="6-digit"
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               maxLength={6}
-              className="text-center text-2xl tracking-widest"
+              className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white"
             />
-            {mfaRecoveryCodes.length > 0 && (
-              <details className="text-xs text-muted-foreground">
-                <summary>Use alternate codes</summary>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {mfaRecoveryCodes.slice(0, 5).map((c, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setMfaCode(c)}
-                      className="px-2 py-1 border rounded"
-                    >
-                      {c}
-                    </button>
-                  ))}
-                </div>
-              </details>
-            )}
             {error && (
-              <Alert variant="destructive">
-                <AlertDescription>{error}</AlertDescription>
+              <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
+                <AlertDescription className="text-red-200">{error}</AlertDescription>
               </Alert>
             )}
           </div>
           <DialogFooter>
-            <Button onClick={handleMFASubmit} disabled={isLoading} className="w-full">
+            <Button onClick={handleMFASubmit} disabled={isLoading} className="w-full bg-blue-600 hover:bg-blue-700">
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -907,41 +848,52 @@ export default function LoginPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Forgot Password */}
+      {/* Forgot Password Dialog */}
       <Dialog
         open={showForgotPassword}
         onOpenChange={(o) => {
           if (!o) setShowForgotPassword(false)
         }}
       >
-        <DialogContent>
+        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
           <DialogHeader>
-            <DialogTitle>Reset Your Password</DialogTitle>
-            <DialogDescription>
+            <DialogTitle className="text-white">Reset Password</DialogTitle>
+            <DialogDescription className="text-gray-400">
               {forgotPasswordStep === 1
-                ? "Enter your email to receive a code"
+                ? "Enter your email address and we'll send you a link to reset your password."
                 : "Enter code & new password"}
             </DialogDescription>
           </DialogHeader>
+
           {forgotPasswordStep === 1 ? (
-            <div className="grid gap-4 py-4">
-              <Label htmlFor="reset-email">Email Address</Label>
-              <Input
-                id="reset-email"
-                type="email"
-                placeholder="name@example.com"
-                value={forgotPasswordEmail}
-                onChange={(e) => setForgotPasswordEmail(e.target.value)}
-              />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="forgot-email" className="text-white text-sm font-medium">
+                  Email Address
+                </Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Input
+                    id="forgot-email"
+                    type="email"
+                    placeholder="name@company.com"
+                    value={forgotPasswordEmail}
+                    onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                  />
+                </div>
+              </div>
+
               {forgotPasswordError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{forgotPasswordError}</AlertDescription>
+                <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
+                  <AlertDescription className="text-red-200">{forgotPasswordError}</AlertDescription>
                 </Alert>
               )}
+
               <Button
                 onClick={handleForgotPasswordRequest}
                 disabled={!forgotPasswordEmail || isForgotPasswordLoading}
-                className="w-full"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium transition-all duration-200"
               >
                 {isForgotPasswordLoading ? (
                   <>
@@ -949,44 +901,47 @@ export default function LoginPage() {
                     Sending...
                   </>
                 ) : (
-                  "Send Reset Code"
+                  "Send Reset Link"
                 )}
               </Button>
             </div>
           ) : (
-            <div className="grid gap-4 py-4">
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="reset-code">Verification Code</Label>
+                <Label htmlFor="reset-code" className="text-white">Verification Code</Label>
                 <Input
                   id="reset-code"
                   placeholder="Enter code"
                   value={forgotPasswordCode}
                   onChange={(e) => setForgotPasswordCode(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="new-forgot-password">New Password</Label>
+                <Label htmlFor="new-forgot-password" className="text-white">New Password</Label>
                 <Input
                   id="new-forgot-password"
                   type="password"
                   placeholder="Enter new password"
                   value={newForgotPassword}
                   onChange={(e) => setNewForgotPassword(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="confirm-forgot-password">Confirm New Password</Label>
+                <Label htmlFor="confirm-forgot-password" className="text-white">Confirm New Password</Label>
                 <Input
                   id="confirm-forgot-password"
                   type="password"
                   placeholder="Confirm password"
                   value={confirmForgotPassword}
                   onChange={(e) => setConfirmForgotPassword(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
                 />
               </div>
               {forgotPasswordError && (
-                <Alert variant="destructive">
-                  <AlertDescription>{forgotPasswordError}</AlertDescription>
+                <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
+                  <AlertDescription className="text-red-200">{forgotPasswordError}</AlertDescription>
                 </Alert>
               )}
               <div className="flex gap-3">
@@ -994,7 +949,7 @@ export default function LoginPage() {
                   variant="outline"
                   onClick={() => setForgotPasswordStep(1)}
                   disabled={isForgotPasswordLoading}
-                  className="flex-1"
+                  className="flex-1 border-[#2f2f2f] text-white hover:bg-[#1f1f1f]"
                 >
                   Back
                 </Button>
@@ -1006,7 +961,7 @@ export default function LoginPage() {
                     !confirmForgotPassword ||
                     isForgotPasswordLoading
                   }
-                  className="flex-1"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
                 >
                   {isForgotPasswordLoading ? (
                     <>
