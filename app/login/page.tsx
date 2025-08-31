@@ -13,7 +13,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { fetchWithRetry, getAdjustedTime } from "@/utils/auth"
 import {
   Dialog,
@@ -24,9 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, ArrowRight, Lock, Mail, CheckCircle } from "lucide-react"
-
-type UserType = "admin" | "employee"
+import { Loader2, ArrowRight, Lock, Mail, CheckCircle, X, Copy, Check } from "lucide-react"
 
 interface LoginResponse {
   access_token?: string
@@ -49,7 +46,6 @@ interface LoginResponse {
 
 export default function LoginPage() {
   const router = useRouter()
-  const [userType, setUserType] = useState<UserType>("admin")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
@@ -85,6 +81,7 @@ export default function LoginPage() {
   const [serverTime, setServerTime] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null)
+  const [copiedSecret, setCopiedSecret] = useState(false)
 
   // initialize API base
   useEffect(() => {
@@ -104,6 +101,21 @@ export default function LoginPage() {
       router.push("/admin/dashboard")
     }
   }, [router])
+
+  // Handle ESC key for dialogs
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (showPasswordChange) setShowPasswordChange(false)
+        if (showMFASetup) setShowMFASetup(false)
+        if (showMFA) setShowMFA(false)
+        if (showForgotPassword) setShowForgotPassword(false)
+      }
+    }
+    
+    document.addEventListener("keydown", handleKeyDown)
+    return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [showPasswordChange, showMFASetup, showMFA, showForgotPassword])
 
   // fetch server time & offset
   const fetchServerTime = async (base: string) => {
@@ -154,6 +166,18 @@ export default function LoginPage() {
       }
     } catch (e) {
       // Silently fail
+    }
+  }
+
+  // Copy MFA secret to clipboard
+  const copySecret = async () => {
+    if (!mfaSecretCode) return
+    try {
+      await navigator.clipboard.writeText(mfaSecretCode)
+      setCopiedSecret(true)
+      setTimeout(() => setCopiedSecret(false), 2000)
+    } catch (error) {
+      console.error("Failed to copy secret:", error)
     }
   }
 
@@ -256,7 +280,7 @@ export default function LoginPage() {
     localStorage.setItem("access_token", access)
     localStorage.setItem("id_token", id)
     localStorage.setItem("refresh_token", refresh)
-    localStorage.setItem("userType", userType)
+    localStorage.setItem("userType", "admin")
     sessionStorage.removeItem("temp_password")
     router.push("/admin/dashboard")
   }
@@ -407,7 +431,7 @@ export default function LoginPage() {
           localStorage.setItem("access_token", localStorage.getItem("temp_access_token")||"")
           localStorage.setItem("id_token", localStorage.getItem("temp_id_token")||"")
           localStorage.setItem("refresh_token", localStorage.getItem("temp_refresh_token")||"")
-          localStorage.setItem("userType", userType)
+          localStorage.setItem("userType", "admin")
           sessionStorage.removeItem("temp_password")
           localStorage.removeItem("temp_access_token")
           localStorage.removeItem("temp_id_token")
@@ -422,7 +446,7 @@ export default function LoginPage() {
       localStorage.setItem("access_token", d.access_token||"")
       localStorage.setItem("id_token", d.id_token||"")
       localStorage.setItem("refresh_token", d.refresh_token||"")
-      localStorage.setItem("userType", userType)
+      localStorage.setItem("userType", "admin")
       sessionStorage.removeItem("temp_password")
       localStorage.removeItem("temp_access_token")
       localStorage.removeItem("temp_id_token")
@@ -575,25 +599,6 @@ export default function LoginPage() {
           }}
         >
           <CardContent className="space-y-6">
-            <RadioGroup
-              value={userType}
-              onValueChange={(v: UserType) => setUserType(v)}
-              className="grid gap-4"
-            >
-              <div className="relative flex items-center space-x-4 rounded-lg border border-[#2f2f2f] p-4 hover:border-blue-500/50 bg-[#1a1a1a]/50 transition-colors">
-                <RadioGroupItem value="admin" id="admin" />
-                <Label htmlFor="admin" className="flex-1 cursor-pointer text-white">
-                  Admin
-                </Label>
-              </div>
-              <div className="relative flex items-center space-x-4 rounded-lg border border-[#2f2f2f] p-4 hover:border-blue-500/50 bg-[#1a1a1a]/50 transition-colors">
-                <RadioGroupItem value="employee" id="employee" />
-                <Label htmlFor="employee" className="flex-1 cursor-pointer text-white">
-                  Employee
-                </Label>
-              </div>
-            </RadioGroup>
-
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-white text-sm font-medium">
@@ -607,7 +612,7 @@ export default function LoginPage() {
                     placeholder="name@company.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white"
                   />
                 </div>
               </div>
@@ -624,7 +629,7 @@ export default function LoginPage() {
                     placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white"
                   />
                 </div>
               </div>
@@ -680,8 +685,15 @@ export default function LoginPage() {
       </Card>
 
       {/* Password Change Dialog */}
-      <Dialog open={showPasswordChange} onOpenChange={(o) => o && setShowPasswordChange(o)}>
+      <Dialog open={showPasswordChange} onOpenChange={setShowPasswordChange}>
         <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+          <button
+            onClick={() => setShowPasswordChange(false)}
+            className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </button>
           <DialogHeader>
             <DialogTitle className="text-white">Change Password Required</DialogTitle>
             <DialogDescription className="text-gray-400">
@@ -747,8 +759,15 @@ export default function LoginPage() {
       </Dialog>
 
       {/* MFA Setup Dialog */}
-      <Dialog open={showMFASetup} onOpenChange={(o) => o && setShowMFASetup(o)}>
+      <Dialog open={showMFASetup} onOpenChange={setShowMFASetup}>
         <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+          <button
+            onClick={() => setShowMFASetup(false)}
+            className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </button>
           <DialogHeader>
             <DialogTitle className="text-white">Setup Two-Factor Authentication</DialogTitle>
             <DialogDescription className="text-gray-400">
@@ -775,7 +794,20 @@ export default function LoginPage() {
             {mfaSecretCode && (
               <div className="text-center space-y-2">
                 <Label className="text-white">Secret Key</Label>
-                <div className="font-mono text-gray-300 bg-[#1f1f1f] p-2 rounded">{mfaSecretCode}</div>
+                <div className="relative">
+                  <div className="font-mono text-gray-300 bg-[#1f1f1f] p-2 pr-10 rounded">{mfaSecretCode}</div>
+                  <button
+                    onClick={copySecret}
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-white transition-colors rounded"
+                    title="Copy secret key"
+                  >
+                    {copiedSecret ? (
+                      <Check className="h-4 w-4 text-green-400" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
               </div>
             )}
             <div className="space-y-2">
@@ -811,8 +843,15 @@ export default function LoginPage() {
       </Dialog>
 
       {/* MFA Verify Dialog */}
-      <Dialog open={showMFA} onOpenChange={(o) => o && setShowMFA(o)}>
+      <Dialog open={showMFA} onOpenChange={setShowMFA}>
         <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+          <button
+            onClick={() => setShowMFA(false)}
+            className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </button>
           <DialogHeader>
             <DialogTitle className="text-white">Enter Authentication Code</DialogTitle>
             <DialogDescription className="text-gray-400">Enter the 6-digit code from your authenticator app</DialogDescription>
@@ -849,13 +888,15 @@ export default function LoginPage() {
       </Dialog>
 
       {/* Forgot Password Dialog */}
-      <Dialog
-        open={showForgotPassword}
-        onOpenChange={(o) => {
-          if (!o) setShowForgotPassword(false)
-        }}
-      >
+      <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
         <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+          <button
+            onClick={() => setShowForgotPassword(false)}
+            className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+          >
+            <X className="h-4 w-4" />
+            <span className="sr-only">Close</span>
+          </button>
           <DialogHeader>
             <DialogTitle className="text-white">Reset Password</DialogTitle>
             <DialogDescription className="text-gray-400">

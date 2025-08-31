@@ -4,10 +4,9 @@ import { Badge } from "@/components/ui/badge"
 import { Clock } from "lucide-react"
 
 interface AssignmentsOverviewProps {
-  username: string
 }
 
-export function AssignmentsOverview({ username }: AssignmentsOverviewProps) {
+export function AssignmentsOverview({}: AssignmentsOverviewProps) {
   const assignments = [
     {
       id: 1,
