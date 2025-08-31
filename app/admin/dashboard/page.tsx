@@ -180,7 +180,7 @@ export default function DashboardPage() {
   // Show loading state
   if (loading) {
     return (
-      <AppLayout username="John Doe" notificationsCount={5}>
+      <AppLayout notificationsCount={5}>
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
             <RefreshCw className="animate-spin mx-auto h-8 w-8 mb-4 text-white" />
@@ -192,7 +192,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <AppLayout username="John Doe" notificationsCount={5}>
+    <AppLayout notificationsCount={5}>
       {/* Error Alert */}
       {error && (
         <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20">
@@ -231,7 +231,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Assignments Overview - Takes 2 columns */}
         <div className="lg:col-span-2">
-          <AssignmentsOverview username="John Doe" />
+          <AssignmentsOverview />
         </div>
 
         {/* Detection Trends Chart */}

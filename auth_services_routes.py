@@ -870,29 +870,8 @@ def confirm_mfa_setup_endpoint():
         client_time_str = data.get('client_time')
         adjusted_time_str = data.get('adjusted_time')
         
-        # Enhanced session validation and logging
-        logger.info(f"MFA setup parameters: username={username}, code length={len(code) if code else 0}, password provided={bool(password)}")
-        
-        # Parse time information for debugging
-        server_time = datetime.now()
-        client_time = None
-        adjusted_time = None
-        time_diff_seconds = None
-        
-        if client_time_str:
-            try:
-                client_time = datetime.fromisoformat(client_time_str.replace('Z', '+00:00'))
-                time_diff_seconds = abs((server_time - client_time).total_seconds())
-                logger.info(f"Client time: {client_time_str}, Time difference: {time_diff_seconds} seconds")
-            except Exception as time_error:
-                logger.warning(f"Error parsing client time: {time_error}")
-        
-        if adjusted_time_str:
-            try:
-                adjusted_time = datetime.fromisoformat(adjusted_time_str.replace('Z', '+00:00'))
-                logger.info(f"Adjusted time: {adjusted_time_str}")
-            except Exception as adj_error:
-                logger.warning(f"Error parsing adjusted time: {adj_error}")
+        # Simple validation and logging
+        logger.info(f"MFA setup for user: {username}, code length: {len(code) if code else 0}")
         
         # Validate input parameters
         if not code:
@@ -926,45 +905,8 @@ def confirm_mfa_setup_endpoint():
                 logger.error("Failed to get secret code from associate_software_token")
                 return jsonify({"detail": "Failed to setup MFA. Please try again."}), 500
             
-            # Add debug info to check TOTP validation directly
-            try:
-                # Create a TOTP object with the secret
-                totp = pyotp.TOTP(secret_code)
-                
-                # Generate codes for multiple time windows
-                valid_codes = []
-                valid_times = []
-                
-                # Server-based time windows
-                for i in range(-5, 6):  # Check ±5 windows
-                    window_time = server_time + timedelta(seconds=30 * i)
-                    window_code = totp.at(window_time)
-                    valid_codes.append(window_code)
-                    valid_times.append(window_time.isoformat())
-                
-                # Also check adjusted client time if provided
-                if adjusted_time:
-                    adjusted_code = totp.at(adjusted_time)
-                    logger.info(f"Code based on adjusted client time: {adjusted_code}")
-                    if adjusted_code not in valid_codes:
-                        valid_codes.append(adjusted_code)
-                        valid_times.append(adjusted_time.isoformat())
-                
-                current_code = totp.now()
-                is_valid = code in valid_codes
-                
-                logger.info(f"TOTP Validation: Current code = {current_code}, User code = {code}, Valid = {is_valid}")
-                logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
-                logger.info(f"Valid codes: {valid_codes}")
-                
-                # If code doesn't match any valid window, use current server code
-                if not is_valid:
-                    logger.info(f"Code {code} doesn't match any valid window, using server code {current_code} instead")
-                    original_code = code
-                    code = current_code
-                    logger.info(f"Replaced user code {original_code} with server code {code}")
-            except Exception as totp_error:
-                logger.error(f"TOTP validation error: {totp_error}")
+            # Simple debug info - no server-side validation
+            logger.info(f"User provided code: {code} for MFA setup")
             
             # Step 2: Call verify_software_token with the session and code
             logger.info(f"Step 2: Calling verify_software_token with session and code: {code}")
@@ -973,6 +915,9 @@ def confirm_mfa_setup_endpoint():
             verify_session = new_session if new_session else session
             
             try:
+                # ✅ CRITICAL FIX: Only use the user's actual code from their authenticator app
+                # Do NOT use server-generated codes during MFA setup - this teaches Cognito the wrong time base
+                logger.info(f"Using user's original code {code} for MFA setup verification")
                 verify_response = cognito_client.verify_software_token(
                     Session=verify_session,
                     UserCode=code
@@ -984,42 +929,10 @@ def confirm_mfa_setup_endpoint():
                 
                 logger.info(f"MFA verification status: {status}")
             except cognito_client.exceptions.CodeMismatchException as code_error:
-                logger.warning(f"Code {code} was rejected: {code_error}")
-                
-                # Try with each valid code until one works
-                status = None
-                for i, retry_code in enumerate(valid_codes):
-                    if retry_code != code:  # Only try codes we haven't tried yet
-                        try:
-                            logger.info(f"Retrying with valid code {retry_code} (window {i-5})")
-                            retry_response = cognito_client.verify_software_token(
-                                Session=verify_session,
-                                UserCode=retry_code
-                            )
-                            status = retry_response.get("Status")
-                            verify_session = retry_response.get("Session")
-                            logger.info(f"Retry successful with code {retry_code}: {status}")
-                            
-                            # Update the code reference for later use
-                            code = retry_code
-                            break
-                        except Exception as retry_error:
-                            logger.warning(f"Retry failed with code {retry_code}: {retry_error}")
-                
-                if not status or status != "SUCCESS":
-                    # All retries failed, return helpful error
-                    logger.error("All code verification attempts failed")
-                    return jsonify({
-                        "detail": "The verification code is incorrect. Please use one of these valid codes:",
-                        "validCodes": valid_codes[4:7],  # Return the 3 codes closest to current time
-                        "currentValidCode": valid_codes[5],  # Middle code is current time
-                        "timeInfo": {
-                            "serverTime": server_time.isoformat(),
-                            "clientTime": client_time_str,
-                            "adjustedTime": adjusted_time_str,
-                            "timeDifference": time_diff_seconds
-                        }
-                    }), 400
+                logger.error(f"Code mismatch during MFA setup: {code_error}")
+                return jsonify({
+                    "detail": "The verification code is incorrect. Please make sure you're using the latest code from your authenticator app."
+                }), 400
             
             if status != "SUCCESS":
                 logger.warning(f"Verification returned non-SUCCESS status: {status}")
@@ -1028,8 +941,20 @@ def confirm_mfa_setup_endpoint():
             # ✅ CRITICAL: Set MFA preference after successful verification
             # This enables MFA for the user account so future logins require MFA
             try:
-                logger.info("Setting MFA preference to enable TOTP for user")
-                # We need to use the session from verify_software_token response
+                logger.info(f"Setting MFA preference to enable TOTP for user: {username}")
+                logger.info(f"Using USER_POOL_ID: {USER_POOL_ID}")
+                
+                # First, let's try to get the user's current MFA settings
+                try:
+                    user_response = cognito_client.admin_get_user(
+                        UserPoolId=USER_POOL_ID,
+                        Username=username
+                    )
+                    logger.info(f"Current user info retrieved: {user_response.get('Username', 'N/A')}")
+                except Exception as get_user_error:
+                    logger.warning(f"Could not get user info: {get_user_error}")
+
+                # Now set the MFA preference
                 cognito_client.admin_set_user_mfa_preference(
                     UserPoolId=USER_POOL_ID,
                     Username=username,
@@ -1039,8 +964,20 @@ def confirm_mfa_setup_endpoint():
                     }
                 )
                 logger.info("Successfully enabled MFA preference for user")
+                
+                # Verify the MFA preference was set correctly
+                try:
+                    mfa_response = cognito_client.admin_get_user_mfa_preference(
+                        UserPoolId=USER_POOL_ID,
+                        Username=username
+                    )
+                    logger.info(f"MFA preference verification: {mfa_response}")
+                except Exception as verify_error:
+                    logger.warning(f"Could not verify MFA preference: {verify_error}")
+                    
             except Exception as mfa_pref_error:
                 logger.error(f"Failed to set MFA preference: {mfa_pref_error}")
+                logger.error(f"MFA preference error details: {type(mfa_pref_error).__name__}")
                 return jsonify({"detail": f"MFA setup completed but failed to enable MFA: {str(mfa_pref_error)}"}), 500
                 
             # ✅ FIXED: MFA setup is complete, return success immediately
@@ -1140,6 +1077,7 @@ def verify_mfa_endpoint():
     # Otherwise, it's a successful response
     logger.info("MFA verification successful - returning tokens")
     return jsonify(auth_result)
+
 
 # Route for initiate forgot password
 @auth_services_routes.route("/forgot-password", methods=["POST", "OPTIONS"])

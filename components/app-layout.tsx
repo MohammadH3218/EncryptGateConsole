@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import {
   Bell,
@@ -18,21 +18,45 @@ import {
   Clock,
   CheckCircle,
   AlertCircle,
+  LogOut,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 interface AppLayoutProps {
   children: React.ReactNode
-  username: string
   notificationsCount?: number
 }
 
-export function AppLayout({ children, username, notificationsCount = 0 }: AppLayoutProps) {
+// Helper function to decode JWT and get user info
+const getUserInfoFromToken = () => {
+  try {
+    const token = localStorage.getItem("access_token")
+    if (!token) return { email: "", name: "" }
+    
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return {
+      email: payload.email || payload.username || "",
+      name: payload.name || payload.given_name || payload.email || payload.username || ""
+    }
+  } catch (error) {
+    return { email: "", name: "" }
+  }
+}
+
+export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
+  const [userInfo, setUserInfo] = useState({ email: "", name: "" })
   const router = useRouter()
   const pathname = usePathname()
+
+  // Get user info from JWT token on component mount
+  useEffect(() => {
+    const info = getUserInfoFromToken()
+    setUserInfo(info)
+  }, [])
 
   const mainNavItems = [
     { icon: Shield, label: "Dashboard", href: "/admin/dashboard" },
@@ -58,6 +82,20 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
 
   const handleNavigation = (href: string) => {
     router.push(href)
+  }
+
+  const handleLogout = () => {
+    // Clear all tokens and storage
+    localStorage.clear()
+    sessionStorage.clear()
+    
+    // Clear any cookies by setting them to expire
+    document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
+    document.cookie = "id_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
+    document.cookie = "refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
+    
+    // Redirect to logout page
+    router.push("/logout")
   }
 
   const notifications = [
@@ -191,20 +229,35 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
 
           {/* User Profile */}
           <div className="absolute bottom-0 left-0 w-64 p-4">
-            <div className="flex items-center gap-3">
-              <Avatar className="w-8 h-8">
-                <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">
-                  {username
-                    .split(" ")
-                    .map((n) => n[0])
-                    .join("")}
-                </AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <p className="text-white text-sm font-medium truncate">{username}</p>
-                <p className="text-gray-400 text-xs">Security Admin</p>
-              </div>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <div className="flex items-center gap-3 cursor-pointer hover:bg-[#1f1f1f] p-2 rounded-lg transition-colors">
+                  <Avatar className="w-8 h-8">
+                    <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">
+                      {(userInfo.name || userInfo.email)
+                        .split(" ")
+                        .map((n) => n[0])
+                        .join("")
+                        .toUpperCase()}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{userInfo.name || userInfo.email}</p>
+                    <p className="text-gray-400 text-xs">Security Admin</p>
+                  </div>
+                </div>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuItem onClick={() => handleNavigation("/admin/user-settings/profile")}>
+                  <User className="mr-2 h-4 w-4" />
+                  <span>Profile Settings</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleLogout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  <span>Sign out</span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       )}
