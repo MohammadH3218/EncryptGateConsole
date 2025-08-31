@@ -479,7 +479,9 @@ def verify_software_token_setup(access_token, code):
 
 # Verify MFA function
 def verify_mfa(session, code, username):
-    """Verifies a multi-factor authentication code."""    
+    """Verifies a multi-factor authentication code."""
+    logger.info(f"MFA verification initiated for user: {username} with code: {code}")
+    
     # Input validation
     if not code or not isinstance(code, str):
         return {"detail": "Verification code must be a 6-digit number"}, 400
@@ -508,6 +510,8 @@ def verify_mfa(session, code, username):
             "SECRET_HASH": secret_hash
         }
         
+        logger.info(f"Attempting MFA verification with Cognito for user: {username}")
+        
         # Make the API call
         try:
             response = cognito_client.respond_to_auth_challenge(
@@ -516,14 +520,17 @@ def verify_mfa(session, code, username):
                 Session=session,
                 ChallengeResponses=challenge_responses
             )
+            logger.info("MFA verification successful - received valid response from Cognito")
         except Exception as api_error:
             logger.error(f"Cognito API call failed: {api_error}")
             return {"detail": f"MFA verification failed: {str(api_error)}"}, 500
         
         auth_result = response.get("AuthenticationResult")
         if not auth_result:
+            logger.error("No AuthenticationResult in MFA response")
             return {"detail": "Invalid MFA response from server"}, 500
             
+        logger.info("MFA verification completed successfully")
         return {
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
@@ -1018,6 +1025,24 @@ def confirm_mfa_setup_endpoint():
                 logger.warning(f"Verification returned non-SUCCESS status: {status}")
                 return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
                 
+            # ✅ CRITICAL: Set MFA preference after successful verification
+            # This enables MFA for the user account so future logins require MFA
+            try:
+                logger.info("Setting MFA preference to enable TOTP for user")
+                # We need to use the session from verify_software_token response
+                cognito_client.admin_set_user_mfa_preference(
+                    UserPoolId=USER_POOL_ID,
+                    Username=username,
+                    SoftwareTokenMfaSettings={
+                        'Enabled': True,
+                        'PreferredMfa': True
+                    }
+                )
+                logger.info("Successfully enabled MFA preference for user")
+            except Exception as mfa_pref_error:
+                logger.error(f"Failed to set MFA preference: {mfa_pref_error}")
+                return jsonify({"detail": f"MFA setup completed but failed to enable MFA: {str(mfa_pref_error)}"}), 500
+                
             # ✅ FIXED: MFA setup is complete, return success immediately
             # Don't try to do additional authentication that would reuse the same code
             logger.info("MFA setup completed successfully - skipping final auth step to avoid code reuse")
@@ -1085,26 +1110,35 @@ def verify_mfa_endpoint():
     session = data.get('session')
     code = data.get('code')
     username = data.get('username')
+    
+    logger.info(f"MFA verification endpoint called for user: {username}")
 
     if not (session and username):
+        logger.error("Missing session or username in MFA verification request")
         return jsonify({"detail": "Session and username are required"}), 400
         
     # Input validation for code
     if not code or not isinstance(code, str):
+        logger.error(f"Invalid code format in MFA verification: {type(code)}")
         return jsonify({"detail": "Verification code must be a 6-digit number"}), 400
         
     code = code.strip()
     if not code.isdigit() or len(code) != 6:
+        logger.error(f"Invalid code format in MFA verification - code: {code}, length: {len(code)}")
         return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
+    
+    logger.info(f"Calling verify_mfa function for user: {username} with code: {code}")
     
     # Call verify_mfa directly with the user's code
     auth_result = verify_mfa(session, code, username)
     
     # Check if it's an error response (tuple with status code)
     if isinstance(auth_result, tuple):
+        logger.error(f"MFA verification failed: {auth_result[0]}")
         return jsonify(auth_result[0]), auth_result[1]
     
     # Otherwise, it's a successful response
+    logger.info("MFA verification successful - returning tokens")
     return jsonify(auth_result)
 
 # Route for initiate forgot password
