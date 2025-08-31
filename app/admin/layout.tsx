@@ -1,23 +1,52 @@
-// app/admin/layout.tsx
+"use client"
 
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import type { ReactNode } from 'react'
 
-export default async function AdminLayout({
+export default function AdminLayout({
   children,
 }: {
   children: ReactNode
 }) {
-  // Await the cookie store and pull out our httpOnly id_token
-  const cookieStore = await cookies()
-  const idToken = cookieStore.get('id_token')?.value
+  const router = useRouter()
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
-  // If no session, send the user to Cognito Hosted UI
-  if (!idToken) {
-    redirect('/api/auth/login')
+  useEffect(() => {
+    // Check for authentication token in localStorage
+    const token = localStorage.getItem("access_token")
+    
+    if (!token) {
+      // No token found, redirect to login
+      router.push('/login')
+    } else {
+      // Token found, user is authenticated
+      setIsAuthenticated(true)
+    }
+    
+    setIsLoading(false)
+  }, [router])
+
+  // Show loading state while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#171717]">
+        <div className="relative z-10 text-center space-y-4">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto animate-pulse">
+            <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+          </div>
+          <div className="text-white text-lg font-medium">Loading...</div>
+        </div>
+      </div>
+    )
   }
 
-  // Otherwise render whatever admin pages they requested
+  // Don't render children if not authenticated (redirect will happen)
+  if (!isAuthenticated) {
+    return null
+  }
+
+  // Render admin pages if authenticated
   return <>{children}</>
 }

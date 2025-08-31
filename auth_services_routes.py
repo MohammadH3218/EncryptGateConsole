@@ -479,30 +479,21 @@ def verify_software_token_setup(access_token, code):
 
 # Verify MFA function
 def verify_mfa(session, code, username):
-    """Verifies a multi-factor authentication code."""
-    logger.info(f"MFA verification initiated for user: {username}")
-    
+    """Verifies a multi-factor authentication code."""    
     # Input validation
     if not code or not isinstance(code, str):
-        logger.error(f"Invalid code format")
         return {"detail": "Verification code must be a 6-digit number"}, 400
         
     # Ensure code is exactly 6 digits
     code = code.strip()
     if not code.isdigit() or len(code) != 6:
-        logger.error(f"Invalid code format: {code}")
         return {"detail": "Verification code must be exactly 6 digits"}, 400
     
     # Validate session format
     if not session or not isinstance(session, str) or len(session) < 20:
-        logger.error(f"Invalid session format: length {len(session) if session else 0}")
         return {"detail": "Invalid session format"}, 400
     
     try:
-        # Only log the verification attempt
-        logger.info(f"Processing MFA verification with code: {code}")
-        logger.info(f"Time window position: {int(time.time()) % 30}/30 seconds")
-
         # Generate secret hash
         try:
             secret_hash = generate_client_secret_hash(username)
@@ -517,8 +508,6 @@ def verify_mfa(session, code, username):
             "SECRET_HASH": secret_hash
         }
         
-        logger.info(f"Sending MFA verification with code: {code}")
-        
         # Make the API call
         try:
             response = cognito_client.respond_to_auth_challenge(
@@ -527,18 +516,14 @@ def verify_mfa(session, code, username):
                 Session=session,
                 ChallengeResponses=challenge_responses
             )
-            
-            logger.info(f"MFA verification response received")
         except Exception as api_error:
             logger.error(f"Cognito API call failed: {api_error}")
             return {"detail": f"MFA verification failed: {str(api_error)}"}, 500
         
         auth_result = response.get("AuthenticationResult")
         if not auth_result:
-            logger.error("No AuthenticationResult in MFA response")
             return {"detail": "Invalid MFA response from server"}, 500
             
-        logger.info("MFA verification successful")
         return {
             "id_token": auth_result.get("IdToken"),
             "access_token": auth_result.get("AccessToken"),
@@ -548,11 +533,9 @@ def verify_mfa(session, code, username):
         }
         
     except cognito_client.exceptions.CodeMismatchException as code_error:
-        logger.warning(f"MFA code mismatch: {code_error}")
         return {"detail": "The verification code is incorrect or has expired. Please try again with a new code from your authenticator app."}, 400
         
     except cognito_client.exceptions.ExpiredCodeException as expired_error:
-        logger.warning(f"MFA code expired: {expired_error}")
         return {"detail": "The verification code has expired. Please generate a new code from your authenticator app."}, 400
         
     except botocore.exceptions.ClientError as client_error:
@@ -1102,25 +1085,6 @@ def verify_mfa_endpoint():
     session = data.get('session')
     code = data.get('code')
     username = data.get('username')
-    client_time_str = data.get('client_time')
-    adjusted_time_str = data.get('adjusted_time')
-    
-    # Log time information for debugging
-    server_time = datetime.now()
-    logger.info(f"Server time: {server_time.isoformat()}")
-    
-    # Parse client time and calculate time difference
-    if client_time_str:
-        try:
-            client_time = datetime.fromisoformat(client_time_str.replace('Z', '+00:00'))
-            time_diff = abs((server_time - client_time).total_seconds())
-            logger.info(f"Client time: {client_time_str}, Time difference: {time_diff} seconds")
-        except Exception as time_error:
-            logger.warning(f"Error parsing client time: {time_error}")
-    
-    # Log adjusted time if provided
-    if adjusted_time_str:
-        logger.info(f"Client adjusted time: {adjusted_time_str}")
 
     if not (session and username):
         return jsonify({"detail": "Session and username are required"}), 400
@@ -1133,8 +1097,7 @@ def verify_mfa_endpoint():
     if not code.isdigit() or len(code) != 6:
         return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
     
-    # FIXED: Do NOT try to generate new secrets for existing MFA users
-    # Just call verify_mfa directly with the user's code
+    # Call verify_mfa directly with the user's code
     auth_result = verify_mfa(session, code, username)
     
     # Check if it's an error response (tuple with status code)
