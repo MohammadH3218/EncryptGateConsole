@@ -59,6 +59,7 @@ export default function LoginPage() {
   const [showPasswordChange, setShowPasswordChange] = useState(false)
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [displayName, setDisplayName] = useState("")
 
   // MFA setup states
   const [showMFASetup, setShowMFASetup] = useState(false)
@@ -316,7 +317,11 @@ export default function LoginPage() {
             username: email,
             session,
             challengeName: "NEW_PASSWORD_REQUIRED",
-            challengeResponses: { NEW_PASSWORD: newPassword },
+            challengeResponses: {
+              NEW_PASSWORD: newPassword,
+              // Set preferred_username for display in profile
+              "userAttributes.preferred_username": displayName || "User",
+            },
           }),
         },
         1
@@ -612,7 +617,11 @@ export default function LoginPage() {
                     placeholder="name@company.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white"
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill]:text-fill-color-white"
+                    style={{
+                      WebkitTextFillColor: 'white !important',
+                      color: 'white !important'
+                    }}
                   />
                 </div>
               </div>
@@ -700,67 +709,97 @@ export default function LoginPage() {
               Your account requires a password change. Please create a new password.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="new-password" className="text-white">New Password</Label>
-              <Input
-                id="new-password"
-                type="password"
-                placeholder="Enter new password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm-password" className="text-white">Confirm Password</Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                placeholder="Confirm new password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
-              />
-            </div>
-            {error && (
-              <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
-                <AlertDescription className="text-sm text-red-200">{error}</AlertDescription>
-              </Alert>
-            )}
-            <Alert className="bg-blue-500/10 border-blue-500/20">
-              <AlertDescription className="text-blue-200">
-                Password must be at least 8 characters, include uppercase, lowercase, numbers, and special characters.
-              </AlertDescription>
-            </Alert>
-          </div>
-          <DialogFooter>
-            <Button
-              onClick={handlePasswordChange}
-              disabled={
-                isLoading ||
-                !newPassword ||
-                !confirmPassword ||
-                newPassword !== confirmPassword
-              }
-              className="w-full bg-blue-600 hover:bg-blue-700"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Updating...
-                </>
-              ) : (
-                "Update Password"
+          
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              handlePasswordChange()
+            }}
+          >
+            <div className="grid gap-4 py-4">
+              {/* Username (read-only) */}
+              <div className="space-y-2">
+                <Label className="text-white">Username (Email)</Label>
+                <div className="bg-[#1f1f1f] border border-[#2f2f2f] rounded px-3 py-2 text-gray-300">
+                  {email || "unknown"}
+                </div>
+              </div>
+
+              {/* Display name -> preferred_username */}
+              <div className="space-y-2">
+                <Label htmlFor="display-name" className="text-white">Display Name</Label>
+                <Input
+                  id="display-name"
+                  placeholder="e.g., Security Admin, John Doe"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
+                />
+                <p className="text-xs text-gray-400">This will be shown in your profile instead of your user ID</p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="new-password" className="text-white">New Password</Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  placeholder="Enter new password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-password" className="text-white">Confirm Password</Label>
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  placeholder="Confirm new password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
+                />
+              </div>
+              {error && (
+                <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
+                  <AlertDescription className="text-sm text-red-200">{error}</AlertDescription>
+                </Alert>
               )}
-            </Button>
-          </DialogFooter>
+              <Alert className="bg-blue-500/10 border-blue-500/20">
+                <AlertDescription className="text-blue-200">
+                  Password must be at least 8 characters, include uppercase, lowercase, numbers, and special characters.
+                </AlertDescription>
+              </Alert>
+            </div>
+            <DialogFooter>
+              <Button
+                type="submit"
+                disabled={
+                  isLoading ||
+                  !newPassword ||
+                  !confirmPassword ||
+                  !displayName.trim() ||
+                  newPassword !== confirmPassword
+                }
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Updating...
+                  </>
+                ) : (
+                  "Update Password"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
       {/* MFA Setup Dialog */}
       <Dialog open={showMFASetup} onOpenChange={setShowMFASetup}>
-        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white max-w-2xl max-h-[90vh] overflow-y-auto">
           <button
             onClick={() => setShowMFASetup(false)}
             className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
@@ -774,31 +813,37 @@ export default function LoginPage() {
               For additional security, please set up Google Authenticator.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="space-y-6 py-4">
             <Alert className="bg-blue-500/10 border-blue-500/20">
               <AlertDescription className="text-blue-200">
-                <ol className="list-decimal list-inside">
-                  <li>Install Google Authenticator</li>
-                  <li>Scan the QR code below</li>
-                  <li>Enter the 6-digit code</li>
-                  <li>Click "Verify & Complete"</li>
+                <ol className="list-decimal list-inside space-y-1">
+                  <li>Install Google Authenticator on your phone</li>
+                  <li>Scan the QR code below or manually enter the secret key</li>
+                  <li>Enter the 6-digit code from your authenticator app</li>
+                  <li>Click "Verify & Complete" to finish setup</li>
                 </ol>
               </AlertDescription>
             </Alert>
+            
             {qrCodeUrl && (
-              <div className="flex flex-col items-center space-y-2">
-                <Label className="text-white">Scan QR Code</Label>
-                <img src={qrCodeUrl} alt="MFA QR" className="w-48 h-48" />
+              <div className="flex flex-col items-center space-y-3">
+                <Label className="text-white font-medium">Scan QR Code</Label>
+                <div className="bg-white p-4 rounded-lg">
+                  <img src={qrCodeUrl} alt="MFA QR" className="w-48 h-48" />
+                </div>
               </div>
             )}
+            
             {mfaSecretCode && (
-              <div className="text-center space-y-2">
-                <Label className="text-white">Secret Key</Label>
+              <div className="space-y-3">
+                <Label className="text-white font-medium">Manual Entry Secret Key</Label>
                 <div className="relative">
-                  <div className="font-mono text-gray-300 bg-[#1f1f1f] p-2 pr-10 rounded">{mfaSecretCode}</div>
+                  <div className="font-mono text-sm text-gray-300 bg-[#1f1f1f] p-3 pr-12 rounded border-[#2f2f2f] border break-all">
+                    {mfaSecretCode}
+                  </div>
                   <button
                     onClick={copySecret}
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 text-gray-400 hover:text-white transition-colors rounded"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 text-gray-400 hover:text-white transition-colors rounded hover:bg-[#2f2f2f]"
                     title="Copy secret key"
                   >
                     {copiedSecret ? (
@@ -810,17 +855,19 @@ export default function LoginPage() {
                 </div>
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="setup-mfa-code" className="text-white">Verification Code</Label>
+            
+            <div className="space-y-3">
+              <Label htmlFor="setup-mfa-code" className="text-white font-medium">Enter Verification Code</Label>
               <Input
                 id="setup-mfa-code"
-                placeholder="6-digit code"
+                placeholder="Enter 6-digit code"
                 value={setupMfaCode}
                 onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                 maxLength={6}
-                className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white"
+                className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 h-12"
               />
             </div>
+            
             {error && (
               <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
                 <AlertDescription className="text-red-200">{error}</AlertDescription>

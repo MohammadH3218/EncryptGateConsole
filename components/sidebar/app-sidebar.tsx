@@ -269,25 +269,33 @@ export function AppSidebar({ isCollapsed, onToggle, username, onSignOut }: AppSi
         <div className="mt-auto border-t p-2 shrink-0">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <div
+              <Button
+                variant="ghost"
                 className={cn(
-                  "flex items-center gap-3 rounded-lg p-2 cursor-pointer hover:bg-accent",
-                  isCollapsed && "justify-center",
+                  "flex items-center gap-3 rounded-lg p-2 w-full justify-start hover:bg-accent hover:text-accent-foreground transition-colors",
+                  isCollapsed && "justify-center px-2"
                 )}
               >
-                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                   <User className="h-4 w-4" />
                 </div>
                 {!isCollapsed && (
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium leading-none">{username}</p>
+                  <div className="space-y-1 text-left min-w-0 flex-1">
+                    <p className="text-sm font-medium leading-none text-foreground truncate">{username}</p>
                     <p className="text-xs text-muted-foreground">Security Admin</p>
                   </div>
                 )}
-              </div>
+              </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align={isCollapsed ? "center" : "end"}>
-              <DropdownMenuItem onClick={onSignOut}>
+            <DropdownMenuContent 
+              align={isCollapsed ? "center" : "end"}
+              className="w-56"
+              sideOffset={8}
+            >
+              <DropdownMenuItem 
+                onClick={onSignOut}
+                className="cursor-pointer hover:bg-accent hover:text-accent-foreground"
+              >
                 <LogOut className="mr-2 h-4 w-4" />
                 <span>Sign out</span>
               </DropdownMenuItem>
