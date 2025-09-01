@@ -28,8 +28,11 @@ import {
   Flag,
   FlagOff,
   Clock,
-  UserCheck
+  UserCheck,
+  ArrowUp
 } from "lucide-react"
+import { InvestigationAssignmentDialog } from "@/components/investigation-assignment-dialog"
+import { PushToAdminDialog } from "@/components/push-to-admin-dialog"
 
 interface Detection {
   id: string
@@ -99,6 +102,59 @@ export default function AdminDetectionsPage() {
   // Status update functionality - NEW
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
   const [assigningDetection, setAssigningDetection] = useState<string | null>(null)
+
+  // Investigation assignment dialog
+  const [assignmentDialog, setAssignmentDialog] = useState<{
+    isOpen: boolean
+    detection: Detection | null
+    warnings: any[]
+    assignedUsers: string[]
+  }>({
+    isOpen: false,
+    detection: null,
+    warnings: [],
+    assignedUsers: []
+  })
+
+  // Push to admin dialog
+  const [pushToAdminDialog, setPushToAdminDialog] = useState<{
+    isOpen: boolean
+    detection: Detection | null
+  }>({
+    isOpen: false,
+    detection: null
+  })
+
+  // User profile state
+  const [currentUser, setCurrentUser] = useState<{
+    id: string
+    name: string
+    email: string
+    role: string
+    permissions: string[]
+  } | null>(null)
+
+  // Load current user profile
+  useEffect(() => {
+    const loadUserProfile = async () => {
+      try {
+        const response = await fetch('/api/user/profile')
+        if (response.ok) {
+          const profile = await response.json()
+          setCurrentUser({
+            id: profile.id,
+            name: profile.name || profile.preferred_username || profile.email,
+            email: profile.email,
+            role: profile.role,
+            permissions: profile.permissions
+          })
+        }
+      } catch (error) {
+        console.error('Failed to load user profile:', error)
+      }
+    }
+    loadUserProfile()
+  }, [])
 
   // Clear messages after some time
   useEffect(() => {
@@ -295,8 +351,53 @@ export default function AdminDetectionsPage() {
   }
 
   const handleInvestigate = async (detection: Detection) => {
+    if (!currentUser) {
+      setError('User profile not loaded. Please refresh the page.')
+      return
+    }
+
     try {
-      console.log('🔍 Starting investigation for detection:', {
+      console.log('🔍 Starting investigation assignment check for detection:', detection.id)
+      
+      // Check for existing investigation and potential conflicts
+      const assignmentResponse = await fetch('/api/user/investigations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          investigationId: detection.id,
+          assignToUserId: currentUser.id
+        })
+      })
+
+      if (!assignmentResponse.ok) {
+        setError('Failed to check investigation assignment.')
+        return
+      }
+
+      const assignmentResult = await assignmentResponse.json()
+
+      // If there are warnings/conflicts, show dialog
+      if (assignmentResult.warnings && assignmentResult.warnings.length > 0) {
+        setAssignmentDialog({
+          isOpen: true,
+          detection: detection,
+          warnings: assignmentResult.warnings,
+          assignedUsers: assignmentResult.assignedUsers || []
+        })
+        return
+      }
+
+      // No conflicts, proceed directly
+      await proceedWithInvestigation(detection)
+    } catch (error) {
+      console.error('❌ Failed to start investigation assignment:', error)
+      setError('Failed to start investigation assignment.')
+    }
+  }
+
+  const proceedWithInvestigation = async (detection: Detection) => {
+    try {
+      console.log('🔍 Proceeding with investigation for detection:', {
         detectionId: detection.id,
         emailMessageId: detection.emailMessageId,
         originalMessageId: detection.emailMessageId
@@ -309,41 +410,133 @@ export default function AdminDetectionsPage() {
       const existingResponse = await fetch(`/api/investigations/${encodedMessageId}`)
       
       if (!existingResponse.ok) {
-        // Create new investigation
+        // Create new investigation with current user assignment
         console.log('📝 Creating investigation for detection:', detection.id)
         const createResponse = await fetch('/api/investigations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            emailMessageId: detection.emailMessageId, // Use original messageId for storage
+            emailMessageId: detection.emailMessageId,
             detectionId: detection.detectionId,
-            investigatorName: 'John Doe', // TODO: Get from auth
+            investigatorName: currentUser.name,
+            investigatorId: currentUser.id,
             priority: detection.severity === 'critical' ? 'critical' : 
-                     detection.severity === 'high' ? 'high' : 'medium'
+                     detection.severity === 'high' ? 'high' : 'medium',
+            emailSubject: detection.name,
+            sender: detection.sentBy,
+            severity: detection.severity
           })
         })
         
         if (createResponse.ok) {
           console.log('✅ Investigation created successfully')
+          // Mark detection as in progress
+          await updateDetectionStatus(detection.id, 'in_progress')
         } else {
           console.warn('⚠️ Failed to create investigation, but continuing with navigation')
         }
       } else {
-        console.log('✅ Investigation already exists')
+        console.log('✅ Investigation already exists, assigning to current user')
+        // Update existing investigation to include current user
+        await fetch(`/api/investigations/${encodedMessageId}/assign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            investigatorId: currentUser.id,
+            investigatorName: currentUser.name
+          })
+        })
       }
       
-      // Navigate to investigation page with properly encoded messageId
+      // Navigate to investigation page
       const navigationUrl = `/admin/investigate/${encodedMessageId}`
       console.log('🧭 Navigating to:', navigationUrl)
       
       router.push(navigationUrl)
     } catch (error) {
       console.error('❌ Failed to create/navigate to investigation:', error)
-      // Still navigate even if creation fails - use encoded URL for navigation
+      // Still navigate even if creation fails
       const fallbackUrl = `/admin/investigate/${encodeURIComponent(detection.emailMessageId)}`
       console.log('🔄 Fallback navigation to:', fallbackUrl)
       router.push(fallbackUrl)
     }
+  }
+
+  // Update detection status helper
+  const updateDetectionStatus = async (detectionId: string, status: string) => {
+    try {
+      setUpdatingStatus(detectionId)
+      const response = await fetch(`/api/detections/${detectionId}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      })
+      
+      if (response.ok) {
+        // Update local state
+        setDetections(prev => prev.map(d => 
+          d.id === detectionId ? { ...d, status: status as any } : d
+        ))
+        setSuccessMessage(`Detection status updated to ${status}`)
+      }
+    } catch (error) {
+      console.error('Failed to update detection status:', error)
+    } finally {
+      setUpdatingStatus(null)
+    }
+  }
+
+  // Assignment dialog handlers
+  const handleAssignmentDialogConfirm = async () => {
+    if (!assignmentDialog.detection) return
+    
+    await proceedWithInvestigation(assignmentDialog.detection)
+    setAssignmentDialog({ isOpen: false, detection: null, warnings: [], assignedUsers: [] })
+  }
+
+  const handleAssignmentDialogClose = () => {
+    setAssignmentDialog({ isOpen: false, detection: null, warnings: [], assignedUsers: [] })
+  }
+
+  // Push to admin functionality
+  const handlePushToAdmin = (detection: Detection) => {
+    if (!currentUser?.permissions.includes('push_to_admin')) {
+      setError('You do not have permission to escalate investigations.')
+      return
+    }
+    
+    setPushToAdminDialog({ isOpen: true, detection })
+  }
+
+  const handlePushToAdminConfirm = async (reason: string, category: string) => {
+    if (!pushToAdminDialog.detection || !currentUser) return
+
+    try {
+      const response = await fetch('/api/admin/pushed-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          investigationId: pushToAdminDialog.detection.id,
+          reason: `${category}: ${reason}`
+        })
+      })
+
+      if (response.ok) {
+        // Update detection status to escalated
+        await updateDetectionStatus(pushToAdminDialog.detection.id, 'escalated')
+        setSuccessMessage('Investigation escalated to administrators successfully.')
+        setPushToAdminDialog({ isOpen: false, detection: null })
+      } else {
+        setError('Failed to escalate investigation to administrators.')
+      }
+    } catch (error) {
+      console.error('Failed to push to admin:', error)
+      setError('Failed to escalate investigation.')
+    }
+  }
+
+  const handlePushToAdminClose = () => {
+    setPushToAdminDialog({ isOpen: false, detection: null })
   }
 
   const refreshDetections = () => {
@@ -851,6 +1044,20 @@ export default function AdminDetectionsPage() {
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
+                              
+                              {/* Push to Admin button - shown if user has permission */}
+                              {currentUser?.permissions.includes('push_to_admin') && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handlePushToAdmin(detection)}
+                                  title="Escalate to Admin"
+                                  className="text-blue-400 hover:bg-blue-900/30 hover:text-blue-300 p-2"
+                                >
+                                  <ArrowUp className="h-4 w-4" />
+                                </Button>
+                              )}
+                              
                               {detection.detectionId.startsWith('manual-') && (
                                 <Button
                                   variant="ghost"
@@ -1000,6 +1207,42 @@ export default function AdminDetectionsPage() {
             </div>
           )}
         </div>
+
+        {/* Investigation Assignment Dialog */}
+        <InvestigationAssignmentDialog
+          isOpen={assignmentDialog.isOpen}
+          onClose={handleAssignmentDialogClose}
+          onConfirm={handleAssignmentDialogConfirm}
+          detection={{
+            id: assignmentDialog.detection?.id || '',
+            emailSubject: assignmentDialog.detection?.name || '',
+            sender: assignmentDialog.detection?.sentBy || '',
+            severity: assignmentDialog.detection?.severity || 'low'
+          }}
+          warnings={assignmentDialog.warnings}
+          assignedUsers={assignmentDialog.assignedUsers}
+          currentUser={{
+            name: currentUser?.name || '',
+            email: currentUser?.email || ''
+          }}
+        />
+
+        {/* Push to Admin Dialog */}
+        <PushToAdminDialog
+          isOpen={pushToAdminDialog.isOpen}
+          onClose={handlePushToAdminClose}
+          onConfirm={handlePushToAdminConfirm}
+          detection={{
+            id: pushToAdminDialog.detection?.id || '',
+            emailSubject: pushToAdminDialog.detection?.name || '',
+            sender: pushToAdminDialog.detection?.sentBy || '',
+            severity: pushToAdminDialog.detection?.severity || 'low'
+          }}
+          currentUser={{
+            name: currentUser?.name || '',
+            email: currentUser?.email || ''
+          }}
+        />
       </FadeInSection>
     </AppLayout>
   )
