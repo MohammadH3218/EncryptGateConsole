@@ -3,7 +3,8 @@
     "allow": [
       "Bash(.venv/Scripts/python:*)",
       "Bash(npm run build:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(npm install:*)"
     ],
     "deny": [],
     "ask": []
