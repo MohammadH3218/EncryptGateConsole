@@ -46,7 +46,17 @@ except Exception as e:
 # Blueprint for auth routes
 auth_services_routes = Blueprint('auth_services_routes', __name__)
 
-# Generate Client Secret Hash
+# Generate Client Secret Hash (following ChatGPT's pattern)
+def _calculate_secret_hash(username: str, client_id: str, client_secret: str) -> str:
+    """
+    Helper to calculate Cognito secret hash, required when using an app client with a client secret.
+    """
+    message = (username + client_id).encode('utf-8')
+    key = client_secret.encode('utf-8')
+    secret_hash = base64.b64encode(hmac.new(key, message, digestmod=hashlib.sha256).digest()).decode('utf-8')
+    return secret_hash
+
+# Legacy function for backward compatibility
 def generate_client_secret_hash(username: str) -> str:
     try:
         if not CLIENT_ID:
@@ -57,15 +67,7 @@ def generate_client_secret_hash(username: str) -> str:
             logger.error("CLIENT_SECRET is not configured")
             raise ValueError("CLIENT_SECRET is missing")
             
-        message = username + CLIENT_ID
-        secret = CLIENT_SECRET.encode("utf-8")
-        
-        # Compute the hash
-        hash_obj = hmac.new(secret, message.encode("utf-8"), hashlib.sha256)
-        hash_digest = hash_obj.digest()
-        hash_result = base64.b64encode(hash_digest).decode()
-        
-        return hash_result
+        return _calculate_secret_hash(username, CLIENT_ID, CLIENT_SECRET)
     except Exception as e:
         logger.error(f"Error generating client secret hash: {e}")
         raise
@@ -625,6 +627,224 @@ def confirm_signup(email, temp_password, new_password):
         logger.error(f"Error confirming signup: {e}")
         return None
 
+# ============================================================================
+# NEW IMPROVED COGNITO AUTHENTICATION FLOW (following ChatGPT pattern)
+# ============================================================================
+#
+# This section implements a complete, robust Cognito authentication flow that:
+# 
+# 1. Uses standard CLIENT APIs (not admin APIs) for user authentication
+# 2. Handles all authentication challenges systematically:
+#    - NEW_PASSWORD_REQUIRED: When user has temporary password
+#    - MFA_SETUP: When user needs to configure TOTP for first time  
+#    - SOFTWARE_TOKEN_MFA: When user needs to provide MFA code for login
+# 3. Proper session management throughout the entire flow
+# 4. Clear error handling with specific exception mapping
+# 5. Follows AWS best practices for TOTP MFA implementation
+#
+# Flow Overview:
+# - initiate_authentication() -> starts with username/password
+# - respond_to_new_password_challenge() -> handles password change
+# - associate_mfa_token() -> gets TOTP secret during MFA setup
+# - verify_mfa_token() -> verifies user's TOTP code during setup
+# - respond_to_mfa_challenge() -> handles both MFA setup completion and login MFA
+#
+# Key Benefits:
+# - Eliminates session reuse issues
+# - Prevents secret/time base mismatches
+# - Provides consistent error handling
+# - Uses proper Cognito authentication patterns
+# ============================================================================
+
+def initiate_authentication(client, client_id: str, username: str, password: str, client_secret: str = None):
+    """
+    Initiates the authentication flow using USER_PASSWORD_AUTH.
+    Returns the response which contains either AuthenticationResult (tokens) or a ChallengeName requiring further steps.
+    """
+    auth_params = {"USERNAME": username, "PASSWORD": password}
+    if client_secret:
+        auth_params["SECRET_HASH"] = _calculate_secret_hash(username, client_id, client_secret)
+    
+    logger.info(f"Initiating authentication for user: {username}")
+    
+    try:
+        response = client.initiate_auth(
+            ClientId=client_id,
+            AuthFlow="USER_PASSWORD_AUTH",
+            AuthParameters=auth_params
+        )
+        logger.info(f"Authentication response received - keys: {list(response.keys())}")
+        if response.get("ChallengeName"):
+            logger.info(f"Challenge detected: {response.get('ChallengeName')}")
+        return response
+    except client.exceptions.NotAuthorizedException:
+        logger.warning("Authentication failed: Invalid credentials")
+        raise Exception("Authentication failed: Incorrect username or password, or account not authorized.")
+    except client.exceptions.UserNotConfirmedException:
+        logger.warning("User account is not confirmed")
+        raise Exception("User account is not confirmed. Please complete verification before login.")
+    except client.exceptions.UserNotFoundException:
+        logger.warning("User does not exist")
+        raise Exception("User does not exist.")
+    except client.exceptions.PasswordResetRequiredException:
+        logger.warning("Password reset is required")
+        raise Exception("Password reset is required for this user. Use the Forgot Password flow to set a new password.")
+    except Exception as e:
+        logger.error(f"Unexpected error during authentication: {e}")
+        raise
+
+def respond_to_new_password_challenge(client, client_id: str, username: str, new_password: str, session: str, client_secret: str = None):
+    """
+    Responds to a NEW_PASSWORD_REQUIRED challenge with a new permanent password.
+    Returns the response which may contain tokens or another challenge (e.g., MFA challenge).
+    """
+    challenge_responses = {
+        "USERNAME": username,
+        "NEW_PASSWORD": new_password
+    }
+    if client_secret:
+        challenge_responses["SECRET_HASH"] = _calculate_secret_hash(username, client_id, client_secret)
+    
+    logger.info(f"Responding to NEW_PASSWORD_REQUIRED challenge for user: {username}")
+    
+    try:
+        response = client.respond_to_auth_challenge(
+            ClientId=client_id,
+            ChallengeName="NEW_PASSWORD_REQUIRED",
+            Session=session,
+            ChallengeResponses=challenge_responses
+        )
+        logger.info(f"Password change response received - keys: {list(response.keys())}")
+        if response.get("ChallengeName"):
+            logger.info(f"Next challenge: {response.get('ChallengeName')}")
+        return response
+    except client.exceptions.InvalidPasswordException:
+        logger.warning("New password does not meet policy requirements")
+        raise Exception("New password does not meet the password policy requirements.")
+    except client.exceptions.NotAuthorizedException:
+        logger.warning("Session invalid or expired during password change")
+        raise Exception("Failed to set new password: The session is invalid or expired.")
+    except Exception as e:
+        logger.error(f"Unexpected error during password change: {e}")
+        raise
+
+def associate_mfa_token(client, session: str):
+    """
+    Initiates TOTP software token setup for MFA (MFA_SETUP challenge).
+    Returns a tuple (secret_code, session_for_verify). The secret_code should be shown to the user (e.g., as QR code or text)
+    so they can configure their authenticator app. The session_for_verify should be used in verify_mfa_token().
+    """
+    logger.info("Associating MFA software token")
+    
+    try:
+        response = client.associate_software_token(Session=session)
+        secret_code = response.get("SecretCode")
+        session_for_verify = response.get("Session")
+        
+        logger.info(f"MFA token associated successfully, secret: {secret_code[:8]}...")
+        return secret_code, session_for_verify
+    except client.exceptions.InvalidParameterException:
+        logger.error("Invalid parameters for MFA token association")
+        raise Exception("Failed to associate MFA token: Invalid parameters or session.")
+    except client.exceptions.ResourceNotFoundException:
+        logger.error("Resource not found for MFA token association")
+        raise Exception("Failed to associate MFA token: Session or user not found.")
+    except client.exceptions.NotAuthorizedException:
+        logger.error("Not authorized for MFA token association")
+        raise Exception("Failed to associate MFA token: Not authorized (invalid session or access token).")
+    except Exception as e:
+        logger.error(f"Unexpected error during MFA token association: {e}")
+        raise
+
+def verify_mfa_token(client, session: str, user_code: str, friendly_name: str = "AuthenticatorApp"):
+    """
+    Verifies the TOTP code from the user's authenticator app. Use the session from associate_mfa_token().
+    Returns a new session string to be used to complete the MFA setup challenge.
+    """
+    logger.info(f"Verifying MFA token with code: {user_code}")
+    
+    try:
+        response = client.verify_software_token(
+            Session=session, 
+            UserCode=user_code, 
+            FriendlyDeviceName=friendly_name
+        )
+        status = response.get("Status")
+        session_after_verify = response.get("Session")
+        
+        logger.info(f"MFA token verification status: {status}")
+        
+        if status != "SUCCESS":
+            logger.warning(f"MFA verification failed with status: {status}")
+            raise Exception("MFA code verification failed. The code might be incorrect.")
+        
+        return session_after_verify
+    except client.exceptions.CodeMismatchException:
+        logger.warning("MFA code mismatch")
+        raise Exception("The MFA code is incorrect. Please try again with a new code.")
+    except client.exceptions.ExpiredCodeException:
+        logger.warning("MFA code expired")
+        raise Exception("The MFA code has expired. Please try again with a new code.")
+    except client.exceptions.NotAuthorizedException:
+        logger.error("Not authorized for MFA token verification")
+        raise Exception("Failed to verify MFA code: The session is invalid or user not authorized.")
+    except Exception as e:
+        logger.error(f"Unexpected error during MFA token verification: {e}")
+        raise
+
+def respond_to_mfa_challenge(client, client_id: str, username: str, session: str, mfa_code: str = None, client_secret: str = None):
+    """
+    Completes the authentication by responding to an MFA challenge.
+    If mfa_code is provided, responds to a SOFTWARE_TOKEN_MFA challenge using the given code.
+    If mfa_code is None, finalizes an MFA_SETUP challenge (after verify_mfa_token) to complete login.
+    Returns the AuthenticationResult (dict with IdToken, AccessToken, RefreshToken, etc.) on success.
+    """
+    if mfa_code is not None:
+        challenge_name = "SOFTWARE_TOKEN_MFA"
+        challenge_responses = {
+            "USERNAME": username,
+            "SOFTWARE_TOKEN_MFA_CODE": mfa_code
+        }
+        logger.info(f"Responding to SOFTWARE_TOKEN_MFA challenge for user: {username}")
+    else:
+        challenge_name = "MFA_SETUP"
+        challenge_responses = {
+            "USERNAME": username
+        }
+        logger.info(f"Responding to MFA_SETUP challenge for user: {username}")
+    
+    if client_secret:
+        challenge_responses["SECRET_HASH"] = _calculate_secret_hash(username, client_id, client_secret)
+    
+    try:
+        response = client.respond_to_auth_challenge(
+            ClientId=client_id,
+            ChallengeName=challenge_name,
+            Session=session,
+            ChallengeResponses=challenge_responses
+        )
+        
+        if "AuthenticationResult" in response:
+            logger.info("MFA challenge completed successfully - tokens received")
+            return response["AuthenticationResult"]
+        else:
+            # If there's no AuthenticationResult, we likely have another challenge (which is not expected in this flow)
+            challenge = response.get("ChallengeName")
+            logger.error(f"Unexpected challenge '{challenge}' returned instead of tokens")
+            raise Exception(f"Unexpected challenge '{challenge}' returned instead of tokens.")
+    except client.exceptions.CodeMismatchException:
+        logger.warning("MFA code mismatch in final challenge")
+        raise Exception("MFA code is incorrect or expired, authentication failed.")
+    except client.exceptions.NotAuthorizedException:
+        logger.warning("Not authorized in final MFA challenge")
+        raise Exception("MFA code is incorrect or expired, authentication failed.")
+    except client.exceptions.ExpiredCodeException:
+        logger.warning("MFA code expired in final challenge")
+        raise Exception("MFA code expired. Please provide a new code.")
+    except Exception as e:
+        logger.error(f"Unexpected error during MFA challenge response: {e}")
+        raise
+
 # Enhanced CORS handler for preflight requests
 def handle_cors_preflight():
     response = make_response()
@@ -652,6 +872,7 @@ def handle_cors_preflight():
 
 @auth_services_routes.route("/authenticate", methods=["OPTIONS", "POST"])
 def authenticate_user_route():
+    """NEW IMPROVED AUTHENTICATION ENDPOINT using ChatGPT flow pattern"""
     if request.method == "OPTIONS":
         return handle_cors_preflight()
 
@@ -663,21 +884,57 @@ def authenticate_user_route():
         username = data.get('username')
         password = data.get('password')
         
-        # Call the function version and handle the response
-        auth_response = authenticate_user(username, password)
+        if not username or not password:
+            return jsonify({"detail": "Username and password are required"}), 400
         
-        # Check if it's an error response (tuple with status code)
-        if isinstance(auth_response, tuple):
-            return jsonify(auth_response[0]), auth_response[1]
+        # Step 1: Initiate authentication using the new improved flow
+        logger.info(f"=== Starting authentication flow for user: {username} ===")
         
-        # Otherwise, it's a successful response
-        return jsonify(auth_response)
+        try:
+            auth_response = initiate_authentication(
+                cognito_client, CLIENT_ID, username, password, CLIENT_SECRET
+            )
+        except Exception as auth_error:
+            logger.error(f"Authentication failed: {auth_error}")
+            return jsonify({"detail": str(auth_error)}), 401
+        
+        # Step 2: Handle the response
+        if "AuthenticationResult" in auth_response:
+            # User is fully authenticated - return tokens
+            logger.info("User fully authenticated - returning tokens")
+            tokens = auth_response["AuthenticationResult"]
+            return jsonify({
+                "id_token": tokens.get("IdToken"),
+                "access_token": tokens.get("AccessToken"),
+                "refresh_token": tokens.get("RefreshToken"),
+                "token_type": tokens.get("TokenType"),
+                "expires_in": tokens.get("ExpiresIn")
+            })
+        
+        elif auth_response.get("ChallengeName"):
+            # User has a challenge to complete
+            challenge_name = auth_response.get("ChallengeName")
+            session = auth_response.get("Session")
+            
+            logger.info(f"Challenge required: {challenge_name}")
+            
+            return jsonify({
+                "ChallengeName": challenge_name,
+                "session": session,
+                "mfa_required": challenge_name == "SOFTWARE_TOKEN_MFA"
+            })
+        
+        else:
+            logger.error("Unexpected authentication response - no result or challenge")
+            return jsonify({"detail": "Unexpected authentication response"}), 500
+            
     except Exception as e:
-        logger.error(f"Error in authenticate_user_route: {e}")
+        logger.error(f"Error in authenticate endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 @auth_services_routes.route("/respond-to-challenge", methods=["POST", "OPTIONS"])
 def respond_to_challenge_endpoint():
+    """NEW IMPROVED CHALLENGE RESPONSE ENDPOINT using ChatGPT flow pattern"""
     if request.method == "OPTIONS":
         return handle_cors_preflight()
     
@@ -693,18 +950,76 @@ def respond_to_challenge_endpoint():
         
         if not (username and session and challenge_name):
             return jsonify({"detail": "Username, session, and challengeName are required"}), 400
+        
+        logger.info(f"=== Responding to {challenge_name} challenge for user: {username} ===")
+        
+        try:
+            if challenge_name == "NEW_PASSWORD_REQUIRED":
+                new_password = challenge_responses.get('NEW_PASSWORD')
+                if not new_password:
+                    return jsonify({"detail": "NEW_PASSWORD is required for this challenge"}), 400
+                
+                # Use the improved password challenge function
+                response = respond_to_new_password_challenge(
+                    cognito_client, CLIENT_ID, username, new_password, session, CLIENT_SECRET
+                )
+                
+            else:
+                # For other challenges, fall back to the old method for now
+                response = respond_to_auth_challenge(username, session, challenge_name, challenge_responses)
+                if isinstance(response, tuple):
+                    return jsonify(response[0]), response[1]
+                return jsonify(response)
+        
+        except Exception as challenge_error:
+            logger.error(f"Challenge response failed: {challenge_error}")
+            return jsonify({"detail": str(challenge_error)}), 400
+        
+        # Handle the response
+        if "AuthenticationResult" in response:
+            # Challenge completed - return tokens
+            logger.info("Challenge completed successfully - returning tokens")
+            tokens = response["AuthenticationResult"]
+            return jsonify({
+                "id_token": tokens.get("IdToken"),
+                "access_token": tokens.get("AccessToken"),
+                "refresh_token": tokens.get("RefreshToken"),
+                "token_type": tokens.get("TokenType"),
+                "expires_in": tokens.get("ExpiresIn")
+            })
+        
+        elif response.get("ChallengeName"):
+            # Another challenge is required
+            next_challenge = response.get("ChallengeName")
+            new_session = response.get("Session")
             
-        # Call the respond_to_auth_challenge function
-        response = respond_to_auth_challenge(username, session, challenge_name, challenge_responses)
+            logger.info(f"Next challenge required: {next_challenge}")
+            
+            result = {
+                "ChallengeName": next_challenge,
+                "session": new_session,
+                "mfa_required": next_challenge == "SOFTWARE_TOKEN_MFA"
+            }
+            
+            # For MFA_SETUP challenge, get the secret
+            if next_challenge == "MFA_SETUP":
+                try:
+                    secret_code, verify_session = associate_mfa_token(cognito_client, new_session)
+                    result["secretCode"] = secret_code
+                    result["session"] = verify_session  # Use the session from associate call
+                    logger.info(f"MFA setup initiated, secret: {secret_code[:8]}...")
+                except Exception as mfa_error:
+                    logger.error(f"Failed to setup MFA: {mfa_error}")
+                    return jsonify({"detail": f"MFA setup failed: {str(mfa_error)}"}), 500
+            
+            return jsonify(result)
         
-        # Check if it's an error response (tuple with status code)
-        if isinstance(response, tuple):
-            return jsonify(response[0]), response[1]
-        
-        # Otherwise, it's a successful response
-        return jsonify(response)
+        else:
+            logger.error("Unexpected challenge response - no result or next challenge")
+            return jsonify({"detail": "Unexpected challenge response"}), 500
+            
     except Exception as e:
-        logger.error(f"Error in respond_to_challenge_endpoint: {e}")
+        logger.error(f"Error in challenge response endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 @auth_services_routes.route("/setup-mfa", methods=["POST", "OPTIONS"])
@@ -870,71 +1185,47 @@ def test_mfa_code_endpoint():
             "server_time": datetime.now().isoformat()
         }), 500
 
-# Fixed MFA setup implementation that follows the exact PowerShell flow
+# NEW IMPROVED MFA SETUP CONFIRMATION using ChatGPT flow pattern
 @auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
 def confirm_mfa_setup_endpoint():
+    """NEW IMPROVED MFA SETUP CONFIRMATION using ChatGPT flow pattern"""
     if request.method == "OPTIONS":
         return handle_cors_preflight()
-    
-    logger.info("Starting MFA Setup Confirmation")
     
     try:
         data = request.json
         if not data:
-            logger.error("No JSON data provided in request body")
             return jsonify({"detail": "No JSON data provided"}), 400
             
         username = data.get('username')
         session = data.get('session')
         code = data.get('code')
-        password = data.get('password', '')
-        client_time_str = data.get('client_time')
-        adjusted_time_str = data.get('adjusted_time')
         
         # Validate required fields
         if not all([username, session, code]):
             missing = [field for field, value in [('username', username), ('session', session), ('code', code)] if not value]
-            logger.error(f"Missing required fields: {', '.join(missing)}")
             return jsonify({"detail": f"Missing required fields: {', '.join(missing)}"}), 400
         
         # Validate code format
         if not code.isdigit() or len(code) != 6:
-            logger.error(f"Invalid MFA code format: {code}")
             return jsonify({"detail": "MFA code must be exactly 6 digits"}), 400
         
-        logger.info(f"MFA setup confirmation for user: {username} with code: {code}")
+        logger.info(f"=== MFA setup confirmation for user: {username} with code: {code} ===")
         
         try:
-            # Step 1: First get a new secret by calling associate_software_token
-            # This is required because the session from MFA_SETUP challenge needs this call
-            logger.info("Step 1: Getting secret with associate_software_token")
-            associate_response = cognito_client.associate_software_token(Session=session)
+            # Step 1: Verify the MFA token using the session from associate_mfa_token
+            logger.info("Step 1: Verifying MFA token")
+            session_after_verify = verify_mfa_token(cognito_client, session, code)
             
-            secret_code = associate_response.get("SecretCode")
-            new_session = associate_response.get("Session")
-            
-            if not secret_code:
-                logger.error("Failed to get secret code from associate_software_token")
-                return jsonify({"detail": "MFA setup failed - could not generate secret"}), 500
-            
-            logger.info(f"Generated secret code: {secret_code[:8]}...")
-            
-            # Step 2: Verify the user's code with the new session
-            logger.info(f"Step 2: Verifying user code {code} with new session")
-            verify_response = cognito_client.verify_software_token(
-                Session=new_session or session,
-                UserCode=code
+            # Step 2: Complete the MFA setup challenge to finalize authentication
+            logger.info("Step 2: Completing MFA setup challenge")
+            auth_result = respond_to_mfa_challenge(
+                cognito_client, CLIENT_ID, username, session_after_verify, 
+                mfa_code=None, client_secret=CLIENT_SECRET
             )
             
-            status = verify_response.get("Status")
-            logger.info(f"MFA verification status: {status}")
-            
-            if status != "SUCCESS":
-                logger.warning(f"MFA verification failed with status: {status}")
-                return jsonify({"detail": f"MFA verification failed: {status}"}), 400
-            
             # Step 3: Set MFA preference to enable TOTP for future logins
-            logger.info(f"Step 3: Enabling MFA preference for user: {username}")
+            logger.info("Step 3: Setting MFA preference")
             try:
                 cognito_client.admin_set_user_mfa_preference(
                     UserPoolId=USER_POOL_ID,
@@ -944,87 +1235,81 @@ def confirm_mfa_setup_endpoint():
                         'PreferredMfa': True
                     }
                 )
-                logger.info("Successfully enabled MFA preference")
-                
-                # Verify the setting took effect
-                mfa_settings = cognito_client.admin_get_user_mfa_preference(
-                    UserPoolId=USER_POOL_ID,
-                    Username=username
-                )
-                logger.info(f"MFA preference verification: {mfa_settings}")
-                
-            except Exception as mfa_error:
-                logger.error(f"Failed to set MFA preference: {mfa_error}")
-                # Don't fail the entire setup if this step fails
-                logger.warning("MFA was verified but preference setting failed - user may need to re-setup")
+                logger.info("MFA preference set successfully")
+            except Exception as pref_error:
+                logger.warning(f"MFA preference setting failed: {pref_error}")
+                # Don't fail the entire flow - user can still login
             
-            # Success - MFA setup is complete
-            logger.info("MFA setup completed successfully")
+            # Success - return the authentication tokens
+            logger.info("MFA setup completed successfully - returning tokens")
             return jsonify({
-                "message": "MFA setup verified successfully. Please log in again with your MFA code.",
+                "id_token": auth_result.get("IdToken"),
+                "access_token": auth_result.get("AccessToken"),
+                "refresh_token": auth_result.get("RefreshToken"),
+                "token_type": auth_result.get("TokenType"),
+                "expires_in": auth_result.get("ExpiresIn"),
+                "message": "MFA setup completed successfully",
                 "status": "SUCCESS"
             }), 200
-                
-        except cognito_client.exceptions.NotAuthorizedException as auth_error:
-            logger.error(f"NotAuthorizedException during MFA setup: {auth_error}")
-            return jsonify({"detail": "Session expired. Please log in again to restart MFA setup."}), 401
-            
-        except cognito_client.exceptions.CodeMismatchException as code_error:
-            logger.warning(f"CodeMismatchException during MFA setup: {code_error}")
-            return jsonify({
-                "detail": "The verification code is incorrect. Please ensure your device time is synchronized and use the latest code from your authenticator app.",
-                "error_type": "code_mismatch"
-            }), 400
             
         except Exception as setup_error:
-            logger.error(f"Error during MFA setup process: {setup_error}")
-            logger.error(traceback.format_exc())
-            return jsonify({"detail": f"MFA setup failed: {str(setup_error)}"}), 500
+            logger.error(f"MFA setup failed: {setup_error}")
+            return jsonify({"detail": str(setup_error)}), 400
             
     except Exception as e:
-        logger.error(f"Unhandled exception in MFA setup endpoint: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"Error in MFA setup confirmation endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 @auth_services_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
 def verify_mfa_endpoint():
+    """NEW IMPROVED MFA VERIFICATION using ChatGPT flow pattern"""
     if request.method == "OPTIONS":
         return handle_cors_preflight()
     
-    data = request.json
-    session = data.get('session')
-    code = data.get('code')
-    username = data.get('username')
-    
-    logger.info(f"MFA verification endpoint called for user: {username}")
-
-    if not (session and username):
-        logger.error("Missing session or username in MFA verification request")
-        return jsonify({"detail": "Session and username are required"}), 400
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
         
-    # Input validation for code
-    if not code or not isinstance(code, str):
-        logger.error(f"Invalid code format in MFA verification: {type(code)}")
-        return jsonify({"detail": "Verification code must be a 6-digit number"}), 400
+        session = data.get('session')
+        code = data.get('code')
+        username = data.get('username')
         
-    code = code.strip()
-    if not code.isdigit() or len(code) != 6:
-        logger.error(f"Invalid code format in MFA verification - code: {code}, length: {len(code)}")
-        return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
-    
-    logger.info(f"Calling verify_mfa function for user: {username} with code: {code}")
-    
-    # Call verify_mfa directly with the user's code
-    auth_result = verify_mfa(session, code, username)
-    
-    # Check if it's an error response (tuple with status code)
-    if isinstance(auth_result, tuple):
-        logger.error(f"MFA verification failed: {auth_result[0]}")
-        return jsonify(auth_result[0]), auth_result[1]
-    
-    # Otherwise, it's a successful response
-    logger.info("MFA verification successful - returning tokens")
-    return jsonify(auth_result)
+        # Validate required fields
+        if not all([session, username, code]):
+            missing = [field for field, value in [('session', session), ('username', username), ('code', code)] if not value]
+            return jsonify({"detail": f"Missing required fields: {', '.join(missing)}"}), 400
+        
+        # Validate code format
+        if not code.isdigit() or len(code) != 6:
+            return jsonify({"detail": "MFA code must be exactly 6 digits"}), 400
+        
+        logger.info(f"=== MFA verification for user: {username} with code: {code} ===")
+        
+        try:
+            # Use the improved MFA challenge response function
+            auth_result = respond_to_mfa_challenge(
+                cognito_client, CLIENT_ID, username, session, 
+                mfa_code=code, client_secret=CLIENT_SECRET
+            )
+            
+            # Return the authentication tokens
+            logger.info("MFA verification successful - returning tokens")
+            return jsonify({
+                "id_token": auth_result.get("IdToken"),
+                "access_token": auth_result.get("AccessToken"),
+                "refresh_token": auth_result.get("RefreshToken"),
+                "token_type": auth_result.get("TokenType"),
+                "expires_in": auth_result.get("ExpiresIn")
+            })
+            
+        except Exception as mfa_error:
+            logger.error(f"MFA verification failed: {mfa_error}")
+            return jsonify({"detail": str(mfa_error)}), 400
+            
+    except Exception as e:
+        logger.error(f"Error in MFA verification endpoint: {e}")
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 
 # Route for initiate forgot password
