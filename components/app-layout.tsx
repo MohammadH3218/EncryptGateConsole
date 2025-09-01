@@ -366,14 +366,20 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                   </div>
                 </div>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56">
-                <DropdownMenuItem onClick={() => handleNavigation("/admin/user-settings/profile")}>
-                  <User className="mr-2 h-4 w-4" />
-                  <span>Profile Settings</span>
+              <DropdownMenuContent align="end" className="w-56 bg-[#0f0f0f] border border-[#2f2f2f] shadow-xl">
+                <DropdownMenuItem 
+                  onClick={() => handleNavigation("/admin/user-settings/profile")}
+                  className="text-white hover:bg-[#1f1f1f] hover:text-white cursor-pointer focus:bg-[#1f1f1f] focus:text-white transition-all duration-200"
+                >
+                  <User className="mr-2 h-4 w-4 text-blue-400" />
+                  <span className="font-medium">Profile Settings</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleLogout}>
-                  <LogOut className="mr-2 h-4 w-4" />
-                  <span>Sign out</span>
+                <DropdownMenuItem 
+                  onClick={handleLogout}
+                  className="text-white hover:bg-red-900/20 hover:text-red-200 cursor-pointer focus:bg-red-900/20 focus:text-red-200 transition-all duration-200"
+                >
+                  <LogOut className="mr-2 h-4 w-4 text-red-400" />
+                  <span className="font-medium">Sign out</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -489,12 +495,12 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                     <div
                       key={member.id || index}
                       className="flex items-center gap-3 p-2 rounded-lg hover:bg-[#1f1f1f] transition-colors cursor-pointer"
-                      title={`${member.name} - ${member.email}`}
+                      title={`${member.name || member.email} - ${member.email}`}
                     >
                       <div className="relative">
                         <Avatar className="w-8 h-8">
                           <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">
-                            {member.avatar || member.name?.substring(0, 2).toUpperCase() || 'U'}
+                            {member.avatar || (member.name || member.email)?.substring(0, 2).toUpperCase() || 'U'}
                           </AvatarFallback>
                         </Avatar>
                         <div
@@ -504,7 +510,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="text-white text-sm font-medium truncate">
-                          {member.name}
+                          {member.name || member.email}
                         </p>
                         <p className="text-gray-400 text-xs truncate">
                           {getStatusText(member)}

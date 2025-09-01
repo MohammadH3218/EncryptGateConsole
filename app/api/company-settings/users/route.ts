@@ -141,13 +141,29 @@ export async function POST(req: Request) {
       region: cognitoRegion,
     });
 
-    // Check if user exists in Cognito
+    // Check if user exists in Cognito and get their preferred_username
+    let actualName = name; // Use provided name as fallback
     try {
-      await cognito.send(new AdminGetUserCommand({
+      const userResp = await cognito.send(new AdminGetUserCommand({
         UserPoolId: userPoolId,
         Username: email,
       }));
-      console.log(`✅ User ${email} exists in Cognito`);
+      
+      // Extract preferred_username from user attributes if available
+      const attributes = userResp.UserAttributes || [];
+      const getAttributeValue = (attrName: string) => {
+        const attr = attributes.find(a => a.Name === attrName);
+        return attr?.Value || "";
+      };
+      
+      // Prioritize preferred_username, then provided name, then other attributes
+      actualName = getAttributeValue("preferred_username") || 
+                   name || 
+                   getAttributeValue("name") || 
+                   getAttributeValue("given_name") + " " + getAttributeValue("family_name") ||
+                   email.split("@")[0];
+      
+      console.log(`✅ User ${email} exists in Cognito with display name: ${actualName}`);
     } catch (cognitoError: any) {
       if (cognitoError.name === "UserNotFoundException") {
         return NextResponse.json(
