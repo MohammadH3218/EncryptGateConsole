@@ -693,17 +693,30 @@ def initiate_authentication(client, client_id: str, username: str, password: str
         logger.error(f"Unexpected error during authentication: {e}")
         raise
 
-def respond_to_new_password_challenge(client, client_id: str, username: str, new_password: str, session: str, client_secret: str = None):
+def respond_to_new_password_challenge(client, client_id: str, username: str, new_password: str, session: str, user_attributes: dict = None, client_secret: str = None):
     """
-    Responds to a NEW_PASSWORD_REQUIRED challenge with a new permanent password.
+    Responds to a NEW_PASSWORD_REQUIRED challenge with a new permanent password and optional user attributes.
+    user_attributes example: {"preferred_username": "Security Admin", "custom:role": "admin"}
     Returns the response which may contain tokens or another challenge (e.g., MFA challenge).
     """
+    # Base challenge responses
     challenge_responses = {
         "USERNAME": username,
         "NEW_PASSWORD": new_password
     }
     if client_secret:
         challenge_responses["SECRET_HASH"] = _calculate_secret_hash(username, client_id, client_secret)
+    
+    # Add user attributes using the required key format
+    if user_attributes:
+        for k, v in user_attributes.items():
+            if k.startswith("custom:"):
+                # custom attribute
+                challenge_responses[f"userAttributes.custom:{k.split(':',1)[1]}"] = str(v)
+            else:
+                # standard attribute
+                challenge_responses[f"userAttributes.{k}"] = str(v)
+        logger.info(f"Setting user attributes: {list(user_attributes.keys())}")
     
     logger.info(f"Responding to NEW_PASSWORD_REQUIRED challenge for user: {username}")
     
@@ -845,6 +858,174 @@ def respond_to_mfa_challenge(client, client_id: str, username: str, session: str
         logger.error(f"Unexpected error during MFA challenge response: {e}")
         raise
 
+# ============================================================================
+# IMPROVED FORGOT PASSWORD FUNCTIONS (following ChatGPT pattern)
+# ============================================================================
+
+def start_forgot_password(client, client_id: str, username: str, client_secret: str = None):
+    """
+    Step 1: Trigger password reset. Cognito sends the user a confirmation code.
+    Returns CodeDeliveryDetails (destination & delivery medium) on success.
+    """
+    params = {"ClientId": client_id, "Username": username}
+    if client_secret:
+        params["SecretHash"] = _calculate_secret_hash(username, client_id, client_secret)
+
+    logger.info(f"Starting forgot password process for user: {username}")
+
+    try:
+        resp = client.forgot_password(**params)
+        delivery_details = resp.get("CodeDeliveryDetails", {})
+        logger.info(f"Forgot password initiated successfully, delivery: {delivery_details}")
+        return delivery_details
+    except client.exceptions.UserNotFoundException:
+        logger.warning(f"User not found for forgot password: {username}")
+        # For security, treat as success so you don't reveal if the account exists.
+        return {"DeliveryMedium": "UNKNOWN", "Destination": "hidden"}
+    except client.exceptions.LimitExceededException:
+        logger.warning(f"Rate limit exceeded for forgot password: {username}")
+        raise Exception("Too many password reset requests. Please wait before trying again.")
+    except client.exceptions.TooManyRequestsException:
+        logger.warning(f"Too many requests for forgot password: {username}")
+        raise Exception("Too many requests. Please wait a few minutes before trying again.")
+    except Exception as e:
+        logger.error(f"Forgot password failed for {username}: {e}")
+        raise Exception(f"Failed to initiate password reset: {str(e)}")
+
+def confirm_forgot_password(client, client_id: str, username: str, confirmation_code: str, new_password: str, client_secret: str = None):
+    """
+    Step 2: Confirm reset with the received code + new password.
+    Returns True on success.
+    """
+    params = {
+        "ClientId": client_id,
+        "Username": username,
+        "ConfirmationCode": confirmation_code,
+        "Password": new_password,
+    }
+    if client_secret:
+        params["SecretHash"] = _calculate_secret_hash(username, client_id, client_secret)
+
+    logger.info(f"Confirming forgot password for user: {username}")
+
+    try:
+        client.confirm_forgot_password(**params)
+        logger.info(f"Forgot password confirmed successfully for user: {username}")
+        return True
+    except client.exceptions.CodeMismatchException:
+        logger.warning(f"Invalid confirmation code for forgot password: {username}")
+        raise Exception("The confirmation code is incorrect. Please try again.")
+    except client.exceptions.ExpiredCodeException:
+        logger.warning(f"Expired confirmation code for forgot password: {username}")
+        raise Exception("The confirmation code has expired. Request a new one and try again.")
+    except client.exceptions.InvalidPasswordException:
+        logger.warning(f"Invalid password format for forgot password: {username}")
+        raise Exception("New password doesn't meet the policy. Choose a stronger password.")
+    except client.exceptions.TooManyFailedAttemptsException:
+        logger.warning(f"Too many failed attempts for forgot password: {username}")
+        raise Exception("Too many failed attempts. Wait a bit and try again.")
+    except client.exceptions.UserNotFoundException:
+        logger.warning(f"User not found during forgot password confirmation: {username}")
+        # Keep responses generic to avoid user enumeration
+        raise Exception("Unable to reset password for this account.")
+    except Exception as e:
+        logger.error(f"Forgot password confirmation failed for {username}: {e}")
+        raise Exception(f"Failed to reset password: {str(e)}")
+
+# ============================================================================
+# USER ACTIVITY AND TEAM MEMBERS FUNCTIONS
+# ============================================================================
+
+# In-memory storage for user activity (in production, use Redis or database)
+user_activity = {}
+
+def update_user_activity(username: str):
+    """Update user's last activity timestamp"""
+    from datetime import datetime
+    user_activity[username] = {
+        'last_seen': datetime.utcnow(),
+        'status': 'online'
+    }
+    logger.info(f"Updated activity for user: {username}")
+
+def get_user_status(username: str):
+    """Get user's current status based on last activity"""
+    from datetime import datetime, timedelta
+    
+    if username not in user_activity:
+        return 'offline'
+    
+    last_seen = user_activity[username]['last_seen']
+    now = datetime.utcnow()
+    time_diff = now - last_seen
+    
+    if time_diff.total_seconds() < 300:  # 5 minutes
+        return 'online'
+    elif time_diff.total_seconds() < 1800:  # 30 minutes
+        return 'away'
+    else:
+        return 'offline'
+
+def get_last_seen_text(username: str):
+    """Get formatted last seen text"""
+    from datetime import datetime, timedelta
+    
+    if username not in user_activity:
+        return "Never"
+    
+    last_seen = user_activity[username]['last_seen']
+    now = datetime.utcnow()
+    time_diff = now - last_seen
+    
+    if time_diff.total_seconds() < 300:  # 5 minutes
+        return "Online"
+    elif time_diff.total_seconds() < 3600:  # 1 hour
+        minutes = int(time_diff.total_seconds() / 60)
+        return f"Last seen {minutes} minute{'s' if minutes != 1 else ''} ago"
+    elif time_diff.total_seconds() < 86400:  # 24 hours
+        hours = int(time_diff.total_seconds() / 3600)
+        return f"Last seen {hours} hour{'s' if hours != 1 else ''} ago"
+    else:
+        days = int(time_diff.total_seconds() / 86400)
+        return f"Last seen {days} day{'s' if days != 1 else ''} ago"
+
+def list_cognito_users():
+    """List all users from Cognito User Pool"""
+    try:
+        paginator = cognito_client.get_paginator('list_users')
+        users = []
+        
+        for page in paginator.paginate(UserPoolId=USER_POOL_ID):
+            for user in page['Users']:
+                # Extract user attributes
+                attributes = {}
+                for attr in user.get('Attributes', []):
+                    attributes[attr['Name']] = attr['Value']
+                
+                # Get display name with fallback
+                display_name = (
+                    attributes.get('preferred_username') or 
+                    attributes.get('name') or 
+                    attributes.get('given_name') or 
+                    attributes.get('email') or 
+                    user.get('Username', 'Unknown')
+                )
+                
+                users.append({
+                    'username': user.get('Username'),
+                    'email': attributes.get('email', ''),
+                    'display_name': display_name,
+                    'status': user.get('UserStatus'),
+                    'enabled': user.get('Enabled', True),
+                    'created': user.get('UserCreateDate').isoformat() if user.get('UserCreateDate') else None,
+                    'last_modified': user.get('UserLastModifiedDate').isoformat() if user.get('UserLastModifiedDate') else None,
+                })
+        
+        return users
+    except Exception as e:
+        logger.error(f"Error listing Cognito users: {e}")
+        return []
+
 # Enhanced CORS handler for preflight requests
 def handle_cors_preflight():
     response = make_response()
@@ -959,9 +1140,19 @@ def respond_to_challenge_endpoint():
                 if not new_password:
                     return jsonify({"detail": "NEW_PASSWORD is required for this challenge"}), 400
                 
-                # Use the improved password challenge function
+                # Extract user attributes from challenge responses
+                user_attributes = {}
+                for key, value in challenge_responses.items():
+                    if key.startswith('userAttributes.'):
+                        # Remove the 'userAttributes.' prefix
+                        attr_key = key.replace('userAttributes.', '')
+                        user_attributes[attr_key] = value
+                        logger.info(f"Extracted user attribute: {attr_key} = {value}")
+                
+                # Use the improved password challenge function with user attributes
                 response = respond_to_new_password_challenge(
-                    cognito_client, CLIENT_ID, username, new_password, session, CLIENT_SECRET
+                    cognito_client, CLIENT_ID, username, new_password, session, 
+                    user_attributes if user_attributes else None, CLIENT_SECRET
                 )
                 
             else:
@@ -1312,9 +1503,10 @@ def verify_mfa_endpoint():
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
 
-# Route for initiate forgot password
+# NEW IMPROVED FORGOT PASSWORD ENDPOINT using ChatGPT pattern
 @auth_services_routes.route("/forgot-password", methods=["POST", "OPTIONS"])
 def forgot_password_endpoint():
+    """NEW IMPROVED FORGOT PASSWORD INITIATION using ChatGPT pattern"""
     if request.method == "OPTIONS":
         return handle_cors_preflight()
     
@@ -1326,35 +1518,34 @@ def forgot_password_endpoint():
         username = data.get('username')
         
         if not username:
-            return jsonify({"detail": "Username is required"}), 400
+            return jsonify({"detail": "Email address is required"}), 400
             
+        logger.info(f"=== Starting forgot password for user: {username} ===")
+        
         try:
-            # Generate secret hash
-            secret_hash = generate_client_secret_hash(username)
-                
-            # Call Cognito API
-            response = cognito_client.forgot_password(
-                ClientId=CLIENT_ID,
-                Username=username,
-                SecretHash=secret_hash
+            # Use the improved forgot password function
+            delivery_details = start_forgot_password(
+                cognito_client, CLIENT_ID, username, CLIENT_SECRET
             )
             
-            logger.info("Forgot password initiated successfully")
+            # Always return success message for security (don't reveal if user exists)
             return jsonify({
-                "message": "Password reset initiated. Check your email for verification code.",
-                "delivery": response.get("CodeDeliveryDetails"),
+                "message": "If an account with this email exists, you will receive a password reset code shortly.",
+                "delivery": delivery_details
             })
-        except Exception as api_error:
-            logger.error(f"Forgot password API call failed: {api_error}")
-            return jsonify({"detail": f"Failed to initiate password reset: {str(api_error)}"}), 500
+            
+        except Exception as forgot_error:
+            logger.error(f"Forgot password failed: {forgot_error}")
+            return jsonify({"detail": str(forgot_error)}), 400
             
     except Exception as e:
-        logger.error(f"Error in forgot_password_endpoint: {e}")
+        logger.error(f"Error in forgot password endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
 
-# Route for confirming forgot password
+# NEW IMPROVED CONFIRM FORGOT PASSWORD ENDPOINT using ChatGPT pattern
 @auth_services_routes.route("/confirm-forgot-password", methods=["POST", "OPTIONS"])
 def confirm_forgot_password_endpoint():
+    """NEW IMPROVED FORGOT PASSWORD CONFIRMATION using ChatGPT pattern"""
     if request.method == "OPTIONS":
         return handle_cors_preflight()
     
@@ -1367,41 +1558,116 @@ def confirm_forgot_password_endpoint():
         confirmation_code = data.get('code')
         new_password = data.get('password')
         
-        if not (username and confirmation_code and new_password):
-            return jsonify({"detail": "Username, verification code, and new password are required"}), 400
+        if not all([username, confirmation_code, new_password]):
+            missing = [field for field, value in [('username', username), ('code', confirmation_code), ('password', new_password)] if not value]
+            return jsonify({"detail": f"Missing required fields: {', '.join(missing)}"}), 400
+        
+        logger.info(f"=== Confirming forgot password for user: {username} ===")
         
         try:
-            # Generate secret hash
-            secret_hash = generate_client_secret_hash(username)
-                
-            # Call Cognito API
-            cognito_client.confirm_forgot_password(
-                ClientId=CLIENT_ID,
-                Username=username,
-                ConfirmationCode=confirmation_code,
-                Password=new_password,
-                SecretHash=secret_hash
+            # Use the improved confirm forgot password function
+            success = confirm_forgot_password(
+                cognito_client, CLIENT_ID, username, confirmation_code, new_password, CLIENT_SECRET
             )
             
-            logger.info("Password reset successfully")
-            return jsonify({
-                "message": "Password has been reset successfully."
-            })
-        except cognito_client.exceptions.CodeMismatchException:
-            logger.warning("Invalid verification code")
-            return jsonify({"detail": "Invalid verification code. Please try again."}), 400
-            
-        except cognito_client.exceptions.InvalidPasswordException as e:
-            logger.warning(f"Invalid password format: {e}")
-            return jsonify({"detail": f"Password does not meet requirements: {str(e)}"}), 400
-            
-        except Exception as api_error:
-            logger.error(f"Confirm forgot password API call failed: {api_error}")
-            return jsonify({"detail": f"Failed to reset password: {str(api_error)}"}), 500
+            if success:
+                logger.info("Password reset completed successfully")
+                return jsonify({
+                    "message": "Password has been reset successfully. You can now log in with your new password."
+                })
+            else:
+                logger.error("Forgot password confirmation returned False")
+                return jsonify({"detail": "Failed to reset password"}), 500
+                
+        except Exception as confirm_error:
+            logger.error(f"Forgot password confirmation failed: {confirm_error}")
+            return jsonify({"detail": str(confirm_error)}), 400
             
     except Exception as e:
-        logger.error(f"Error in confirm_forgot_password_endpoint: {e}")
+        logger.error(f"Error in confirm forgot password endpoint: {e}")
         return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+# TEAM MEMBERS AND ACTIVITY TRACKING ENDPOINTS
+@auth_services_routes.route("/team-members", methods=["GET", "OPTIONS"])
+def get_team_members():
+    """Get list of team members with their activity status"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        # Get all Cognito users
+        users = list_cognito_users()
+        
+        # Add activity status to each user
+        team_members = []
+        for user in users:
+            if user['enabled'] and user['status'] in ['CONFIRMED', 'FORCE_CHANGE_PASSWORD']:
+                username = user['email'] or user['username']  # Use email as identifier
+                
+                team_member = {
+                    'id': user['username'],
+                    'name': user['display_name'],
+                    'email': user['email'],
+                    'avatar': ''.join([word[0].upper() for word in user['display_name'].split()[:2]]),
+                    'status': get_user_status(username),
+                    'last_seen': get_last_seen_text(username),
+                    'created': user['created'],
+                }
+                team_members.append(team_member)
+        
+        # Sort by status priority (online, away, offline) then by name
+        status_priority = {'online': 0, 'away': 1, 'offline': 2}
+        team_members.sort(key=lambda x: (status_priority.get(x['status'], 3), x['name']))
+        
+        logger.info(f"Retrieved {len(team_members)} team members")
+        return jsonify({
+            "team_members": team_members,
+            "total": len(team_members)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting team members: {e}")
+        return jsonify({"detail": f"Failed to get team members: {str(e)}"}), 500
+
+@auth_services_routes.route("/activity/heartbeat", methods=["POST", "OPTIONS"])
+def update_activity():
+    """Update user's activity timestamp (heartbeat)"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        # Get username from JWT token or request body
+        auth_header = request.headers.get('Authorization')
+        username = None
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            try:
+                token = auth_header.split(' ')[1]
+                payload = __import__('jwt').decode(token, options={"verify_signature": False})
+                username = payload.get('email') or payload.get('username')
+            except Exception as token_error:
+                logger.warning(f"Could not decode token for activity update: {token_error}")
+        
+        # Fallback to request body
+        if not username:
+            data = request.json or {}
+            username = data.get('username')
+        
+        if not username:
+            return jsonify({"detail": "Username required for activity tracking"}), 400
+        
+        # Update activity
+        update_user_activity(username)
+        
+        return jsonify({
+            "message": "Activity updated",
+            "username": username,
+            "status": get_user_status(username)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error updating user activity: {e}")
+        return jsonify({"detail": f"Failed to update activity: {str(e)}"}), 500
 
 # Helper endpoint to get server time
 @auth_services_routes.route("/server-time", methods=["GET"])

@@ -26,6 +26,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 
 interface AppLayoutProps {
   children: React.ReactNode
+  username?: string
   notificationsCount?: number
 }
 
@@ -38,24 +39,75 @@ const getUserInfoFromToken = () => {
     const payload = JSON.parse(atob(token.split('.')[1]))
     return {
       email: payload.email || payload.username || "",
-      name: payload.name || payload.given_name || payload.email || payload.username || ""
+      name: payload.preferred_username || payload.name || payload.given_name || payload.email || payload.username || ""
     }
   } catch (error) {
     return { email: "", name: "" }
   }
 }
 
-export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) {
+export function AppLayout({ children, username, notificationsCount = 0 }: AppLayoutProps) {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
   const [userInfo, setUserInfo] = useState({ email: "", name: "" })
+  const [teamMembers, setTeamMembers] = useState([])
+  const [loading, setLoading] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
 
   // Get user info from JWT token on component mount
   useEffect(() => {
+    // Always prefer JWT token info over passed username prop
     const info = getUserInfoFromToken()
+    // Fallback to username prop only if JWT doesn't have name info
+    if (!info.name && username) {
+      info.name = username
+    }
     setUserInfo(info)
+  }, [username])
+
+  // Initialize data and set up intervals on mount
+  useEffect(() => {
+    // Initial data fetch
+    fetchTeamMembers()
+    sendHeartbeat()
+
+    // Set up intervals
+    const heartbeatInterval = setInterval(sendHeartbeat, 60000) // Every minute
+    const teamMembersInterval = setInterval(fetchTeamMembers, 30000) // Every 30 seconds
+
+    // Cleanup intervals on unmount
+    return () => {
+      clearInterval(heartbeatInterval)
+      clearInterval(teamMembersInterval)
+    }
+  }, [])
+
+  // Send heartbeat on user activity (mouse move, key press, click)
+  useEffect(() => {
+    const handleActivity = () => {
+      sendHeartbeat()
+    }
+
+    // Throttle activity updates to max once per minute
+    let lastHeartbeat = 0
+    const throttledActivity = () => {
+      const now = Date.now()
+      if (now - lastHeartbeat > 60000) { // 60 seconds
+        lastHeartbeat = now
+        handleActivity()
+      }
+    }
+
+    document.addEventListener('mousemove', throttledActivity)
+    document.addEventListener('keypress', throttledActivity)
+    document.addEventListener('click', throttledActivity)
+
+    return () => {
+      document.removeEventListener('mousemove', throttledActivity)
+      document.removeEventListener('keypress', throttledActivity)
+      document.removeEventListener('click', throttledActivity)
+    }
   }, [])
 
   const mainNavItems = [
@@ -82,6 +134,46 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
 
   const handleNavigation = (href: string) => {
     router.push(href)
+  }
+
+  // Fetch team members from API
+  const fetchTeamMembers = async () => {
+    try {
+      const token = localStorage.getItem("access_token")
+      if (!token) return
+
+      const response = await fetch("/api/auth/team-members", {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setTeamMembers(data.team_members || [])
+      }
+    } catch (error) {
+      console.error("Failed to fetch team members:", error)
+    }
+  }
+
+  // Send activity heartbeat
+  const sendHeartbeat = async () => {
+    try {
+      const token = localStorage.getItem("access_token")
+      if (!token) return
+
+      await fetch("/api/auth/activity/heartbeat", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
+    } catch (error) {
+      console.error("Failed to send heartbeat:", error)
+    }
   }
 
   const handleLogout = () => {
@@ -125,15 +217,41 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
     },
   ]
 
-  const teamMembers = [
-    { name: "Alice Johnson", status: "online", avatar: "AJ" },
-    { name: "Bob Smith", status: "away", avatar: "BS" },
-    { name: "Charlie Brown", status: "online", avatar: "CB" },
-    { name: "Frank Castle", status: "offline", avatar: "FC" },
-  ]
+  // Status colors
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'online': return 'bg-green-500'
+      case 'away': return 'bg-yellow-500'
+      case 'offline': return 'bg-gray-500'
+      default: return 'bg-gray-500'
+    }
+  }
+
+  const getStatusText = (member) => {
+    if (member.status === 'online') {
+      return 'Online'
+    }
+    return member.last_seen || 'Offline'
+  }
 
   return (
     <div className="min-h-screen bg-[#171717] flex h-screen">
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #1f1f1f;
+          border-radius: 2px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #2f2f2f;
+          border-radius: 2px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #3f3f3f;
+        }
+      `}</style>
       {/* Left Sidebar */}
       {leftSidebarOpen && (
         <div className="w-64 bg-[#0f0f0f] relative overflow-y-auto custom-scrollbar">
@@ -360,32 +478,47 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
                 <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Team Members</span>
               </div>
 
-              <div className="space-y-3">
-                {teamMembers.map((member, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-[#1f1f1f] transition-colors"
-                  >
-                    <div className="relative">
-                      <Avatar className="w-8 h-8">
-                        <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">{member.avatar}</AvatarFallback>
-                      </Avatar>
-                      <div
-                        className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f0f0f] ${
-                          member.status === "online"
-                            ? "bg-green-500"
-                            : member.status === "away"
-                              ? "bg-yellow-500"
-                              : "bg-[#1f1f1f]"
-                        }`}
-                      ></div>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-medium truncate">{member.name}</p>
-                      <p className="text-gray-400 text-xs capitalize">{member.status}</p>
-                    </div>
+              <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar">
+                {teamMembers.length === 0 ? (
+                  <div className="text-center text-gray-400 text-sm py-4">
+                    <div className="animate-pulse">Loading team members...</div>
                   </div>
-                ))}
+                ) : (
+                  teamMembers.map((member, index) => (
+                    <div
+                      key={member.id || index}
+                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-[#1f1f1f] transition-colors cursor-pointer"
+                      title={`${member.name} - ${member.email}`}
+                    >
+                      <div className="relative">
+                        <Avatar className="w-8 h-8">
+                          <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">
+                            {member.avatar || member.name?.substring(0, 2).toUpperCase() || 'U'}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div
+                          className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f0f0f] ${getStatusColor(member.status)}`}
+                          title={`${member.status.charAt(0).toUpperCase() + member.status.slice(1)}`}
+                        ></div>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-medium truncate">
+                          {member.name}
+                        </p>
+                        <p className="text-gray-400 text-xs truncate">
+                          {getStatusText(member)}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              
+              {/* Team Members Count */}
+              <div className="mt-4 px-3 py-2 text-center">
+                <span className="text-gray-500 text-xs">
+                  {teamMembers.filter(m => m.status === 'online').length} online • {teamMembers.length} total
+                </span>
               </div>
             </div>
           </div>
