@@ -85,7 +85,8 @@ export async function GET(req: Request) {
       };
 
       const email = getAttributeValue("email");
-      const name = getAttributeValue("name") || 
+      const name = getAttributeValue("preferred_username") || 
+                   getAttributeValue("name") || 
                    getAttributeValue("given_name") + " " + getAttributeValue("family_name") ||
                    email.split("@")[0]; // fallback to email username
 

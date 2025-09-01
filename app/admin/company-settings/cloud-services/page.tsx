@@ -425,7 +425,7 @@ export default function CloudServicesPage() {
       <div className="flex space-x-2">
         <select
           id={id}
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="flex h-10 w-full rounded-md border border-[#1f1f1f] bg-[#1f1f1f] px-3 py-2 text-sm text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-[#2a2a2a] focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
           value={value}
           onChange={(e) => onChange(e.target.value)}
         >
@@ -671,7 +671,7 @@ export default function CloudServicesPage() {
                     {cognitoServices.map((svc) => (
                       <div
                         key={svc.id}
-                        className="border rounded-lg p-4"
+                        className="border border-[#1f1f1f] rounded-lg p-4 bg-[#1f1f1f]"
                       >
                         <div className="flex justify-between items-center mb-4">
                           <div className="flex items-center gap-2">
@@ -736,12 +736,12 @@ export default function CloudServicesPage() {
                           ].map(([label, val]) => (
                             <div
                               key={label}
-                              className="border rounded p-3 bg-muted/30"
+                              className="border border-[#2a2a2a] rounded p-3 bg-[#0f0f0f]"
                             >
-                              <p className="text-sm font-medium mb-1">
+                              <p className="text-sm font-medium mb-1 text-gray-300">
                                 {label}
                               </p>
-                              <p className="text-sm text-muted-foreground truncate">
+                              <p className="text-sm text-white truncate">
                                 {val}
                               </p>
                             </div>
@@ -938,7 +938,7 @@ export default function CloudServicesPage() {
                     {workmailServices.map((svc) => (
                       <div
                         key={svc.id}
-                        className="border rounded-lg p-4"
+                        className="border border-[#1f1f1f] rounded-lg p-4 bg-[#1f1f1f]"
                       >
                         <div className="flex justify-between items-center mb-4">
                           <div className="flex items-center gap-2">
@@ -1006,12 +1006,12 @@ export default function CloudServicesPage() {
                           ].map(([label, val]) => (
                             <div
                               key={label}
-                              className="border rounded p-3 bg-muted/30"
+                              className="border border-[#2a2a2a] rounded p-3 bg-[#0f0f0f]"
                             >
-                              <p className="text-sm font-medium mb-1">
+                              <p className="text-sm font-medium mb-1 text-gray-300">
                                 {label}
                               </p>
-                              <p className="text-sm text-muted-foreground truncate">
+                              <p className="text-sm text-white truncate">
                                 {val}
                               </p>
                             </div>

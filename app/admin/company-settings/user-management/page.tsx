@@ -470,7 +470,7 @@ export default function UserManagementPage() {
                                 placeholder="Search users..."
                                 value={userSearchQuery}
                                 onChange={(e) => setUserSearchQuery(e.target.value)}
-                                className="h-8 bg-[#2a2a2a] border-[#2a2a2a] text-white placeholder:text-gray-400"
+                                className="h-8 bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                               />
                             </div>
                             
@@ -625,7 +625,7 @@ export default function UserManagementPage() {
                     {filteredUsers.length > 0 ? (
                       filteredUsers.map((user: User) => (
                         <TableRow key={user.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
-                          <TableCell className="font-medium text-white">{user.name}</TableCell>
+                          <TableCell className="font-medium text-white">{user.name || user.email}</TableCell>
                           <TableCell className="text-white">{user.email}</TableCell>
                           <TableCell>
                             <Badge variant="outline">{user.role}</Badge>
@@ -741,7 +741,7 @@ export default function UserManagementPage() {
                                   placeholder="Search employees..."
                                   value={empSearchQuery}
                                   onChange={(e) => setEmpSearchQuery(e.target.value)}
-                                  className="h-8 bg-[#2a2a2a] border-[#2a2a2a] text-white placeholder:text-gray-400"
+                                  className="h-8 bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                                 />
                               </div>
                               
@@ -939,7 +939,7 @@ export default function UserManagementPage() {
                     {filteredEmps.length > 0 ? (
                       filteredEmps.map((employee: Employee) => (
                         <TableRow key={employee.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
-                          <TableCell className="font-medium text-white">{employee.name || "Unknown User"}</TableCell>
+                          <TableCell className="font-medium text-white">{employee.name || employee.email}</TableCell>
                           <TableCell className="text-white">{employee.email}</TableCell>
                           <TableCell className="text-white">{employee.department || "—"}</TableCell>
                           <TableCell className="text-white">{employee.jobTitle || "—"}</TableCell>
