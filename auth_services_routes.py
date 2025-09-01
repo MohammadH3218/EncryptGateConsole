@@ -1669,6 +1669,75 @@ def update_activity():
         logger.error(f"Error updating user activity: {e}")
         return jsonify({"detail": f"Failed to update activity: {str(e)}"}), 500
 
+# USER PROFILE ENDPOINT
+@auth_services_routes.route("/me", methods=["GET", "OPTIONS"])
+def get_current_user():
+    """Get current user information from access token"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        # Get access token from Authorization header
+        auth_header = request.headers.get('Authorization')
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({"detail": "Authorization token required"}), 401
+        
+        access_token = auth_header.split(' ')[1]
+        
+        # Decode the access token to get username
+        try:
+            payload = __import__('jwt').decode(access_token, options={"verify_signature": False})
+            username = payload.get('username') or payload.get('email')
+            if not username:
+                return jsonify({"detail": "Invalid token: no username found"}), 401
+        except Exception as token_error:
+            logger.error(f"Failed to decode access token: {token_error}")
+            return jsonify({"detail": "Invalid access token"}), 401
+        
+        # Get user details from Cognito
+        try:
+            response = cognito_client.admin_get_user(
+                UserPoolId=USER_POOL_ID,
+                Username=username
+            )
+            
+            # Extract user attributes
+            attributes = {}
+            for attr in response.get('UserAttributes', []):
+                attributes[attr['Name']] = attr['Value']
+            
+            # Build user info response
+            user_info = {
+                'username': username,
+                'email': attributes.get('email', ''),
+                'preferred_username': attributes.get('preferred_username', ''),
+                'name': attributes.get('name', ''),
+                'given_name': attributes.get('given_name', ''),
+                'family_name': attributes.get('family_name', ''),
+                'display_name': (
+                    attributes.get('preferred_username') or 
+                    attributes.get('name') or 
+                    attributes.get('given_name') or 
+                    attributes.get('email') or 
+                    username
+                ),
+                'user_status': response.get('UserStatus'),
+                'enabled': response.get('Enabled', True),
+            }
+            
+            return jsonify(user_info)
+            
+        except cognito_client.exceptions.UserNotFoundException:
+            logger.warning(f"User not found: {username}")
+            return jsonify({"detail": "User not found"}), 404
+        except Exception as cognito_error:
+            logger.error(f"Failed to get user from Cognito: {cognito_error}")
+            return jsonify({"detail": "Failed to get user information"}), 500
+        
+    except Exception as e:
+        logger.error(f"Error in get current user endpoint: {e}")
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
 # Helper endpoint to get server time
 @auth_services_routes.route("/server-time", methods=["GET"])
 def server_time_endpoint():

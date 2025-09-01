@@ -30,19 +30,20 @@ interface AppLayoutProps {
   notificationsCount?: number
 }
 
-// Helper function to decode JWT and get user info
+// Helper function to decode JWT and get user info (prefer ID token for profile claims)
 const getUserInfoFromToken = () => {
   try {
-    const token = localStorage.getItem("access_token")
-    if (!token) return { email: "", name: "" }
-    
-    const payload = JSON.parse(atob(token.split('.')[1]))
-    return {
-      email: payload.email || payload.username || "",
-      name: payload.preferred_username || payload.name || payload.given_name || payload.email || payload.username || ""
-    }
-  } catch (error) {
-    return { email: "", name: "" }
+    const decode = (t: string) => JSON.parse(atob(t.split(".")[1]));
+    const idTok = localStorage.getItem("id_token");
+    const accTok = localStorage.getItem("access_token");
+    const p = idTok ? decode(idTok) : accTok ? decode(accTok) : {};
+
+    const email = p.email || p["cognito:username"] || p.username || "";
+    const name = p.preferred_username || p.name || p.given_name || p.nickname || email || "";
+
+    return { email, name };
+  } catch {
+    return { email: "", name: "" };
   }
 }
 
