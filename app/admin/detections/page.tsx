@@ -601,38 +601,6 @@ export default function AdminDetectionsPage() {
     setUnflagConfirm({ show: false, detection: null })
   }
 
-  // NEW: Update detection status
-  const updateDetectionStatus = async (detectionId: string, newStatus: string) => {
-    setUpdatingStatus(detectionId)
-    setError(null)
-    
-    try {
-      // For now, we'll update locally and show success
-      // In production, you'd want to create a PATCH endpoint for detections
-      setDetections(prev => 
-        prev.map(d => 
-          d.id === detectionId 
-            ? { ...d, status: newStatus as any }
-            : d
-        )
-      )
-      
-      setSuccessMessage(`Detection status updated to "${newStatus}".`)
-      
-      // TODO: Implement actual API call
-      // const response = await fetch(`/api/detections/${detectionId}`, {
-      //   method: 'PATCH',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({ status: newStatus })
-      // })
-      
-    } catch (err: any) {
-      console.error('❌ Failed to update detection status:', err)
-      setError(`Failed to update detection status: ${err.message}`)
-    } finally {
-      setUpdatingStatus(null)
-    }
-  }
 
   // NEW: Assign detection
   const assignDetection = async (detectionId: string, assignTo: string) => {

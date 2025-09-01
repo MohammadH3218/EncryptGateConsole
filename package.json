@@ -59,6 +59,7 @@
     "graphology-layout-forceatlas2": "^0.10.1",
     "graphology-metrics": "^2.4.0",
     "input-otp": "1.4.1",
+    "jose": "^6.1.0",
     "lucide-react": "^0.454.0",
     "motion": "^12.23.11",
     "neo4j-driver": "^5.28.1",
