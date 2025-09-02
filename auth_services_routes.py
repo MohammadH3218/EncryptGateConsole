@@ -867,9 +867,12 @@ def start_forgot_password(client, client_id: str, username: str, client_secret: 
     Step 1: Trigger password reset. Cognito sends the user a confirmation code.
     Returns CodeDeliveryDetails (destination & delivery medium) on success.
     """
-    params = {"ClientId": client_id, "Username": username}
+    # Normalize email to avoid typos (lowercase/trim)
+    normalized_username = username.strip().lower()
+    
+    params = {"ClientId": client_id, "Username": normalized_username}
     if client_secret:
-        params["SecretHash"] = _calculate_secret_hash(username, client_id, client_secret)
+        params["SecretHash"] = _calculate_secret_hash(normalized_username, client_id, client_secret)
 
     logger.info(f"Starting forgot password process for user: {username}")
 
@@ -897,14 +900,17 @@ def confirm_forgot_password(client, client_id: str, username: str, confirmation_
     Step 2: Confirm reset with the received code + new password.
     Returns True on success.
     """
+    # Normalize email to avoid typos (lowercase/trim) - must match the original request
+    normalized_username = username.strip().lower()
+    
     params = {
         "ClientId": client_id,
-        "Username": username,
+        "Username": normalized_username,
         "ConfirmationCode": confirmation_code,
         "Password": new_password,
     }
     if client_secret:
-        params["SecretHash"] = _calculate_secret_hash(username, client_id, client_secret)
+        params["SecretHash"] = _calculate_secret_hash(normalized_username, client_id, client_secret)
 
     logger.info(f"Confirming forgot password for user: {username}")
 
