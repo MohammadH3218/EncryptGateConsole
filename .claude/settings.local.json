@@ -4,7 +4,8 @@
       "Bash(.venv/Scripts/python:*)",
       "Bash(npm run build:*)",
       "Bash(npm run dev:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []

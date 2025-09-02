@@ -133,10 +133,12 @@ export default function AdminDetectionsPage() {
     role: string
     permissions: string[]
   } | null>(null)
+  const [isUserLoading, setIsUserLoading] = useState(true)
 
   // Load current user profile
   useEffect(() => {
     const loadUserProfile = async () => {
+      setIsUserLoading(true)
       try {
         const response = await fetch('/api/user/profile')
         if (response.ok) {
@@ -145,12 +147,16 @@ export default function AdminDetectionsPage() {
             id: profile.id,
             name: profile.name || profile.preferred_username || profile.email,
             email: profile.email,
-            role: profile.role,
-            permissions: profile.permissions
+            role: profile.role || 'user',
+            permissions: profile.permissions || []
           })
+        } else {
+          console.error('Failed to load user profile:', response.status)
         }
       } catch (error) {
         console.error('Failed to load user profile:', error)
+      } finally {
+        setIsUserLoading(false)
       }
     }
     loadUserProfile()
@@ -351,8 +357,13 @@ export default function AdminDetectionsPage() {
   }
 
   const handleInvestigate = async (detection: Detection) => {
+    if (isUserLoading) {
+      setError('Please wait while user profile is loading...')
+      return
+    }
+    
     if (!currentUser) {
-      setError('User profile not loaded. Please refresh the page.')
+      setError('Unable to load user profile. Please refresh the page and try again.')
       return
     }
 
@@ -1007,8 +1018,9 @@ export default function AdminDetectionsPage() {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handleInvestigate(detection)}
-                                title="Investigate"
-                                className="text-white hover:bg-[#2a2a2a] hover:text-white p-2"
+                                disabled={isUserLoading}
+                                title={isUserLoading ? "Loading user profile..." : "Investigate"}
+                                className="text-white hover:bg-[#2a2a2a] hover:text-white p-2 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
