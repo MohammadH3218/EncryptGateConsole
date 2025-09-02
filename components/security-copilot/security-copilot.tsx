@@ -37,74 +37,83 @@ export function SecurityCopilotEnhanced({
   messageId,
   className = ""
 }: SecurityCopilotEnhancedProps) {
-  // Use a unique storage key based on messageId to persist state per email
-  const storageKey = `copilot-state-${messageId || 'global'}`
+  // Use a stable storage key reference to avoid re-renders
+  const storageKeyRef = useRef(`copilot-state-${messageId || 'global'}`)
   
   // Initialize state from localStorage if available
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(`${storageKey}-messages`)
-        return saved ? JSON.parse(saved) : []
-      } catch {
-        return []
-      }
-    }
-    return []
-  })
-  
+  const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [context, setContext] = useState<any>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(`${storageKey}-context`)
-        return saved ? JSON.parse(saved) : null
-      } catch {
-        return null
-      }
-    }
-    return null
-  })
+  const [context, setContext] = useState<any>(null)
   
   const [isConnected, setIsConnected] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
+  const [initialized, setInitialized] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const maxRetries = 3
 
-  // Persist messages to localStorage whenever they change
+  // Prevent hydration mismatch by only rendering after mount
   useEffect(() => {
-    if (typeof window !== 'undefined' && messages.length > 0) {
+    setIsMounted(true)
+  }, [])
+
+  // Load initial state from localStorage
+  useEffect(() => {
+    if (isMounted && !initialized) {
+      const storageKey = storageKeyRef.current
       try {
-        localStorage.setItem(`${storageKey}-messages`, JSON.stringify(messages))
-      } catch {
-        // Ignore localStorage errors
+        const savedMessages = localStorage.getItem(`${storageKey}-messages`)
+        const savedContext = localStorage.getItem(`${storageKey}-context`)
+        
+        if (savedMessages) {
+          setMessages(JSON.parse(savedMessages))
+        }
+        if (savedContext) {
+          setContext(JSON.parse(savedContext))
+        }
+        
+        setInitialized(true)
+      } catch (error) {
+        console.warn('Failed to load copilot state from localStorage:', error)
+        setInitialized(true)
       }
     }
-  }, [messages, storageKey])
+  }, [isMounted, initialized])
+
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (isMounted && initialized && messages.length > 0) {
+      try {
+        localStorage.setItem(`${storageKeyRef.current}-messages`, JSON.stringify(messages))
+      } catch (error) {
+        console.warn('Failed to save messages to localStorage:', error)
+      }
+    }
+  }, [messages, initialized, isMounted])
 
   // Persist context to localStorage whenever it changes
   useEffect(() => {
-    if (typeof window !== 'undefined' && context) {
+    if (isMounted && initialized && context) {
       try {
-        localStorage.setItem(`${storageKey}-context`, JSON.stringify(context))
-      } catch {
-        // Ignore localStorage errors
+        localStorage.setItem(`${storageKeyRef.current}-context`, JSON.stringify(context))
+      } catch (error) {
+        console.warn('Failed to save context to localStorage:', error)
       }
     }
-  }, [context, storageKey])
+  }, [context, initialized, isMounted])
 
-  // Initialize with welcome message and context
+  // Initialize copilot after state is loaded
   useEffect(() => {
-    // Only initialize if we don't have existing messages (first time or new messageId)
-    if (messages.length === 0) {
-      initializeCopilot()
-    } else {
-      // If we have existing messages, just check connection status
-      checkConnectionStatus()
+    if (initialized) {
+      if (messages.length === 0) {
+        initializeCopilot()
+      } else {
+        checkConnectionStatus()
+      }
     }
-  }, [messageId])
+  }, [initialized])
 
   const checkConnectionStatus = useCallback(async () => {
     try {
@@ -179,7 +188,7 @@ export function SecurityCopilotEnhanced({
       
       setMessages([errorMessage])
     }
-  }, [messageId])
+  }, [])
 
   const loadEmailContext = async (msgId: string) => {
     try {
@@ -346,12 +355,12 @@ export function SecurityCopilotEnhanced({
     setMessages([])
     setContext(null)
     // Clear localStorage for this session
-    if (typeof window !== 'undefined') {
+    if (isMounted) {
       try {
-        localStorage.removeItem(`${storageKey}-messages`)
-        localStorage.removeItem(`${storageKey}-context`)
-      } catch {
-        // Ignore localStorage errors
+        localStorage.removeItem(`${storageKeyRef.current}-messages`)
+        localStorage.removeItem(`${storageKeyRef.current}-context`)
+      } catch (error) {
+        console.warn('Failed to clear localStorage:', error)
       }
     }
     // Re-initialize
@@ -374,6 +383,26 @@ export function SecurityCopilotEnhanced({
   const cardClassName = className.includes('border-0') 
     ? `flex flex-col h-full ${className.replace('border-0', '')} border-0 shadow-none`
     : `flex flex-col h-full ${className}`
+
+  // Show loading state until component is mounted and initialized
+  if (!isMounted || !initialized) {
+    return (
+      <Card className={`${cardClassName} bg-[#0f0f0f] border-[#2a2a2a]`}>
+        <CardHeader className="pb-3 bg-[#0f0f0f]">
+          <CardTitle className="flex items-center gap-2 text-lg text-white">
+            <Bot className="h-5 w-5 text-blue-400" />
+            Security Copilot
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex-1 flex items-center justify-center bg-[#0f0f0f]">
+          <div className="flex items-center gap-2 text-gray-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Initializing...</span>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card className={`${cardClassName} bg-[#0f0f0f] border-[#2a2a2a]`}>
