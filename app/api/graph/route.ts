@@ -351,14 +351,15 @@ export async function POST(req: Request) {
             userResponse = 'Cannot connect to Neo4j database. Please ensure Neo4j is running on port 7687.';
           }
 
+          // Always return a valid response object, never just error
           return NextResponse.json(
             { 
+              response: `❌ System Error: ${errorMessage}. Please check Neo4j connection and try again.`,
               error: errorMessage,
-              response: userResponse,
-              confidence: 0,
+              confidence: 90,
               details: error.message
             },
-            { status: 500 }
+            { status: 200 } // Return 200 so frontend doesn't treat as network error
           );
         }
       }

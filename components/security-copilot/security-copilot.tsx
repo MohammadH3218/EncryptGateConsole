@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Bot, Send, Loader2, AlertTriangle, CheckCircle, Info, Zap, WifiOff, Wifi } from "lucide-react"
+import { Bot, Send, Loader2, AlertTriangle, CheckCircle, Info, Zap, WifiOff, Wifi, Trash2 } from "lucide-react"
 
 interface Message {
   id: string
@@ -37,20 +37,97 @@ export function SecurityCopilotEnhanced({
   messageId,
   className = ""
 }: SecurityCopilotEnhancedProps) {
-  const [messages, setMessages] = useState<Message[]>([])
+  // Use a unique storage key based on messageId to persist state per email
+  const storageKey = `copilot-state-${messageId || 'global'}`
+  
+  // Initialize state from localStorage if available
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`${storageKey}-messages`)
+        return saved ? JSON.parse(saved) : []
+      } catch {
+        return []
+      }
+    }
+    return []
+  })
+  
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
-  const [context, setContext] = useState<any>(null)
+  const [context, setContext] = useState<any>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`${storageKey}-context`)
+        return saved ? JSON.parse(saved) : null
+      } catch {
+        return null
+      }
+    }
+    return null
+  })
+  
   const [isConnected, setIsConnected] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [retryCount, setRetryCount] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const maxRetries = 3
 
+  // Persist messages to localStorage whenever they change
+  useEffect(() => {
+    if (typeof window !== 'undefined' && messages.length > 0) {
+      try {
+        localStorage.setItem(`${storageKey}-messages`, JSON.stringify(messages))
+      } catch {
+        // Ignore localStorage errors
+      }
+    }
+  }, [messages, storageKey])
+
+  // Persist context to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined' && context) {
+      try {
+        localStorage.setItem(`${storageKey}-context`, JSON.stringify(context))
+      } catch {
+        // Ignore localStorage errors
+      }
+    }
+  }, [context, storageKey])
+
   // Initialize with welcome message and context
   useEffect(() => {
-    initializeCopilot()
+    // Only initialize if we don't have existing messages (first time or new messageId)
+    if (messages.length === 0) {
+      initializeCopilot()
+    } else {
+      // If we have existing messages, just check connection status
+      checkConnectionStatus()
+    }
   }, [messageId])
+
+  const checkConnectionStatus = useCallback(async () => {
+    try {
+      const healthResponse = await fetch('/api/graph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'health_check',
+          data: {}
+        })
+      })
+
+      setIsConnected(healthResponse.ok)
+      if (!healthResponse.ok) {
+        setConnectionError('Connection check failed')
+      } else {
+        setConnectionError(null)
+      }
+    } catch (error: any) {
+      setIsConnected(false)
+      setConnectionError(error.message)
+    }
+  }, [])
 
   const initializeCopilot = useCallback(async () => {
     try {
@@ -203,6 +280,16 @@ export function SecurityCopilotEnhanced({
       const result = await response.json()
       console.log('✅ Copilot response received:', result)
 
+      // Handle the case where result is undefined or null
+      if (!result) {
+        throw new Error('No response received from server')
+      }
+
+      // Handle error responses from the server
+      if (result.error && !result.response) {
+        throw new Error(result.error)
+      }
+
       const assistantMessage: Message = {
         id: (Date.now() + 2).toString(),
         type: 'assistant',
@@ -255,6 +342,22 @@ export function SecurityCopilotEnhanced({
     setInput(question)
   }
 
+  const clearChat = () => {
+    setMessages([])
+    setContext(null)
+    // Clear localStorage for this session
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem(`${storageKey}-messages`)
+        localStorage.removeItem(`${storageKey}-context`)
+      } catch {
+        // Ignore localStorage errors
+      }
+    }
+    // Re-initialize
+    initializeCopilot()
+  }
+
   const suggestedQuestions = messageId ? [
     "Who else has received similar emails?",
     "What makes this email suspicious?",
@@ -275,32 +378,45 @@ export function SecurityCopilotEnhanced({
   return (
     <Card className={`${cardClassName} bg-[#0f0f0f] border-[#2a2a2a]`}>
       <CardHeader className="pb-3 bg-[#0f0f0f]">
-        <CardTitle className="flex items-center gap-2 text-lg text-white">
-          <Bot className="h-5 w-5 text-blue-400" />
-          Security Copilot
-          <div className="flex gap-1">
-            <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-xs">
-              <Zap className="h-3 w-3 mr-1" />
-              Neo4j
-            </Badge>
-            <Badge variant="outline" className={`text-xs ${
-              isConnected 
-                ? 'bg-green-500/10 text-green-400 border-green-500/20' 
-                : 'bg-red-500/10 text-red-400 border-red-500/20'
-            }`}>
-              {isConnected ? (
-                <>
-                  <Wifi className="h-3 w-3 mr-1" />
-                  Connected
-                </>
-              ) : (
-                <>
-                  <WifiOff className="h-3 w-3 mr-1" />
-                  Disconnected
-                </>
-              )}
-            </Badge>
+        <CardTitle className="flex items-center justify-between text-lg text-white">
+          <div className="flex items-center gap-2">
+            <Bot className="h-5 w-5 text-blue-400" />
+            Security Copilot
+            <div className="flex gap-1">
+              <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-xs">
+                <Zap className="h-3 w-3 mr-1" />
+                Neo4j
+              </Badge>
+              <Badge variant="outline" className={`text-xs ${
+                isConnected 
+                  ? 'bg-green-500/10 text-green-400 border-green-500/20' 
+                  : 'bg-red-500/10 text-red-400 border-red-500/20'
+              }`}>
+                {isConnected ? (
+                  <>
+                    <Wifi className="h-3 w-3 mr-1" />
+                    Connected
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="h-3 w-3 mr-1" />
+                    Disconnected
+                  </>
+                )}
+              </Badge>
+            </div>
           </div>
+          {messages.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearChat}
+              className="text-gray-400 hover:text-white hover:bg-[#2a2a2a] h-7 px-2"
+            >
+              <Trash2 className="h-3 w-3 mr-1" />
+              Clear
+            </Button>
+          )}
         </CardTitle>
         
         {connectionError && (
