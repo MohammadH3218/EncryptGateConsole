@@ -658,6 +658,9 @@ export async function askCopilot(
 
   } catch (error: any) {
     console.error('❌ Copilot error:', error)
-    return `❌ System Error: ${error.message}. Please check Neo4j connection and try again.`
+    
+    // Ensure we always return a string, never undefined
+    const errorMessage = error?.message || 'Unknown error occurred'
+    return `❌ System Error: ${errorMessage}. Please check Neo4j connection and try again.`
   }
 }
