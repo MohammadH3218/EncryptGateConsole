@@ -505,6 +505,16 @@ export default function LoginPage() {
   // ------------------------------
   // FORGOT PASSWORD
   // ------------------------------
+  const resetForgotPasswordDialog = () => {
+    setShowForgotPassword(false)
+    setForgotPasswordStep(1)
+    setForgotPasswordEmail("")
+    setForgotPasswordCode("")
+    setNewForgotPassword("")
+    setConfirmForgotPassword("")
+    setForgotPasswordError("")
+  }
+
   const handleForgotPasswordRequest = async () => {
     if (!forgotPasswordEmail) return setForgotPasswordError("Enter email")
     setIsForgotPasswordLoading(true)
@@ -522,7 +532,7 @@ export default function LoginPage() {
       )
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail || `Error ${res.status}`)
-      setForgotPasswordStep(2)
+      setForgotPasswordStep(2) // Move to verification code step
     } catch (e: any) {
       setForgotPasswordError(e.message || "Failed to send code")
     } finally {
@@ -530,8 +540,26 @@ export default function LoginPage() {
     }
   }
 
-  const handleForgotPasswordConfirm = async () => {
+  const handleForgotPasswordVerifyCode = async () => {
     if (!forgotPasswordCode) return setForgotPasswordError("Enter code")
+    setIsForgotPasswordLoading(true)
+    setForgotPasswordError("")
+    
+    // For now, we'll just move to the next step since we don't have a separate verify-only endpoint
+    // The actual verification happens when the password is changed
+    try {
+      // Simulate a small delay for UX
+      await new Promise(resolve => setTimeout(resolve, 500))
+      setForgotPasswordStep(3) // Move to password entry step
+      setForgotPasswordError("")
+    } catch (e: any) {
+      setForgotPasswordError(e.message || "Code verification failed")
+    } finally {
+      setIsForgotPasswordLoading(false)
+    }
+  }
+
+  const handleForgotPasswordConfirm = async () => {
     if (!newForgotPassword) return setForgotPasswordError("Enter new password")
     if (newForgotPassword !== confirmForgotPassword)
       return setForgotPasswordError("Passwords don't match")
@@ -555,13 +583,8 @@ export default function LoginPage() {
       )
       const d = await res.json()
       if (!res.ok) throw new Error(d.detail || `Error ${res.status}`)
-      // reset UI
-      setShowForgotPassword(false)
-      setForgotPasswordStep(1)
-      setForgotPasswordEmail("")
-      setForgotPasswordCode("")
-      setNewForgotPassword("")
-      setConfirmForgotPassword("")
+      // reset UI and show success message
+      resetForgotPasswordDialog()
       setSuccessMessage("Password reset! Please log in.")
     } catch (e: any) {
       setForgotPasswordError(e.message || "Reset failed")
@@ -617,10 +640,11 @@ export default function LoginPage() {
                     placeholder="name@company.com"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill]:text-fill-color-white"
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill]:text-fill-color-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
                     style={{
                       WebkitTextFillColor: 'white !important',
-                      color: 'white !important'
+                      color: 'white !important',
+                      backgroundColor: '#1f1f1f !important'
                     }}
                   />
                 </div>
@@ -638,7 +662,12 @@ export default function LoginPage() {
                     placeholder="Enter your password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white"
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                    style={{
+                      WebkitTextFillColor: 'white !important',
+                      color: 'white !important',
+                      backgroundColor: '#1f1f1f !important'
+                    }}
                   />
                 </div>
               </div>
@@ -733,7 +762,12 @@ export default function LoginPage() {
                   placeholder="e.g., Security Admin, John Doe"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                  style={{
+                    WebkitTextFillColor: 'white !important',
+                    color: 'white !important',
+                    backgroundColor: '#1f1f1f !important'
+                  }}
                 />
                 <p className="text-xs text-gray-400">This will be shown in your profile instead of your user ID</p>
               </div>
@@ -746,7 +780,12 @@ export default function LoginPage() {
                   placeholder="Enter new password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                  style={{
+                    WebkitTextFillColor: 'white !important',
+                    color: 'white !important',
+                    backgroundColor: '#1f1f1f !important'
+                  }}
                 />
               </div>
               <div className="space-y-2">
@@ -757,7 +796,12 @@ export default function LoginPage() {
                   placeholder="Confirm new password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                  style={{
+                    WebkitTextFillColor: 'white !important',
+                    color: 'white !important',
+                    backgroundColor: '#1f1f1f !important'
+                  }}
                 />
               </div>
               {error && (
@@ -864,7 +908,12 @@ export default function LoginPage() {
                 value={setupMfaCode}
                 onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                 maxLength={6}
-                className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 h-12"
+                className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 h-12 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                style={{
+                  WebkitTextFillColor: 'white !important',
+                  color: 'white !important',
+                  backgroundColor: '#1f1f1f !important'
+                }}
               />
             </div>
             
@@ -911,7 +960,12 @@ export default function LoginPage() {
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               maxLength={6}
-              className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white"
+              className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+              style={{
+                WebkitTextFillColor: 'white !important',
+                color: 'white !important',
+                backgroundColor: '#1f1f1f !important'
+              }}
             />
             {error && (
               <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
@@ -935,10 +989,10 @@ export default function LoginPage() {
       </Dialog>
 
       {/* Forgot Password Dialog */}
-      <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
+      <Dialog open={showForgotPassword} onOpenChange={(open) => !open && resetForgotPasswordDialog()}>
         <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
           <button
-            onClick={() => setShowForgotPassword(false)}
+            onClick={resetForgotPasswordDialog}
             className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
           >
             <X className="h-4 w-4" />
@@ -947,9 +1001,9 @@ export default function LoginPage() {
           <DialogHeader>
             <DialogTitle className="text-white">Reset Password</DialogTitle>
             <DialogDescription className="text-gray-400">
-              {forgotPasswordStep === 1
-                ? "Enter your email address and we'll send you a link to reset your password."
-                : "Enter code & new password"}
+              {forgotPasswordStep === 1 && "Enter your email address and we'll send you a verification code."}
+              {forgotPasswordStep === 2 && "Enter the verification code sent to your email."}
+              {forgotPasswordStep === 3 && "Enter your new password."}
             </DialogDescription>
           </DialogHeader>
 
@@ -967,7 +1021,12 @@ export default function LoginPage() {
                     placeholder="name@company.com"
                     value={forgotPasswordEmail}
                     onChange={(e) => setForgotPasswordEmail(e.target.value)}
-                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 transition-all duration-200"
+                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white transition-all duration-200 [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                    style={{
+                      WebkitTextFillColor: 'white !important',
+                      color: 'white !important',
+                      backgroundColor: '#1f1f1f !important'
+                    }}
                   />
                 </div>
               </div>
@@ -989,49 +1048,36 @@ export default function LoginPage() {
                     Sending...
                   </>
                 ) : (
-                  "Send Reset Link"
+                  "Send Verification Code"
                 )}
               </Button>
             </div>
-          ) : (
+          ) : forgotPasswordStep === 2 ? (
+            // Step 2: Verification Code Only
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="reset-code" className="text-white">Verification Code</Label>
                 <Input
                   id="reset-code"
-                  placeholder="Enter code"
+                  placeholder="Enter 6-digit code"
                   value={forgotPasswordCode}
-                  onChange={(e) => setForgotPasswordCode(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
+                  onChange={(e) => setForgotPasswordCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                  maxLength={6}
+                  className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                  style={{
+                    WebkitTextFillColor: 'white !important',
+                    color: 'white !important',
+                    backgroundColor: '#1f1f1f !important'
+                  }}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-forgot-password" className="text-white">New Password</Label>
-                <Input
-                  id="new-forgot-password"
-                  type="password"
-                  placeholder="Enter new password"
-                  value={newForgotPassword}
-                  onChange={(e) => setNewForgotPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-forgot-password" className="text-white">Confirm New Password</Label>
-                <Input
-                  id="confirm-forgot-password"
-                  type="password"
-                  placeholder="Confirm password"
-                  value={confirmForgotPassword}
-                  onChange={(e) => setConfirmForgotPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500"
-                />
-              </div>
+              
               {forgotPasswordError && (
                 <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
                   <AlertDescription className="text-red-200">{forgotPasswordError}</AlertDescription>
                 </Alert>
               )}
+              
               <div className="flex gap-3">
                 <Button
                   variant="outline"
@@ -1042,11 +1088,78 @@ export default function LoginPage() {
                   Back
                 </Button>
                 <Button
+                  onClick={handleForgotPasswordVerifyCode}
+                  disabled={!forgotPasswordCode || forgotPasswordCode.length !== 6 || isForgotPasswordLoading}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                >
+                  {isForgotPasswordLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    "Verify Code"
+                  )}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            // Step 3: New Password Entry
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="new-forgot-password" className="text-white">New Password</Label>
+                <Input
+                  id="new-forgot-password"
+                  type="password"
+                  placeholder="Enter new password"
+                  value={newForgotPassword}
+                  onChange={(e) => setNewForgotPassword(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                  style={{
+                    WebkitTextFillColor: 'white !important',
+                    color: 'white !important',
+                    backgroundColor: '#1f1f1f !important'
+                  }}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirm-forgot-password" className="text-white">Confirm New Password</Label>
+                <Input
+                  id="confirm-forgot-password"
+                  type="password"
+                  placeholder="Confirm password"
+                  value={confirmForgotPassword}
+                  onChange={(e) => setConfirmForgotPassword(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20 focus:bg-[#1f1f1f] focus:text-white [&:-webkit-autofill]:!bg-[#1f1f1f] [&:-webkit-autofill]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill]:!text-white [&:-webkit-autofill:hover]:!bg-[#1f1f1f] [&:-webkit-autofill:hover]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:hover]:!text-white [&:-webkit-autofill:focus]:!bg-[#1f1f1f] [&:-webkit-autofill:focus]:shadow-[0_0_0_30px_#1f1f1f_inset] [&:-webkit-autofill:focus]:!text-white"
+                  style={{
+                    WebkitTextFillColor: 'white !important',
+                    color: 'white !important',
+                    backgroundColor: '#1f1f1f !important'
+                  }}
+                />
+              </div>
+              
+              {forgotPasswordError && (
+                <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
+                  <AlertDescription className="text-red-200">{forgotPasswordError}</AlertDescription>
+                </Alert>
+              )}
+              
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setForgotPasswordStep(2)}
+                  disabled={isForgotPasswordLoading}
+                  className="flex-1 border-[#2f2f2f] text-white hover:bg-[#1f1f1f]"
+                >
+                  Back
+                </Button>
+                <Button
                   onClick={handleForgotPasswordConfirm}
                   disabled={
-                    !forgotPasswordCode ||
                     !newForgotPassword ||
                     !confirmForgotPassword ||
+                    newForgotPassword !== confirmForgotPassword ||
                     isForgotPasswordLoading
                   }
                   className="flex-1 bg-blue-600 hover:bg-blue-700"

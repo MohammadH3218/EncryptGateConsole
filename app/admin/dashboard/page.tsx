@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { AppLayout } from "@/components/app-layout"
+import { FadeInSection } from "@/components/fade-in-section"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { InteractiveLineChart } from "@/components/dashboard/interactive-line-chart"
 import { CompletedDetections } from "@/components/dashboard/completed-detections"
@@ -181,28 +182,31 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <AppLayout notificationsCount={5}>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <RefreshCw className="animate-spin mx-auto h-8 w-8 mb-4 text-white" />
-            <p className="text-white">Loading dashboard data...</p>
+        <FadeInSection>
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <RefreshCw className="animate-spin mx-auto h-8 w-8 mb-4 text-white" />
+              <p className="text-white">Loading dashboard data...</p>
+            </div>
           </div>
-        </div>
+        </FadeInSection>
       </AppLayout>
     )
   }
 
   return (
     <AppLayout notificationsCount={5}>
-      {/* Error Alert */}
-      {error && (
-        <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20">
-          <Shield className="h-4 w-4" />
-          <AlertTitle>Dashboard Error</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <FadeInSection>
+        {/* Error Alert */}
+        {error && (
+          <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20">
+            <Shield className="h-4 w-4" />
+            <AlertTitle>Dashboard Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-      {/* Stats Cards */}
+        {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <StatCard
           title="Incoming Emails"
@@ -259,10 +263,11 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Data Summary Footer */}
-      <div className="mt-6 text-center text-sm text-gray-400">
-        Showing data for {emails.length} emails and {detections.length} detections • Auto-refresh every 60s
-      </div>
+        {/* Data Summary Footer */}
+        <div className="mt-6 text-center text-sm text-gray-400">
+          Showing data for {emails.length} emails and {detections.length} detections • Auto-refresh every 60s
+        </div>
+      </FadeInSection>
     </AppLayout>
   )
 }
