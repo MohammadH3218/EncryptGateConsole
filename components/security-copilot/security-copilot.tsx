@@ -68,7 +68,13 @@ export function SecurityCopilotEnhanced({
         const savedContext = localStorage.getItem(`${storageKey}-context`)
         
         if (savedMessages) {
-          setMessages(JSON.parse(savedMessages))
+          const parsedMessages = JSON.parse(savedMessages)
+          // Convert timestamp strings back to Date objects
+          const messagesWithDates = parsedMessages.map((msg: Message) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }))
+          setMessages(messagesWithDates)
         }
         if (savedContext) {
           setContext(JSON.parse(savedContext))
