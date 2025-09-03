@@ -9,6 +9,8 @@ import {
   UpdateItemCommand,
   DeleteItemCommand,
   GetItemCommand,
+  CreateTableCommand,
+  DescribeTableCommand,
 } from '@aws-sdk/client-dynamodb';
 import {
   CognitoIdentityProviderClient,
@@ -27,6 +29,47 @@ const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 'CloudServices';
 
 const ddb = new DynamoDBClient({ region: REGION });
 const ses = new SESClient({ region: REGION });
+
+// Ensure required tables exist
+async function ensureTablesExist(): Promise<void> {
+  const tables = [
+    {
+      name: INVITATIONS_TABLE,
+      keySchema: [
+        { AttributeName: 'orgId', KeyType: 'HASH' },
+        { AttributeName: 'invitationId', KeyType: 'RANGE' }
+      ],
+      attributeDefinitions: [
+        { AttributeName: 'orgId', AttributeType: 'S' },
+        { AttributeName: 'invitationId', AttributeType: 'S' }
+      ]
+    }
+  ];
+
+  for (const table of tables) {
+    try {
+      await ddb.send(new DescribeTableCommand({ TableName: table.name }));
+      console.log(`✅ Table ${table.name} exists`);
+    } catch (error: any) {
+      if (error.name === 'ResourceNotFoundException') {
+        console.log(`📝 Creating table ${table.name}...`);
+        try {
+          await ddb.send(new CreateTableCommand({
+            TableName: table.name,
+            KeySchema: table.keySchema,
+            AttributeDefinitions: table.attributeDefinitions,
+            BillingMode: 'PAY_PER_REQUEST'
+          }));
+          console.log(`✅ Created table ${table.name}`);
+        } catch (createError: any) {
+          console.error(`❌ Failed to create table ${table.name}:`, createError.message);
+        }
+      } else {
+        console.error(`❌ Error checking table ${table.name}:`, error.message);
+      }
+    }
+  }
+}
 
 interface Invitation {
   id: string
@@ -158,6 +201,9 @@ export async function POST(request: Request) {
 
     console.log('📨 Sending invitation to:', email);
 
+    // Ensure tables exist first
+    await ensureTablesExist();
+
     // Check if user already exists
     const existingUserResponse = await ddb.send(new QueryCommand({
       TableName: USERS_TABLE,
@@ -270,6 +316,9 @@ export async function POST(request: Request) {
 export async function GET() {
   try {
     console.log('📋 Fetching pending invitations');
+
+    // Ensure tables exist first
+    await ensureTablesExist();
 
     const response = await ddb.send(new QueryCommand({
       TableName: INVITATIONS_TABLE,
