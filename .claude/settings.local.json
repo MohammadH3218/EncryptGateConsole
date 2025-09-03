@@ -10,7 +10,10 @@
       "Bash(curl:*)",
       "Bash(lsof:*)",
       "Bash(netstat:*)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []

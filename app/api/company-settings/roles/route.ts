@@ -9,6 +9,8 @@ import {
   UpdateItemCommand,
   DeleteItemCommand,
   GetItemCommand,
+  CreateTableCommand,
+  DescribeTableCommand,
 } from '@aws-sdk/client-dynamodb';
 import { Role, DEFAULT_ROLES, PERMISSIONS } from '@/types/roles';
 
@@ -18,6 +20,58 @@ const ROLES_TABLE = process.env.ROLES_TABLE_NAME || 'SecurityRoles';
 const USER_ROLES_TABLE = process.env.USER_ROLES_TABLE_NAME || 'SecurityUserRoles';
 
 const ddb = new DynamoDBClient({ region: REGION });
+
+// Ensure required tables exist
+async function ensureTablesExist(): Promise<void> {
+  const tables = [
+    {
+      name: ROLES_TABLE,
+      keySchema: [
+        { AttributeName: 'orgId', KeyType: 'HASH' },
+        { AttributeName: 'roleId', KeyType: 'RANGE' }
+      ],
+      attributeDefinitions: [
+        { AttributeName: 'orgId', AttributeType: 'S' },
+        { AttributeName: 'roleId', AttributeType: 'S' }
+      ]
+    },
+    {
+      name: USER_ROLES_TABLE,
+      keySchema: [
+        { AttributeName: 'orgId', KeyType: 'HASH' },
+        { AttributeName: 'userId', KeyType: 'RANGE' }
+      ],
+      attributeDefinitions: [
+        { AttributeName: 'orgId', AttributeType: 'S' },
+        { AttributeName: 'userId', AttributeType: 'S' }
+      ]
+    }
+  ];
+
+  for (const table of tables) {
+    try {
+      await ddb.send(new DescribeTableCommand({ TableName: table.name }));
+      console.log(`✅ Table ${table.name} exists`);
+    } catch (error: any) {
+      if (error.name === 'ResourceNotFoundException') {
+        console.log(`📝 Creating table ${table.name}...`);
+        try {
+          await ddb.send(new CreateTableCommand({
+            TableName: table.name,
+            KeySchema: table.keySchema,
+            AttributeDefinitions: table.attributeDefinitions,
+            BillingMode: 'PAY_PER_REQUEST'
+          }));
+          console.log(`✅ Created table ${table.name}`);
+        } catch (createError: any) {
+          console.error(`❌ Failed to create table ${table.name}:`, createError.message);
+        }
+      } else {
+        console.error(`❌ Error checking table ${table.name}:`, error.message);
+      }
+    }
+  }
+}
 
 // Helper to convert DynamoDB item to Role
 function itemToRole(item: any): Role {
@@ -88,6 +142,9 @@ async function initializeDefaultRoles(orgId: string): Promise<void> {
 export async function GET() {
   try {
     console.log('📋 Fetching roles for organization:', ORG_ID);
+
+    // Ensure tables exist first
+    await ensureTablesExist();
 
     // Query roles for this organization
     const response = await ddb.send(new QueryCommand({

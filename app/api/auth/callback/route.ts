@@ -2,8 +2,52 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { Buffer } from 'buffer'
+import {
+  DynamoDBClient,
+  UpdateItemCommand,
+} from '@aws-sdk/client-dynamodb'
 
 export const runtime = 'nodejs'
+
+const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
+const ORG_ID = process.env.ORGANIZATION_ID!
+const USERS_TABLE = process.env.USERS_TABLE_NAME || 'SecurityTeamUsers'
+
+// Helper function to decode JWT token and extract user email
+function decodeJWT(token: string) {
+  try {
+    const [header, payload, signature] = token.split('.')
+    const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'))
+    return decodedPayload
+  } catch (error) {
+    console.error('❌ Error decoding JWT token:', error)
+    return null
+  }
+}
+
+// Helper function to update user's lastLogin timestamp
+async function updateUserLastLogin(userEmail: string) {
+  try {
+    console.log('🔄 Updating lastLogin for user:', userEmail)
+    
+    await ddb.send(new UpdateItemCommand({
+      TableName: USERS_TABLE,
+      Key: {
+        orgId: { S: ORG_ID },
+        email: { S: userEmail }
+      },
+      UpdateExpression: 'SET lastLogin = :lastLogin',
+      ExpressionAttributeValues: {
+        ':lastLogin': { S: new Date().toISOString() }
+      },
+      ReturnValues: 'NONE'
+    }))
+    
+    console.log('✅ Successfully updated lastLogin for:', userEmail)
+  } catch (error) {
+    console.error('⚠️ Failed to update lastLogin for:', userEmail, error)
+  }
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -76,6 +120,15 @@ export async function GET(req: NextRequest) {
       if (!id_token || !access_token) {
         console.error('❌ Missing required tokens in response');
         return NextResponse.redirect(`${baseUrl}/api/auth/login?error=missing_tokens`);
+      }
+
+      // Decode the ID token to get user information
+      const userInfo = decodeJWT(id_token)
+      if (userInfo && userInfo.email) {
+        // Update user's lastLogin timestamp for activity status
+        await updateUserLastLogin(userInfo.email)
+      } else {
+        console.warn('⚠️ Could not extract email from ID token for activity tracking')
       }
 
     const res = NextResponse.redirect(`${baseUrl}/admin/dashboard`);
