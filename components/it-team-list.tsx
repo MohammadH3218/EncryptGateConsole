@@ -30,9 +30,27 @@ export function ITTeamList({ searchQuery }: ITTeamListProps) {
   useEffect(() => {
     const fetchITTeamMembers = async () => {
       try {
-        // TODO: Implement API call to fetch IT team members
-        // const data = await fetchITTeamMembersFromAPI()
-        // setITTeamMembers(data)
+        const response = await fetch('/api/auth/team-members')
+        if (response.ok) {
+          const data = await response.json()
+          const members = data.team_members || data.teamMembers || []
+          
+          // Transform the team members to match ITTeamMember interface
+          const itMembers = members.map((member: any, index: number) => ({
+            id: member.id || `member-${index}`,
+            name: member.name || 'Unknown User',
+            username: member.email?.split('@')[0] || 'unknown',
+            email: member.email || '',
+            position: member.role || 'Team Member',
+            department: 'Security',
+            hireDate: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // Random date within past year
+            roles: [member.role || 'User']
+          }))
+          
+          setITTeamMembers(itMembers)
+        } else {
+          console.error('Failed to fetch team members:', response.statusText)
+        }
       } catch (error) {
         console.error("Error fetching IT team members:", error)
       } finally {

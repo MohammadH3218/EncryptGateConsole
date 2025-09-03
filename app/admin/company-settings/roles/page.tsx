@@ -23,48 +23,74 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Cloud, MoreHorizontal, Plus, Search, Shield } from "lucide-react"
+import { Cloud, MoreHorizontal, Plus, Search, Shield, Crown, Mail, UserPlus, Settings, Trash2 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Role, Permission, PERMISSIONS, getUserPermissions, canManageRole } from "@/types/roles"
+import { Separator } from "@/components/ui/separator"
 
-// Empty array for production use
-const mockRoles: any[] = []
+interface User {
+  id: string
+  name: string
+  email: string
+  roles: Role[]
+  status: string
+  lastLogin?: string
+}
 
-// Empty array for production use
-const mockUsers: any[] = []
-
-// Empty array for production use
-const mockPermissions: any[] = []
-
-// Empty array for production use
-const mockConnectedServices: any[] = []
+interface Invitation {
+  id: string
+  email: string
+  name: string
+  roleIds: string[]
+  invitedBy: string
+  invitedAt: string
+  expiresAt: string
+  status: string
+}
 
 export default function RolesPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const userId = searchParams.get("user")
   const [searchQuery, setSearchQuery] = useState("")
-  const [roles, setRoles] = useState(mockRoles)
-  const [users, setUsers] = useState(mockUsers)
-  const [permissions] = useState(mockPermissions)
-  const [connectedServices] = useState(mockConnectedServices)
+  const [roles, setRoles] = useState<Role[]>([])
+  const [users, setUsers] = useState<User[]>([])
+  const [invitations, setInvitations] = useState<Invitation[]>([])
+  const [loading, setLoading] = useState(true)
+  const [permissions] = useState<Permission[]>(PERMISSIONS)
+  const [connectedServices] = useState([{ type: 'cognito' }]) // Mock connected service
   const [isAddRoleDialogOpen, setIsAddRoleDialogOpen] = useState(false)
+  const [isInviteUserDialogOpen, setIsInviteUserDialogOpen] = useState(false)
   const [isEditUserRoleDialogOpen, setIsEditUserRoleDialogOpen] = useState(false)
-  const [selectedUser, setSelectedUser] = useState<(typeof mockUsers)[0] | null>(null)
-  const [selectedRole, setSelectedRole] = useState<(typeof mockRoles)[0] | null>(null)
+  const [selectedUser, setSelectedUser] = useState<User | null>(null)
+  const [selectedRole, setSelectedRole] = useState<Role | null>(null)
   const [newRole, setNewRole] = useState({
     name: "",
     description: "",
+    color: "#95a5a6",
     permissions: [] as string[],
+    priority: 400,
+    mentionable: true,
+    hoisted: false
+  })
+  const [inviteForm, setInviteForm] = useState({
+    email: "",
+    name: "",
+    roleIds: [] as string[]
   })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const { toast } = useToast()
 
-  // Handle user selection from query params
+  // Fetch data on component mount
   useEffect(() => {
+    fetchRoles()
+    fetchUsers()
+    fetchInvitations()
+    
     // If userId is provided, find the user and open the edit dialog
     if (userId) {
-      const user = mockUsers.find((u) => u.id === userId)
+      const user = users.find((u) => u.id === userId)
       if (user) {
         setSelectedUser(user)
         setIsEditUserRoleDialogOpen(true)
@@ -72,13 +98,66 @@ export default function RolesPage() {
     }
   }, [userId])
 
+  const fetchRoles = async () => {
+    try {
+      const response = await fetch('/api/company-settings/roles')
+      if (response.ok) {
+        const data = await response.json()
+        setRoles(data.roles || [])
+      } else {
+        console.error('Failed to fetch roles:', response.statusText)
+      }
+    } catch (error) {
+      console.error('Error fetching roles:', error)
+    }
+  }
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('/api/company-settings/users')
+      if (response.ok) {
+        const usersData = await response.json()
+        
+        // Transform users and add role objects
+        const usersWithRoles = usersData.map((user: any) => ({
+          ...user,
+          roles: roles.filter(role => user.roleIds?.includes(role.id) || role.name === user.role)
+        }))
+        
+        setUsers(usersWithRoles)
+      }
+    } catch (error) {
+      console.error('Error fetching users:', error)
+    }
+  }
+
+  const fetchInvitations = async () => {
+    try {
+      const response = await fetch('/api/auth/invite')
+      if (response.ok) {
+        const data = await response.json()
+        setInvitations(data.invitations || [])
+      }
+    } catch (error) {
+      console.error('Error fetching invitations:', error)
+    }
+  }
+
+  // Refetch users when roles change
+  useEffect(() => {
+    if (roles.length > 0) {
+      fetchUsers()
+    }
+    setLoading(false)
+  }, [roles])
+
   const filteredRoles = roles.filter(
     (role) =>
       role.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       role.description.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
-  const handleAddRole = () => {
+  const handleAddRole = async () => {
     if (!newRole.name) {
       toast({
         title: "Role name required",
@@ -90,30 +169,44 @@ export default function RolesPage() {
 
     setIsSubmitting(true)
 
-    // Simulate API call
-    setTimeout(() => {
-      const newRoleData = {
-        id: `role-${Date.now()}`,
-        name: newRole.name,
-        description: newRole.description,
-        userCount: 0,
-        permissions: newRole.permissions,
+    try {
+      const response = await fetch('/api/company-settings/roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newRole)
+      })
+
+      if (response.ok) {
+        await fetchRoles() // Refresh roles list
+        setIsAddRoleDialogOpen(false)
+        setSelectedRole(null)
+        setNewRole({
+          name: "",
+          description: "",
+          color: "#95a5a6",
+          permissions: [],
+          priority: 400,
+          mentionable: true,
+          hoisted: false
+        })
+
+        toast({
+          title: "Role Added",
+          description: `${newRole.name} role has been added successfully.`,
+        })
+      } else {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to create role')
       }
-
-      setRoles([...roles, newRoleData])
-      setIsSubmitting(false)
-      setIsAddRoleDialogOpen(false)
-      setNewRole({
-        name: "",
-        description: "",
-        permissions: [],
-      })
-
+    } catch (error: any) {
       toast({
-        title: "Role Added",
-        description: `${newRole.name} role has been added successfully.`,
+        title: "Error",
+        description: error.message || 'Failed to create role',
+        variant: "destructive",
       })
-    }, 2000)
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleDeleteRole = (roleId: string) => {
