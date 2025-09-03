@@ -604,10 +604,10 @@ export async function askCopilot(
       )
       attempts.push(qtpl)
       const res = await runQuery(qtpl)
-      if (res.length && !('error' in res[0])) {
+      if (res.length && res[0] && !('error' in res[0])) {
         return summarizeResults(question, qtpl, res)
       } else {
-        errors.push(res[0].error || 'No results')
+        errors.push((res.length && res[0] && res[0].error) || 'No results')
       }
     }
 
@@ -635,10 +635,10 @@ export async function askCopilot(
       }
 
       const res = await runQuery(clean)
-      if (res.length && !('error' in res[0])) {
+      if (res.length && res[0] && !('error' in res[0])) {
         return summarizeResults(question, clean, res)
       } else {
-        errors.push(res[0].error || 'No results')
+        errors.push((res.length && res[0] && res[0].error) || 'No results')
       }
     }
 
