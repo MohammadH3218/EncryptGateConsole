@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -20,7 +20,7 @@ interface Invitation {
   expiresAt: string
 }
 
-export default function AcceptInvitePage() {
+function AcceptInviteContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { toast } = useToast()
@@ -280,5 +280,24 @@ export default function AcceptInvitePage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense 
+      fallback={
+        <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
+          <Card className="w-full max-w-md bg-[#0f0f0f] border-[#2a2a2a]">
+            <CardContent className="pt-6 flex items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+              <span className="ml-2 text-white">Loading...</span>
+            </CardContent>
+          </Card>
+        </div>
+      }
+    >
+      <AcceptInviteContent />
+    </Suspense>
   )
 }
