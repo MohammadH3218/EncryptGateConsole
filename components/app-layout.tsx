@@ -141,18 +141,20 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   const fetchTeamMembers = async () => {
     try {
       const token = localStorage.getItem("access_token")
-      if (!token) return
-
+      
       const response = await fetch("/api/auth/team-members", {
         headers: {
-          "Authorization": `Bearer ${token}`,
+          ...(token && { "Authorization": `Bearer ${token}` }),
           "Content-Type": "application/json",
         },
       })
 
       if (response.ok) {
         const data = await response.json()
+        console.log('📋 Team members data received:', data)
         setTeamMembers(data.team_members || [])
+      } else {
+        console.error('❌ Failed to fetch team members:', response.status, response.statusText)
       }
     } catch (error) {
       console.error("Failed to fetch team members:", error)
