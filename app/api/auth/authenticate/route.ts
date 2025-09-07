@@ -12,6 +12,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   ScanCommand,
+  QueryCommand,
 } from "@aws-sdk/client-dynamodb";
 
 // Helper function to compute SECRET_HASH when clientSecret is present
@@ -24,7 +25,8 @@ const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
 
 export async function POST(req: Request) {
   try {
-    const { username, password } = await req.json();
+    let { username, password, email, orgId } = await req.json();
+    if (!username && email) username = email;
     
     if (!username || !password) {
       return NextResponse.json(
@@ -35,18 +37,61 @@ export async function POST(req: Request) {
 
     console.log(`🔐 Authenticating user ${username}`);
 
-    // Scan all organizations to find Cognito configurations
-    const allCognitoConfigs = await ddb.send(new ScanCommand({
-      TableName: CS_TABLE,
-      FilterExpression: "serviceType = :serviceType",
-      ExpressionAttributeValues: {
-        ":serviceType": { S: "aws-cognito" }
+    let allCognitoConfigs;
+    
+    if (orgId) {
+      // Optimize: Query specific org's Cognito config first using Query instead of Scan
+      console.log(`🎯 Looking up Cognito config for org: ${orgId}`);
+      try {
+        const orgCognitoConfig = await ddb.send(new QueryCommand({
+          TableName: CS_TABLE,
+          KeyConditionExpression: "orgId = :orgId",
+          FilterExpression: "serviceType = :serviceType",
+          ExpressionAttributeValues: {
+            ":orgId": { S: orgId },
+            ":serviceType": { S: "aws-cognito" }
+          }
+        }));
+        
+        if (orgCognitoConfig.Items && orgCognitoConfig.Items.length > 0) {
+          allCognitoConfigs = orgCognitoConfig;
+          console.log(`✅ Found Cognito config for org ${orgId} using Query`);
+        } else {
+          console.log(`❌ No Cognito config found for org ${orgId} using Query, falling back to scan all`);
+          // Fallback to scanning all configurations
+          allCognitoConfigs = await ddb.send(new ScanCommand({
+            TableName: CS_TABLE,
+            FilterExpression: "serviceType = :serviceType",
+            ExpressionAttributeValues: {
+              ":serviceType": { S: "aws-cognito" }
+            }
+          }));
+        }
+      } catch (queryError) {
+        console.log(`❌ Query failed for org ${orgId}, falling back to scan all:`, queryError);
+        // Fallback to scanning all configurations
+        allCognitoConfigs = await ddb.send(new ScanCommand({
+          TableName: CS_TABLE,
+          FilterExpression: "serviceType = :serviceType",
+          ExpressionAttributeValues: {
+            ":serviceType": { S: "aws-cognito" }
+          }
+        }));
       }
-    }));
+    } else {
+      // Scan all organizations to find Cognito configurations
+      allCognitoConfigs = await ddb.send(new ScanCommand({
+        TableName: CS_TABLE,
+        FilterExpression: "serviceType = :serviceType",
+        ExpressionAttributeValues: {
+          ":serviceType": { S: "aws-cognito" }
+        }
+      }));
+    }
 
     if (!allCognitoConfigs.Items || allCognitoConfigs.Items.length === 0) {
       return NextResponse.json(
-        { success: false, message: "No Cognito configurations found" },
+        { status: "ERROR", message: "No Cognito configurations found" },
         { status: 400 }
       );
     }
@@ -170,16 +215,16 @@ export async function POST(req: Request) {
       throw lastError || new Error("Authentication failed");
     }
     
-    const { authResponse, orgId, clientId, clientSecret, region, cognitoClient } = successfulAuth;
+    const { authResponse, orgId: successfulOrgId, clientId, clientSecret, region, cognitoClient } = successfulAuth;
     
     // Handle different auth states
     if (authResponse.ChallengeName) {
       console.log(`🎯 Challenge required: ${authResponse.ChallengeName}`);
       return NextResponse.json({
-        success: true,
-        ChallengeName: authResponse.ChallengeName,
+        status: "CHALLENGE",
+        challenge: authResponse.ChallengeName,
         session: authResponse.Session,
-        message: `Authentication challenge required: ${authResponse.ChallengeName}`,
+        orgId: successfulOrgId,
         challengeParameters: authResponse.ChallengeParameters,
         mfa_required: authResponse.ChallengeName === "SOFTWARE_TOKEN_MFA",
       });
@@ -187,7 +232,7 @@ export async function POST(req: Request) {
 
     if (!authResponse.AuthenticationResult?.AccessToken) {
       return NextResponse.json(
-        { success: false, message: "Authentication failed - no tokens received" },
+        { status: "ERROR", message: "Authentication failed - no tokens received" },
         { status: 401 }
       );
     }
@@ -210,21 +255,26 @@ export async function POST(req: Request) {
                     getAttributeValue("given_name") + " " + getAttributeValue("family_name") ||
                     userEmail.split("@")[0];
 
-    console.log(`✅ Authentication successful for ${userEmail} in org ${orgId}`);
+    console.log(`✅ Authentication successful for ${userEmail} in org ${successfulOrgId}`);
 
-    // Return tokens and user info matching your old system format
+    // Return tokens and user info in standardized format
     return NextResponse.json({
-      success: true,
-      message: "Authentication successful",
-      access_token: authResponse.AuthenticationResult.AccessToken,
-      id_token: authResponse.AuthenticationResult.IdToken,
-      refresh_token: authResponse.AuthenticationResult.RefreshToken,
+      status: "SUCCESS",
+      accessToken: authResponse.AuthenticationResult.AccessToken,
+      idToken: authResponse.AuthenticationResult.IdToken,
+      refreshToken: authResponse.AuthenticationResult.RefreshToken,
+      orgId: successfulOrgId,
       user: {
         email: userEmail,
         name: userName,
         username: userDetails.Username,
       },
-      organizationId: orgId,
+      // Keep legacy fields for backward compatibility
+      success: true,
+      access_token: authResponse.AuthenticationResult.AccessToken,
+      id_token: authResponse.AuthenticationResult.IdToken,
+      refresh_token: authResponse.AuthenticationResult.RefreshToken,
+      organizationId: successfulOrgId,
     });
 
   } catch (cognitoError: any) {
@@ -244,9 +294,11 @@ export async function POST(req: Request) {
     
     return NextResponse.json(
       { 
-        success: false, 
+        status: "ERROR",
         message: userMessage,
-        detail: cognitoError.message
+        detail: cognitoError.message,
+        // Keep legacy field for backward compatibility
+        success: false
       },
       { status: 400 }
     );

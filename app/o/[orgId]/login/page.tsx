@@ -90,21 +90,29 @@ export default function OrgAwareLoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orgId,
-          email: email.trim(),
+          username: email.trim(),
           password,
         })
       })
 
       const result = await response.json()
 
-      if (result.success && result.tokens) {
+      // Handle both new standardized format and legacy format
+      const isSuccess = (result.status === "SUCCESS") || (result.success && result.tokens) || (result.success && result.accessToken);
+      const tokens = result.tokens || {
+        accessToken: result.accessToken || result.access_token,
+        idToken: result.idToken || result.id_token,
+        refreshToken: result.refreshToken || result.refresh_token
+      };
+
+      if (isSuccess) {
         // Store tokens in secure cookies by calling a cookie-setting endpoint
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             orgId,
-            tokens: result.tokens,
+            tokens,
             user: result.user
           })
         })
@@ -115,15 +123,16 @@ export default function OrgAwareLoginPage() {
         } else {
           setAuthError("Session setup failed. Please try again.")
         }
-      } else if (result.success && result.challenge) {
+      } else if ((result.status === "CHALLENGE") || (result.success && result.challenge)) {
         // Handle authentication challenges
         setSession(result.session)
         
-        if (result.challengeName === "NEW_PASSWORD_REQUIRED") {
+        const challengeName = result.challenge || result.ChallengeName;
+        if (challengeName === "NEW_PASSWORD_REQUIRED") {
           setShowPasswordChange(true)
-        } else if (result.challengeName === "SOFTWARE_TOKEN_MFA") {
+        } else if (challengeName === "SOFTWARE_TOKEN_MFA") {
           setShowMFA(true)
-        } else if (result.challengeName === "MFA_SETUP") {
+        } else if (challengeName === "MFA_SETUP") {
           // Try to set up MFA
           try {
             const mfaResponse = await fetch('/api/auth/setup-mfa', {
@@ -142,7 +151,7 @@ export default function OrgAwareLoginPage() {
             setAuthError("MFA setup failed. Please contact your administrator.")
           }
         } else {
-          setAuthError(`Challenge required: ${result.challengeName}`)
+          setAuthError(`Challenge required: ${challengeName}`)
         }
       } else {
         setAuthError(result.message || "Authentication failed")
