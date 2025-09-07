@@ -49,8 +49,6 @@ interface CognitoConfig {
   userPoolId: string
   clientId: string
   clientSecret: string
-  domain: string
-  redirectUri: string
   region: string
   accessKey: string
   secretKey: string
@@ -92,8 +90,6 @@ export default function SetupOrganizationPage() {
     userPoolId: "",
     clientId: "",
     clientSecret: "",
-    domain: "",
-    redirectUri: "https://console-encryptgate.net/api/auth/callback",
     region: "us-east-1",
     accessKey: "",
     secretKey: ""
@@ -127,8 +123,8 @@ export default function SetupOrganizationPage() {
   }, [router])
 
   const validateCognitoConfig = async () => {
-    if (!cognitoConfig.userPoolId || !cognitoConfig.clientId || !cognitoConfig.domain || !cognitoConfig.redirectUri || !cognitoConfig.accessKey || !cognitoConfig.secretKey) {
-      setError("All AWS credentials, domain, and redirect URI are required")
+    if (!cognitoConfig.userPoolId || !cognitoConfig.clientId || !cognitoConfig.accessKey || !cognitoConfig.secretKey) {
+      setError("All AWS credentials are required")
       return false
     }
 
@@ -528,31 +524,6 @@ function AWSConfigStep({
         </div>
       </div>
 
-      <div>
-        <Label className="text-white">Cognito Domain</Label>
-        <Input
-          value={config.domain}
-          onChange={(e) => setConfig({ ...config, domain: e.target.value })}
-          placeholder="your-domain-name.auth.us-east-1.amazoncognito.com"
-          className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          Find this in your AWS Cognito User Pool → App Integration → Domain
-        </p>
-      </div>
-      
-      <div>
-        <Label className="text-white">Redirect URI</Label>
-        <Input
-          value={config.redirectUri}
-          onChange={(e) => setConfig({ ...config, redirectUri: e.target.value })}
-          placeholder="https://console-encryptgate.net/api/auth/callback"
-          className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          The URL where users will be redirected after authentication. This must be configured in your Cognito App Client.
-        </p>
-      </div>
       
       <div>
         <Label className="text-white">Client Secret (Optional)</Label>
