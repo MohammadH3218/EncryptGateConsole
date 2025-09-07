@@ -94,12 +94,18 @@ export default function LoginPage() {
     if (base) fetchServerTime(base)
   }, [])
 
-  // Check if user is already logged in
+  // Check if user is already logged in and handle org-aware redirects
   useEffect(() => {
     const token = localStorage.getItem("access_token")
+    const orgId = localStorage.getItem("organization_id")
+    
     if (token) {
-      // User is already logged in, redirect to dashboard
-      router.push("/admin/dashboard")
+      // User is already logged in, redirect to appropriate dashboard
+      if (orgId) {
+        router.push(`/o/${orgId}/admin/dashboard`)
+      } else {
+        router.push("/admin/dashboard")
+      }
     }
   }, [router])
 
@@ -326,7 +332,13 @@ export default function LoginPage() {
       // Don't fail login if auto-registration fails
     }
     
-    router.push("/admin/dashboard")
+    // Redirect to org-aware dashboard if org context exists
+    const orgId = localStorage.getItem('organization_id')
+    if (orgId) {
+      router.push(`/o/${orgId}/admin/dashboard`)
+    } else {
+      router.push("/admin/dashboard")
+    }
   }
 
   // ------------------------------
@@ -484,7 +496,13 @@ export default function LoginPage() {
           localStorage.removeItem("temp_access_token")
           localStorage.removeItem("temp_id_token")
           localStorage.removeItem("temp_refresh_token")
-          router.push("/admin/dashboard")
+          // Redirect to org-aware dashboard
+          const orgId = localStorage.getItem('organization_id')
+          if (orgId) {
+            router.push(`/o/${orgId}/admin/dashboard`)
+          } else {
+            router.push("/admin/dashboard")
+          }
           return
         }
         throw new Error(d.detail || `MFA setup failed (${resp.status})`)
@@ -499,7 +517,13 @@ export default function LoginPage() {
       localStorage.removeItem("temp_access_token")
       localStorage.removeItem("temp_id_token")
       localStorage.removeItem("temp_refresh_token")
-      router.push("/admin/dashboard")
+      // Redirect to org-aware dashboard
+      const orgId = localStorage.getItem('organization_id')
+      if (orgId) {
+        router.push(`/o/${orgId}/admin/dashboard`)
+      } else {
+        router.push("/admin/dashboard")
+      }
     } catch (e: any) {
       setError(e.message || "MFA setup failed")
     } finally {
