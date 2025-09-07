@@ -84,15 +84,9 @@ const nextConfig = {
     ];
   },
 
-  // 6) Your existing redirects
+  // 6) No redirects needed for landing page
   async redirects() {
-    return [
-      {
-        source: '/',
-        destination: '/login',
-        permanent: false,
-      },
-    ];
+    return [];
   },
 };
 
