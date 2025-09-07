@@ -195,23 +195,30 @@ export default function OrgAwareLoginPage() {
           orgId,
           username: email,
           session,
-          challengeName: "NEW_PASSWORD_REQUIRED",
-          challengeResponses: {
-            NEW_PASSWORD: newPassword,
-          }
+          newPassword: newPassword,
         })
       })
 
       const result = await response.json()
 
-      if (result.success && result.tokens) {
+      // Handle both new standardized format and legacy format
+      const isSuccess = (result.status === "SUCCESS") || (result.success && result.tokens) || (result.success && result.accessToken);
+      const isChallenge = (result.status === "CHALLENGE") || (result.success && result.challenge);
+      
+      const tokens = result.tokens || {
+        accessToken: result.accessToken || result.access_token,
+        idToken: result.idToken || result.id_token,
+        refreshToken: result.refreshToken || result.refresh_token
+      };
+
+      if (isSuccess && (tokens.accessToken || tokens.idToken)) {
         // Password changed successfully, store tokens
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             orgId,
-            tokens: result.tokens,
+            tokens,
             user: { email, name: email.split('@')[0] } // Basic user info
           })
         })
@@ -222,11 +229,35 @@ export default function OrgAwareLoginPage() {
         } else {
           setAuthError("Session setup failed. Please try again.")
         }
-      } else if (result.success && result.challenge) {
+      } else if (isChallenge) {
         // Another challenge required (like MFA)
+        const challengeName = result.challenge || result.ChallengeName;
         setSession(result.session)
         setShowPasswordChange(false)
-        setAuthError(`Additional challenge required: ${result.challengeName}`)
+        
+        if (challengeName === "SOFTWARE_TOKEN_MFA") {
+          setShowMFA(true)
+        } else if (challengeName === "MFA_SETUP") {
+          // Handle MFA setup challenge
+          try {
+            const mfaResponse = await fetch('/api/auth/setup-mfa', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ access_token: tokens.accessToken })
+            })
+            const mfaResult = await mfaResponse.json()
+            if (mfaResult.success && mfaResult.secretCode) {
+              setMfaSecretCode(mfaResult.secretCode)
+              setShowMFASetup(true)
+            } else {
+              setAuthError("MFA setup failed. Please contact your administrator.")
+            }
+          } catch {
+            setAuthError("MFA setup failed. Please contact your administrator.")
+          }
+        } else {
+          setAuthError(`Additional challenge required: ${challengeName || "unknown"}`)
+        }
       } else {
         setAuthError(result.message || "Password change failed")
       }
@@ -306,21 +337,27 @@ export default function OrgAwareLoginPage() {
     setAuthError("")
     
     try {
-      const response = await fetch('/api/auth/verify-mfa', {
+      const response = await fetch('/api/auth/respond-to-challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orgId,
           username: email,
           session,
-          code: mfaCode
+          mfaCode: mfaCode
         })
       })
       
       const result = await response.json()
       
-      if (result.success && result.access_token) {
-        await finalizeLogin(result.access_token, result.id_token || "", result.refresh_token || "")
+      // Handle both new standardized format and legacy format
+      const isSuccess = (result.status === "SUCCESS") || (result.success && result.access_token) || (result.success && result.accessToken);
+      const accessToken = result.accessToken || result.access_token;
+      const idToken = result.idToken || result.id_token;
+      const refreshToken = result.refreshToken || result.refresh_token;
+
+      if (isSuccess && accessToken) {
+        await finalizeLogin(accessToken, idToken || "", refreshToken || "")
       } else {
         setAuthError(result.message || "MFA verification failed")
       }
