@@ -6,10 +6,12 @@ import {
   DynamoDBClient,
   GetItemCommand,
   DeleteItemCommand,
+  UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import {
   CognitoIdentityProviderClient,
   AdminRemoveUserFromGroupCommand,
+  AdminAddUserToGroupCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 
 // Environment variables
@@ -51,6 +53,126 @@ async function getCognitoConfig() {
   
   console.log(`✅ Found Cognito config: UserPoolId=${config.userPoolId}, Region=${config.region}`);
   return config;
+}
+
+// PATCH - update user role
+export async function PATCH(
+  req: Request,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const email = decodeURIComponent(params.id);
+    const { role: newRole } = await req.json();
+    
+    if (!newRole) {
+      return NextResponse.json(
+        { error: "Role is required" },
+        { status: 400 }
+      );
+    }
+    
+    console.log(`🔄 Updating user role: ${email} -> ${newRole}`);
+    
+    // Get current user info
+    const userResp = await ddb.send(new GetItemCommand({
+      TableName: USERS_TABLE,
+      Key: {
+        orgId: { S: ORG_ID },
+        email: { S: email },
+      },
+    }));
+
+    if (!userResp.Item) {
+      console.warn(`⚠️ User not found: ${email}`);
+      return NextResponse.json(
+        { error: "User not found" },
+        { status: 404 }
+      );
+    }
+
+    const currentRole = userResp.Item.role?.S;
+    console.log(`👤 Current role: ${currentRole}, New role: ${newRole}`);
+    
+    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
+
+    // Create Cognito client
+    const cognito = new CognitoIdentityProviderClient({
+      region: cognitoRegion,
+    });
+
+    // Remove user from current role group in Cognito
+    if (currentRole && currentRole !== newRole) {
+      try {
+        await cognito.send(new AdminRemoveUserFromGroupCommand({
+          UserPoolId: userPoolId,
+          Username: email,
+          GroupName: currentRole,
+        }));
+        console.log(`👥 Removed user from Cognito group: ${currentRole}`);
+      } catch (cognitoError: any) {
+        console.warn(`⚠️ Could not remove user from Cognito group: ${cognitoError.message}`);
+        // Continue even if group removal fails
+      }
+    }
+
+    // Add user to new role group in Cognito
+    try {
+      await cognito.send(new AdminAddUserToGroupCommand({
+        UserPoolId: userPoolId,
+        Username: email,
+        GroupName: newRole,
+      }));
+      console.log(`👥 Added user to Cognito group: ${newRole}`);
+    } catch (cognitoError: any) {
+      console.warn(`⚠️ Could not add user to Cognito group: ${cognitoError.message}`);
+      // Continue even if group addition fails
+    }
+
+    // Update role in our SecurityTeamUsers table
+    await ddb.send(new UpdateItemCommand({
+      TableName: USERS_TABLE,
+      Key: {
+        orgId: { S: ORG_ID },
+        email: { S: email },
+      },
+      UpdateExpression: "SET #role = :role, updatedAt = :updatedAt",
+      ExpressionAttributeNames: {
+        "#role": "role"
+      },
+      ExpressionAttributeValues: {
+        ":role": { S: newRole },
+        ":updatedAt": { S: new Date().toISOString() }
+      },
+    }));
+
+    console.log(`✅ User role updated successfully: ${email} -> ${newRole}`);
+    return NextResponse.json({ success: true, role: newRole });
+  } catch (err: any) {
+    console.error("❌ [users:PATCH]", err);
+    
+    let statusCode = 500;
+    let errorMessage = "Failed to update user role";
+    
+    if (err.name === "ResourceNotFoundException") {
+      statusCode = 404;
+      errorMessage = "User not found";
+    } else if (err.message.includes("No AWS Cognito configuration found")) {
+      statusCode = 404;
+      errorMessage = "AWS Cognito not configured";
+    } else if (err.name === "NotAuthorizedException") {
+      statusCode = 403;
+      errorMessage = "Not authorized to access Cognito";
+    }
+    
+    return NextResponse.json(
+      { 
+        error: errorMessage, 
+        message: err.message,
+        code: err.code || err.name
+      },
+      { status: statusCode }
+    );
+  }
 }
 
 // DELETE - remove a user from security team

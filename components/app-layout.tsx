@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useRole, PermissionGate } from "@/contexts/RoleContext"
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -48,6 +49,7 @@ const getUserInfoFromToken = () => {
 }
 
 export function AppLayout({ children, username, notificationsCount = 0 }: AppLayoutProps) {
+  const { hasPermission, user, organizationName } = useRole()
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
   const [userInfo, setUserInfo] = useState({ email: "", name: "" })
@@ -111,27 +113,38 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
     }
   }, [])
 
-  const mainNavItems = [
-    { icon: Shield, label: "Dashboard", href: "/admin/dashboard" },
-    { icon: Mail, label: "All Emails", href: "/admin/all-emails" },
-    { icon: AlertTriangle, label: "Detections", href: "/admin/detections" },
-    { icon: FileText, label: "Allow/Block List", href: "/admin/allow-block-list" },
-    { icon: UserCheck, label: "Assignments", href: "/admin/assignments" },
-    { icon: FileText, label: "Pushed Requests", href: "/admin/pushed-requests" },
-    { icon: Users, label: "Manage Employees", href: "/admin/manage-employees" },
+  const allMainNavItems = [
+    { icon: Shield, label: "Dashboard", href: "/admin/dashboard", permissions: ["view_dashboard"] },
+    { icon: Mail, label: "All Emails", href: "/admin/all-emails", permissions: ["view_all_emails"] },
+    { icon: AlertTriangle, label: "Detections", href: "/admin/detections", permissions: ["view_detections"] },
+    { icon: FileText, label: "Allow/Block List", href: "/admin/allow-block-list", permissions: ["manage_detections"] },
+    { icon: UserCheck, label: "Assignments", href: "/admin/assignments", permissions: ["view_investigations"] },
+    { icon: FileText, label: "Pushed Requests", href: "/admin/pushed-requests", permissions: ["manage_detections"] },
+    { icon: Users, label: "Manage Employees", href: "/admin/manage-employees", permissions: ["view_users"] },
   ]
 
-  const companySettingsItems = [
-    { icon: Lock, label: "Cloud Services", href: "/admin/company-settings/cloud-services" },
-    { icon: User, label: "User Management", href: "/admin/company-settings/user-management" },
-    { icon: Shield, label: "Roles & Permissions", href: "/admin/company-settings/roles" },
+  const allCompanySettingsItems = [
+    { icon: Lock, label: "Cloud Services", href: "/admin/company-settings/cloud-services", permissions: ["manage_cloud_services"] },
+    { icon: User, label: "User Management", href: "/admin/company-settings/user-management", permissions: ["view_users"] },
+    { icon: Shield, label: "Roles & Permissions", href: "/admin/company-settings/roles", permissions: ["view_roles"] },
   ]
 
-  const userSettingsItems = [
-    { icon: User, label: "Profile", href: "/admin/user-settings/profile" },
-    { icon: Bell, label: "Notifications", href: "/admin/user-settings/notifications" },
-    { icon: Lock, label: "Security", href: "/admin/user-settings/security" },
+  const allUserSettingsItems = [
+    { icon: User, label: "Profile", href: "/admin/user-settings/profile", permissions: [] }, // Always accessible
+    { icon: Bell, label: "Notifications", href: "/admin/user-settings/notifications", permissions: [] }, // Always accessible
+    { icon: Lock, label: "Security", href: "/admin/user-settings/security", permissions: [] }, // Always accessible
   ]
+
+  // Filter navigation items based on user permissions
+  const mainNavItems = allMainNavItems.filter(item => 
+    item.permissions.length === 0 || item.permissions.some(permission => hasPermission(permission))
+  )
+
+  const companySettingsItems = allCompanySettingsItems.filter(item => 
+    item.permissions.length === 0 || item.permissions.some(permission => hasPermission(permission))
+  )
+
+  const userSettingsItems = allUserSettingsItems // User settings always accessible
 
   const handleNavigation = (href: string) => {
     router.push(href)
@@ -269,13 +282,18 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
           </Button>
 
           {/* Logo */}
-          <div className="p-6">
-            <div className="flex items-center gap-2">
+          <div className="p-6 border-b border-[#1f1f1f]">
+            <div className="flex items-center gap-2 mb-2">
               <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center">
                 <Shield className="w-5 h-5 text-black" />
               </div>
               <span className="text-white font-semibold text-lg">EncryptGate</span>
             </div>
+            {organizationName && (
+              <div className="text-gray-400 text-sm truncate">
+                {organizationName}
+              </div>
+            )}
           </div>
 
           {/* Navigation */}

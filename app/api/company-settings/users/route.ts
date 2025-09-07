@@ -125,11 +125,31 @@ export async function POST(req: Request) {
   let role: string | undefined;
   try {
     ({ name, email, role } = await req.json());
-    if (!name || !email || !role) {
+    if (!name || !email) {
       return NextResponse.json(
-        { error: "Missing fields", required: ["name","email","role"] },
+        { error: "Missing fields", required: ["name","email"] },
         { status: 400 }
       );
+    }
+
+    // Check if this is the first user in the organization
+    const existingUsersResp = await ddb.send(
+      new QueryCommand({
+        TableName: USERS_TABLE,
+        KeyConditionExpression: "orgId = :orgId",
+        ExpressionAttributeValues: {
+          ":orgId": { S: ORG_ID },
+        },
+        Select: "COUNT"
+      })
+    );
+
+    const isFirstUser = (existingUsersResp.Count || 0) === 0;
+    
+    // Set default role: Owner for first user, Viewer for others
+    if (!role) {
+      role = isFirstUser ? "Owner" : "Viewer";
+      console.log(`🔧 Setting ${isFirstUser ? 'Owner (first user)' : 'Viewer (default)'} role for ${email}`);
     }
 
     console.log(`👤 Adding user to security team: ${email} with role ${role}`);
