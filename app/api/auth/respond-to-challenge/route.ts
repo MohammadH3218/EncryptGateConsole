@@ -24,12 +24,19 @@ const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
 
 export async function POST(req: Request) {
   try {
-    let { username, email, session, challengeName, challengeResponses, orgId } = await req.json();
+    let { username, email, session, challengeName, challengeResponses, orgId, newPassword, mfaCode } = await req.json();
     if (!username && email) username = email;
     
-    if (!username || !session || !challengeName || !challengeResponses) {
+    if (!username || !session) {
       return NextResponse.json(
-        { status: "ERROR", message: "Missing required challenge response data" },
+        { status: "ERROR", message: "Missing username or session" },
+        { status: 400 }
+      );
+    }
+
+    if (!newPassword && !mfaCode && !challengeResponses) {
+      return NextResponse.json(
+        { status: "ERROR", message: "Must provide newPassword, mfaCode, or challengeResponses" },
         { status: 400 }
       );
     }
@@ -121,13 +128,31 @@ export async function POST(req: Request) {
       });
 
       try {
-        console.log(`🎯 Handling challenge: ${challengeName} for org ${orgId}`);
+        console.log(`🎯 Handling challenge for org ${orgId}`);
         
-        // Prepare challenge responses - MUST include USERNAME
+        // Determine challenge name and prepare responses based on provided data
+        let determinedChallengeName: string;
         const responses: Record<string, string> = {
-          USERNAME: username,
-          ...challengeResponses
+          USERNAME: username
         };
+
+        if (newPassword) {
+          determinedChallengeName = "NEW_PASSWORD_REQUIRED";
+          responses.NEW_PASSWORD = newPassword;
+          console.log(`🔑 Handling NEW_PASSWORD_REQUIRED challenge`);
+        } else if (mfaCode) {
+          determinedChallengeName = "SOFTWARE_TOKEN_MFA";
+          responses.SOFTWARE_TOKEN_MFA_CODE = mfaCode;
+          console.log(`🔐 Handling SOFTWARE_TOKEN_MFA challenge`);
+        } else if (challengeResponses && challengeName) {
+          // Fallback to legacy format for backward compatibility
+          determinedChallengeName = challengeName;
+          Object.assign(responses, challengeResponses);
+          console.log(`🔄 Handling legacy challenge format: ${challengeName}`);
+        } else {
+          console.error(`❌ Unable to determine challenge type`);
+          continue;
+        }
         
         // Add SECRET_HASH if client secret is present
         const hash = secretHash(username, clientId, clientSecret);
@@ -136,11 +161,11 @@ export async function POST(req: Request) {
           console.log(`🔐 Including SECRET_HASH for challenge response`);
         }
         
-        console.log(`🔧 Challenge responses prepared for ${challengeName}:`, Object.keys(responses));
+        console.log(`🔧 Challenge responses prepared for ${determinedChallengeName}:`, Object.keys(responses));
         
         const challengeCommand = new RespondToAuthChallengeCommand({
           ClientId: clientId,
-          ChallengeName: challengeName as any,
+          ChallengeName: determinedChallengeName as any,
           Session: session,
           ChallengeResponses: responses,
         });
