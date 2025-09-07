@@ -18,6 +18,8 @@ export function middleware(request: NextRequest) {
     path === '/' ||
     path === '/logout' ||
     path === '/setup' ||
+    path === '/setup-organization' ||
+    path.startsWith('/auth/') ||
     path.startsWith('/_next/') ||
     path === '/favicon.ico'
   
