@@ -92,7 +92,6 @@ export default function RolesPage() {
     fetchRoles()
     fetchUsers()
     fetchInvitations()
-    
     // If userId is provided, find the user and open the edit dialog
     if (userId) {
       const user = users.find((u) => u.id === userId)
@@ -101,7 +100,7 @@ export default function RolesPage() {
         setIsEditUserRoleDialogOpen(true)
       }
     }
-  }, [userId])
+  }, [userId, users])
 
   const fetchRoles = async () => {
     try {
@@ -266,7 +265,7 @@ export default function RolesPage() {
       const response = await fetch(`/api/company-settings/users/${selectedUser.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: selectedUser.role })
+        body: JSON.stringify({ roleIds: selectedUser.roles.map(r => r.id) })
       })
 
       if (!response.ok) {
@@ -279,7 +278,7 @@ export default function RolesPage() {
         if (user.id === selectedUser.id) {
           return {
             ...user,
-            role: selectedUser.role,
+            roles: selectedUser.roles,
           }
         }
         return user
@@ -399,7 +398,11 @@ export default function RolesPage() {
                       setNewRole({
                         name: "",
                         description: "",
+                        color: "#95a5a6",
                         permissions: [],
+                        priority: 400,
+                        mentionable: true,
+                        hoisted: false,
                       })
                     }}
                   >
@@ -595,7 +598,7 @@ export default function RolesPage() {
                                 variant="secondary" 
                                 className="bg-[#1f1f1f] text-gray-300"
                               >
-                                {user.role || 'No Role'}
+                                {user.roles?.map(r => r.name).join(', ') || 'No Role'}
                               </Badge>
                             </TableCell>
                             <TableCell className="text-right">
@@ -674,9 +677,10 @@ export default function RolesPage() {
                   </Label>
                   <div className="col-span-3 space-y-2">
                     <Select
-                      value={selectedUser.role}
+                      value={selectedUser.roles?.[0]?.id ?? ""}
                       onValueChange={(value) => {
-                        setSelectedUser({ ...selectedUser, role: value })
+                        const selectedRoleObj = roles.find(r => r.id === value)
+                        setSelectedUser({ ...selectedUser, roles: selectedRoleObj ? [selectedRoleObj] : [] })
                         setValidationError("")
                       }}
                     >
@@ -691,7 +695,7 @@ export default function RolesPage() {
                         {roles.map((role) => (
                           <SelectItem 
                             key={role.id} 
-                            value={role.name}
+                            value={role.id}
                             className="text-white hover:bg-[#2f2f2f] focus:bg-[#2f2f2f]"
                           >
                             <div>
@@ -732,7 +736,7 @@ export default function RolesPage() {
             </Button>
             <Button 
               onClick={handleUpdateUserRole} 
-              disabled={isSubmitting || !selectedUser?.role}
+              disabled={isSubmitting || !selectedUser?.roles?.length}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {isSubmitting ? "Updating..." : "Update Role"}

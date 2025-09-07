@@ -37,32 +37,63 @@ export async function POST(req: Request) {
     console.log(`🏢 Creating organization: ${organization.name}`);
     console.log(`👤 Setting up admin user: ${adminUser}`);
 
-    // Check for duplicate organizations with same Cognito user pool
-    console.log(`🔍 Checking for existing organizations with same Cognito user pool...`);
+    // Check for duplicate organizations with same Cognito configuration
+    console.log(`🔍 Checking for existing organizations with same Cognito configuration...`);
     try {
-      const scanCommand = new ScanCommand({
+      // Check Organizations table for same userPoolId + region combination
+      const scanOrgsCommand = new ScanCommand({
         TableName: ORGS_TABLE,
-        FilterExpression: "userPoolId = :userPoolId",
+        FilterExpression: "userPoolId = :userPoolId AND #region = :region",
+        ExpressionAttributeNames: {
+          "#region": "region"
+        },
         ExpressionAttributeValues: {
-          ":userPoolId": { S: cognito.userPoolId }
+          ":userPoolId": { S: cognito.userPoolId },
+          ":region": { S: cognito.region }
         }
       });
       
-      const existingOrgs = await ddb.send(scanCommand);
+      const existingOrgs = await ddb.send(scanOrgsCommand);
       
       if (existingOrgs.Items && existingOrgs.Items.length > 0) {
         const existingOrgName = existingOrgs.Items[0].name?.S || "Unknown";
-        console.log(`❌ Found existing organization: ${existingOrgName}`);
+        console.log(`❌ Found existing organization with same Cognito config: ${existingOrgName}`);
         return NextResponse.json({
           success: false,
-          message: `An organization "${existingOrgName}" is already using this Cognito user pool. Each user pool can only be connected to one organization.`,
-          error: "DuplicateUserPoolError"
+          message: `An organization "${existingOrgName}" is already using this Cognito user pool (${cognito.userPoolId}) in region ${cognito.region}. Each Cognito configuration can only be connected to one organization.`,
+          error: "DuplicateCognitoConfigError"
+        }, { status: 409 });
+      }
+
+      // Also check CloudServices table for same cognito configuration
+      const scanCSCommand = new ScanCommand({
+        TableName: CS_TABLE,
+        FilterExpression: "serviceType = :serviceType AND userPoolId = :userPoolId AND #region = :region",
+        ExpressionAttributeNames: {
+          "#region": "region"
+        },
+        ExpressionAttributeValues: {
+          ":serviceType": { S: "aws-cognito" },
+          ":userPoolId": { S: cognito.userPoolId },
+          ":region": { S: cognito.region }
+        }
+      });
+      
+      const existingCS = await ddb.send(scanCSCommand);
+      
+      if (existingCS.Items && existingCS.Items.length > 0) {
+        const existingServiceName = existingCS.Items[0].name?.S || "Unknown Cognito Service";
+        console.log(`❌ Found existing Cognito service: ${existingServiceName}`);
+        return NextResponse.json({
+          success: false,
+          message: `This Cognito user pool (${cognito.userPoolId}) is already connected to another organization. Each Cognito configuration can only be used once.`,
+          error: "DuplicateCognitoServiceError"
         }, { status: 409 });
       }
       
-      console.log(`✅ No duplicate organizations found`);
+      console.log(`✅ No duplicate Cognito configurations found`);
     } catch (error: any) {
-      console.warn(`⚠️ Warning checking for duplicates:`, error.message);
+      console.warn(`⚠️ Warning checking for duplicate configurations:`, error.message);
       // Don't fail the process for this check, just warn
     }
     
