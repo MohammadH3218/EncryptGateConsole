@@ -63,11 +63,11 @@ interface CognitoUser {
   attributes: Record<string, string>
 }
 
-type SetupStep = 'org-info' | 'aws-config' | 'cognito-users' | 'complete'
+type SetupStep = 'aws-config' | 'cognito-users' | 'complete'
 
 export default function SetupOrganizationPage() {
   const router = useRouter()
-  const [currentStep, setCurrentStep] = useState<SetupStep>('org-info')
+  const [currentStep, setCurrentStep] = useState<SetupStep>('aws-config')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [checkingAuth, setCheckingAuth] = useState(true)
@@ -110,7 +110,12 @@ export default function SetupOrganizationPage() {
             localStorage.removeItem("pending_org_creation")
           } catch (e) {
             console.error("Error parsing pending org data:", e)
+            // Redirect back to landing if no valid data
+            router.push("/")
           }
+        } else {
+          // No pending data, redirect to landing page
+          router.push("/")
         }
       }
     }, 300)
@@ -158,14 +163,6 @@ export default function SetupOrganizationPage() {
 
     try {
       switch (currentStep) {
-        case 'org-info':
-          if (!orgData.name.trim() || !orgData.adminName.trim() || !orgData.adminEmail.trim()) {
-            setError("All organization details are required")
-            return
-          }
-          setCurrentStep('aws-config')
-          break
-
         case 'aws-config':
           const isValid = await validateCognitoConfig()
           if (isValid) {
@@ -241,16 +238,15 @@ export default function SetupOrganizationPage() {
       <div className="w-full max-w-2xl relative z-10">
         {/* Progress indicator */}
         <div className="mb-8 flex items-center justify-center space-x-4">
-          {(['org-info', 'aws-config', 'cognito-users', 'complete'] as SetupStep[]).map((step, index) => {
+          {(['aws-config', 'cognito-users', 'complete'] as SetupStep[]).map((step, index) => {
             const stepNames = {
-              'org-info': 'Organization',
               'aws-config': 'AWS Setup',
               'cognito-users': 'Admin User',
               'complete': 'Complete'
             }
             
             const isActive = step === currentStep
-            const isCompleted = ['org-info', 'aws-config', 'cognito-users', 'complete'].indexOf(currentStep) > index
+            const isCompleted = ['aws-config', 'cognito-users', 'complete'].indexOf(currentStep) > index
             
             return (
               <div key={step} className="flex items-center">
@@ -268,7 +264,7 @@ export default function SetupOrganizationPage() {
                 }`}>
                   {stepNames[step]}
                 </span>
-                {index < 3 && <ArrowRight className="w-4 h-4 text-gray-600 mx-4" />}
+                {index < 2 && <ArrowRight className="w-4 h-4 text-gray-600 mx-4" />}
               </div>
             )
           })}
@@ -283,14 +279,13 @@ export default function SetupOrganizationPage() {
               <div>
                 <CardTitle className="text-2xl text-white">Setup Your Organization</CardTitle>
                 <CardDescription className="text-gray-400">
-                  Step {['org-info', 'aws-config', 'cognito-users', 'complete'].indexOf(currentStep) + 1} of 4
+                  Step {['aws-config', 'cognito-users', 'complete'].indexOf(currentStep) + 1} of 3
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
 
           <CardContent className="space-y-6">
-            {currentStep === 'org-info' && <OrganizationInfoStep orgData={orgData} setOrgData={setOrgData} />}
             {currentStep === 'aws-config' && (
               <AWSConfigStep 
                 config={cognitoConfig} 
