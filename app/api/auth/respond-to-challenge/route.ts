@@ -14,7 +14,8 @@ import {
 } from "@aws-sdk/client-dynamodb";
 
 // Helper function to compute SECRET_HASH when clientSecret is present
-function secretHash(username: string, clientId: string, clientSecret: string): string {
+function secretHash(username: string, clientId: string, clientSecret?: string): string | undefined {
+  if (!clientSecret) return undefined;
   return crypto.createHmac("sha256", clientSecret).update(username + clientId).digest("base64");
 }
 
@@ -23,29 +24,72 @@ const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
 
 export async function POST(req: Request) {
   try {
-    const { username, session, challengeName, challengeResponses } = await req.json();
+    let { username, email, session, challengeName, challengeResponses, orgId } = await req.json();
+    if (!username && email) username = email;
     
     if (!username || !session || !challengeName || !challengeResponses) {
       return NextResponse.json(
-        { success: false, message: "Missing required challenge response data" },
+        { status: "ERROR", message: "Missing required challenge response data" },
         { status: 400 }
       );
     }
 
     console.log(`🔄 Responding to auth challenge: ${challengeName} for user: ${username}`);
 
-    // Scan all organizations to find Cognito configurations
-    const allCognitoConfigs = await ddb.send(new ScanCommand({
-      TableName: CS_TABLE,
-      FilterExpression: "serviceType = :serviceType",
-      ExpressionAttributeValues: {
-        ":serviceType": { S: "aws-cognito" }
+    let allCognitoConfigs;
+    
+    if (orgId) {
+      // Optimize: Query specific org's Cognito config first
+      console.log(`🎯 Looking up Cognito config for org: ${orgId}`);
+      try {
+        const orgCognitoConfig = await ddb.send(new ScanCommand({
+          TableName: CS_TABLE,
+          FilterExpression: "orgId = :orgId AND serviceType = :serviceType",
+          ExpressionAttributeValues: {
+            ":orgId": { S: orgId },
+            ":serviceType": { S: "aws-cognito" }
+          }
+        }));
+        
+        if (orgCognitoConfig.Items && orgCognitoConfig.Items.length > 0) {
+          allCognitoConfigs = orgCognitoConfig;
+          console.log(`✅ Found Cognito config for org ${orgId}`);
+        } else {
+          console.log(`❌ No Cognito config found for org ${orgId}, falling back to scan all`);
+          // Fallback to scanning all configurations
+          allCognitoConfigs = await ddb.send(new ScanCommand({
+            TableName: CS_TABLE,
+            FilterExpression: "serviceType = :serviceType",
+            ExpressionAttributeValues: {
+              ":serviceType": { S: "aws-cognito" }
+            }
+          }));
+        }
+      } catch (queryError) {
+        console.log(`❌ Query failed for org ${orgId}, falling back to scan all:`, queryError);
+        // Fallback to scanning all configurations
+        allCognitoConfigs = await ddb.send(new ScanCommand({
+          TableName: CS_TABLE,
+          FilterExpression: "serviceType = :serviceType",
+          ExpressionAttributeValues: {
+            ":serviceType": { S: "aws-cognito" }
+          }
+        }));
       }
-    }));
+    } else {
+      // Scan all organizations to find Cognito configurations
+      allCognitoConfigs = await ddb.send(new ScanCommand({
+        TableName: CS_TABLE,
+        FilterExpression: "serviceType = :serviceType",
+        ExpressionAttributeValues: {
+          ":serviceType": { S: "aws-cognito" }
+        }
+      }));
+    }
 
     if (!allCognitoConfigs.Items || allCognitoConfigs.Items.length === 0) {
       return NextResponse.json(
-        { success: false, message: "No Cognito configurations found" },
+        { status: "ERROR", message: "No Cognito configurations found" },
         { status: 400 }
       );
     }
@@ -79,14 +123,20 @@ export async function POST(req: Request) {
       try {
         console.log(`🎯 Handling challenge: ${challengeName} for org ${orgId}`);
         
-        // Prepare challenge responses
-        const responses: Record<string, string> = { ...challengeResponses };
+        // Prepare challenge responses - MUST include USERNAME
+        const responses: Record<string, string> = {
+          USERNAME: username,
+          ...challengeResponses
+        };
         
         // Add SECRET_HASH if client secret is present
-        if (clientSecret) {
-          responses.SECRET_HASH = secretHash(username, clientId, clientSecret);
+        const hash = secretHash(username, clientId, clientSecret);
+        if (hash) {
+          responses.SECRET_HASH = hash;
           console.log(`🔐 Including SECRET_HASH for challenge response`);
         }
+        
+        console.log(`🔧 Challenge responses prepared for ${challengeName}:`, Object.keys(responses));
         
         const challengeCommand = new RespondToAuthChallengeCommand({
           ClientId: clientId,
@@ -102,11 +152,14 @@ export async function POST(req: Request) {
           // Another challenge is required
           console.log(`🔄 Next challenge required: ${challengeResponse.ChallengeName}`);
           return NextResponse.json({
+            status: "CHALLENGE",
+            challenge: challengeResponse.ChallengeName,
+            session: challengeResponse.Session,
+            orgId: orgId,
+            secretCode: challengeResponse.ChallengeParameters?.SECRET_CODE,
+            // Keep legacy format for backward compatibility
             success: true,
             ChallengeName: challengeResponse.ChallengeName,
-            session: challengeResponse.Session,
-            message: `Next challenge: ${challengeResponse.ChallengeName}`,
-            secretCode: challengeResponse.ChallengeParameters?.SECRET_CODE,
           });
         }
 
@@ -115,8 +168,18 @@ export async function POST(req: Request) {
           console.log(`✅ Challenge ${challengeName} completed successfully for org ${orgId}`);
           
           return NextResponse.json({
+            status: "SUCCESS",
+            accessToken: challengeResponse.AuthenticationResult.AccessToken,
+            idToken: challengeResponse.AuthenticationResult.IdToken,
+            refreshToken: challengeResponse.AuthenticationResult.RefreshToken,
+            orgId: orgId,
+            // Keep legacy fields for backward compatibility
             success: true,
-            message: "Challenge completed successfully",
+            tokens: {
+              accessToken: challengeResponse.AuthenticationResult.AccessToken,
+              idToken: challengeResponse.AuthenticationResult.IdToken,
+              refreshToken: challengeResponse.AuthenticationResult.RefreshToken,
+            },
             access_token: challengeResponse.AuthenticationResult.AccessToken,
             id_token: challengeResponse.AuthenticationResult.IdToken,
             refresh_token: challengeResponse.AuthenticationResult.RefreshToken,
@@ -155,9 +218,11 @@ export async function POST(req: Request) {
       
       return NextResponse.json(
         { 
-          success: false, 
+          status: "ERROR",
           message: userMessage, 
-          detail: lastError.message
+          detail: lastError.message,
+          // Keep legacy field for backward compatibility
+          success: false
         },
         { status: 400 }
       );
@@ -165,7 +230,7 @@ export async function POST(req: Request) {
     
     // Should not reach here
     return NextResponse.json(
-      { success: false, message: "No Cognito configurations available" },
+      { status: "ERROR", message: "No Cognito configurations available", success: false },
       { status: 500 }
     );
 
@@ -174,9 +239,11 @@ export async function POST(req: Request) {
     
     return NextResponse.json(
       {
-        success: false,
+        status: "ERROR",
         message: error.message || "Internal server error during challenge response",
         error: error.name || "ChallengeResponseError",
+        // Keep legacy field for backward compatibility
+        success: false,
       },
       { status: 500 }
     );
