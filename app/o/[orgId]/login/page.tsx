@@ -386,9 +386,11 @@ export default function OrgAwareLoginPage() {
     setAuthError("")
     
     try {
-      const response = await fetch('/api/auth/confirm-mfa-setup', {
+      const response = await fetchWithRetry(`${apiBaseUrl}/api/auth/confirm-mfa-setup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        mode: 'cors',
         body: JSON.stringify({
           orgId,
           username: email,
