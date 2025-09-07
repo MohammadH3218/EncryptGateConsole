@@ -23,6 +23,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Loader2, ArrowRight, Lock, AlertTriangle, Eye, EyeOff, X, Mail, CheckCircle, Copy, Check } from "lucide-react"
+import { fetchWithRetry } from "@/utils/auth"
 
 export default function OrgAwareLoginPage() {
   const router = useRouter()
@@ -36,6 +37,7 @@ export default function OrgAwareLoginPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [orgName, setOrgName] = useState<string>("")
   const [email, setEmail] = useState("")
+  const [apiBaseUrl, setApiBaseUrl] = useState<string | null>(null)
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [authError, setAuthError] = useState("")
@@ -71,6 +73,12 @@ export default function OrgAwareLoginPage() {
     if (storedOrgName) {
       setOrgName(storedOrgName)
     }
+    
+    // Initialize API base URL
+    const configured = process.env.NEXT_PUBLIC_API_URL
+    const fallback = "https://api.console-encryptgate.net"
+    const base = configured || fallback
+    setApiBaseUrl(base)
   }, [])
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -84,10 +92,18 @@ export default function OrgAwareLoginPage() {
       return
     }
 
+    if (!apiBaseUrl) {
+      setAuthError("API configuration not available")
+      setIsLoading(false)
+      return
+    }
+
     try {
-      const response = await fetch('/api/auth/authenticate', {
+      const response = await fetchWithRetry(`${apiBaseUrl}/api/auth/authenticate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        mode: 'cors',
         body: JSON.stringify({
           orgId,
           username: email.trim(),
@@ -97,15 +113,17 @@ export default function OrgAwareLoginPage() {
 
       const result = await response.json()
 
-      // Handle both new standardized format and legacy format
-      const isSuccess = (result.status === "SUCCESS") || (result.success && result.tokens) || (result.success && result.accessToken);
-      const tokens = result.tokens || {
-        accessToken: result.accessToken || result.access_token,
-        idToken: result.idToken || result.id_token,
-        refreshToken: result.refreshToken || result.refresh_token
-      };
+      // Handle Flask API response format
+      const hasTokens = result.access_token && result.id_token;
+      const hasChallenge = result.ChallengeName;
 
-      if (isSuccess) {
+      if (hasTokens) {
+        // Successful authentication - convert to expected format
+        const tokens = {
+          accessToken: result.access_token,
+          idToken: result.id_token,
+          refreshToken: result.refresh_token
+        };
         // Store tokens in secure cookies by calling a cookie-setting endpoint
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
@@ -123,38 +141,26 @@ export default function OrgAwareLoginPage() {
         } else {
           setAuthError("Session setup failed. Please try again.")
         }
-      } else if ((result.status === "CHALLENGE") || (result.success && result.challenge)) {
+      } else if (hasChallenge) {
         // Handle authentication challenges
         setSession(result.session)
         
-        const challengeName = result.challenge || result.ChallengeName;
+        const challengeName = result.ChallengeName;
         if (challengeName === "NEW_PASSWORD_REQUIRED") {
           setShowPasswordChange(true)
         } else if (challengeName === "SOFTWARE_TOKEN_MFA") {
+          // User already has MFA configured - just show MFA input dialog
           setShowMFA(true)
         } else if (challengeName === "MFA_SETUP") {
-          // Try to set up MFA
-          try {
-            const mfaResponse = await fetch('/api/auth/setup-mfa', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ access_token: result.tokens?.accessToken })
-            })
-            const mfaResult = await mfaResponse.json()
-            if (mfaResult.success && mfaResult.secretCode) {
-              setMfaSecretCode(mfaResult.secretCode)
-              setShowMFASetup(true)
-            } else {
-              setAuthError("MFA setup failed. Please contact your administrator.")
-            }
-          } catch {
-            setAuthError("MFA setup failed. Please contact your administrator.")
-          }
+          // This should be rare - only for truly new MFA setup
+          // For now, just show MFA input since most users will already have TOTP
+          console.log("MFA_SETUP challenge received - showing MFA input dialog");
+          setShowMFA(true)
         } else {
-          setAuthError(`Challenge required: ${challengeName}`)
+          setAuthError(`Challenge required: ${challengeName || "unknown"}`)
         }
       } else {
-        setAuthError(result.message || "Authentication failed")
+        setAuthError(result.detail || result.message || "Authentication failed")
       }
     } catch (err: any) {
       console.error('Authentication failed:', err)
@@ -188,30 +194,34 @@ export default function OrgAwareLoginPage() {
     }
 
     try {
-      const response = await fetch('/api/auth/respond-to-challenge', {
+      const response = await fetchWithRetry(`${apiBaseUrl}/api/auth/respond-to-challenge`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        mode: 'cors',
         body: JSON.stringify({
           orgId,
           username: email,
           session,
-          newPassword: newPassword,
+          challengeName: "NEW_PASSWORD_REQUIRED",
+          challengeResponses: {
+            NEW_PASSWORD: newPassword,
+          }
         })
       })
 
       const result = await response.json()
 
-      // Handle both new standardized format and legacy format
-      const isSuccess = (result.status === "SUCCESS") || (result.success && result.tokens) || (result.success && result.accessToken);
-      const isChallenge = (result.status === "CHALLENGE") || (result.success && result.challenge);
+      // Handle Flask API response format
+      const hasTokens = result.access_token && result.id_token;
+      const hasChallenge = result.ChallengeName;
       
-      const tokens = result.tokens || {
-        accessToken: result.accessToken || result.access_token,
-        idToken: result.idToken || result.id_token,
-        refreshToken: result.refreshToken || result.refresh_token
-      };
-
-      if (isSuccess && (tokens.accessToken || tokens.idToken)) {
+      if (hasTokens) {
+        const tokens = {
+          accessToken: result.access_token,
+          idToken: result.id_token,
+          refreshToken: result.refresh_token
+        };
         // Password changed successfully, store tokens
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
@@ -229,37 +239,24 @@ export default function OrgAwareLoginPage() {
         } else {
           setAuthError("Session setup failed. Please try again.")
         }
-      } else if (isChallenge) {
+      } else if (hasChallenge) {
         // Another challenge required (like MFA)
-        const challengeName = result.challenge || result.ChallengeName;
+        const challengeName = result.ChallengeName;
         setSession(result.session)
         setShowPasswordChange(false)
         
         if (challengeName === "SOFTWARE_TOKEN_MFA") {
+          // User already has MFA configured - just show MFA input dialog
           setShowMFA(true)
         } else if (challengeName === "MFA_SETUP") {
-          // Handle MFA setup challenge
-          try {
-            const mfaResponse = await fetch('/api/auth/setup-mfa', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ access_token: tokens.accessToken })
-            })
-            const mfaResult = await mfaResponse.json()
-            if (mfaResult.success && mfaResult.secretCode) {
-              setMfaSecretCode(mfaResult.secretCode)
-              setShowMFASetup(true)
-            } else {
-              setAuthError("MFA setup failed. Please contact your administrator.")
-            }
-          } catch {
-            setAuthError("MFA setup failed. Please contact your administrator.")
-          }
+          // This should be rare - for now, just show MFA input dialog
+          console.log("MFA_SETUP challenge received after password change - showing MFA input dialog");
+          setShowMFA(true)
         } else {
           setAuthError(`Additional challenge required: ${challengeName || "unknown"}`)
         }
       } else {
-        setAuthError(result.message || "Password change failed")
+        setAuthError(result.detail || result.message || "Password change failed")
       }
     } catch (err: any) {
       console.error('Password change failed:', err)
@@ -337,29 +334,31 @@ export default function OrgAwareLoginPage() {
     setAuthError("")
     
     try {
-      const response = await fetch('/api/auth/respond-to-challenge', {
+      const response = await fetchWithRetry(`${apiBaseUrl}/api/auth/respond-to-challenge`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        credentials: 'include',
+        mode: 'cors',
         body: JSON.stringify({
           orgId,
           username: email,
           session,
-          mfaCode: mfaCode
+          challengeName: "SOFTWARE_TOKEN_MFA",
+          challengeResponses: {
+            SOFTWARE_TOKEN_MFA_CODE: mfaCode,
+          }
         })
       })
       
       const result = await response.json()
       
-      // Handle both new standardized format and legacy format
-      const isSuccess = (result.status === "SUCCESS") || (result.success && result.access_token) || (result.success && result.accessToken);
-      const accessToken = result.accessToken || result.access_token;
-      const idToken = result.idToken || result.id_token;
-      const refreshToken = result.refreshToken || result.refresh_token;
+      // Handle Flask API response format
+      const hasTokens = result.access_token && result.id_token;
 
-      if (isSuccess && accessToken) {
-        await finalizeLogin(accessToken, idToken || "", refreshToken || "")
+      if (hasTokens) {
+        await finalizeLogin(result.access_token, result.id_token || "", result.refresh_token || "")
       } else {
-        setAuthError(result.message || "MFA verification failed")
+        setAuthError(result.detail || result.message || "MFA verification failed")
       }
     } catch (err: any) {
       setAuthError(err.message || "MFA verification failed")
