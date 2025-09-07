@@ -20,16 +20,24 @@ export default function LandingPage() {
   const [checkingAuth, setCheckingAuth] = useState(true)
 
   useEffect(() => {
-    // Check if user is already authenticated
+    // Check if user is already authenticated with valid tokens
     const timeout = setTimeout(() => {
-      if (checkAuth()) {
-        const userType = localStorage.getItem("userType")
+      const accessToken = localStorage.getItem("access_token")
+      const userType = localStorage.getItem("userType")
+      
+      // Only redirect if we have both access token AND user type
+      // This ensures the user has completed full login process
+      if (accessToken && userType) {
         if (userType === "admin") {
           router.push("/admin/dashboard")
         } else if (userType === "employee") {
           router.push("/employee/dashboard")
+        } else {
+          // Invalid user type, show landing page
+          setCheckingAuth(false)
         }
       } else {
+        // No valid authentication, show landing page
         setCheckingAuth(false)
       }
     }, 300)
