@@ -7,6 +7,7 @@ import {
   DynamoDBClient,
   PutItemCommand,
   GetItemCommand,
+  ScanCommand,
 } from "@aws-sdk/client-dynamodb";
 import {
   CognitoIdentityProviderClient,
@@ -35,6 +36,35 @@ export async function POST(req: Request) {
 
     console.log(`🏢 Creating organization: ${organization.name}`);
     console.log(`👤 Setting up admin user: ${adminUser}`);
+
+    // Check for duplicate organizations with same Cognito user pool
+    console.log(`🔍 Checking for existing organizations with same Cognito user pool...`);
+    try {
+      const scanCommand = new ScanCommand({
+        TableName: ORGS_TABLE,
+        FilterExpression: "userPoolId = :userPoolId",
+        ExpressionAttributeValues: {
+          ":userPoolId": { S: cognito.userPoolId }
+        }
+      });
+      
+      const existingOrgs = await ddb.send(scanCommand);
+      
+      if (existingOrgs.Items && existingOrgs.Items.length > 0) {
+        const existingOrgName = existingOrgs.Items[0].name?.S || "Unknown";
+        console.log(`❌ Found existing organization: ${existingOrgName}`);
+        return NextResponse.json({
+          success: false,
+          message: `An organization "${existingOrgName}" is already using this Cognito user pool. Each user pool can only be connected to one organization.`,
+          error: "DuplicateUserPoolError"
+        }, { status: 409 });
+      }
+      
+      console.log(`✅ No duplicate organizations found`);
+    } catch (error: any) {
+      console.warn(`⚠️ Warning checking for duplicates:`, error.message);
+      // Don't fail the process for this check, just warn
+    }
     
     // Generate unique organization ID
     const organizationId = `org_${uuidv4().replace(/-/g, '').substring(0, 16)}`;
