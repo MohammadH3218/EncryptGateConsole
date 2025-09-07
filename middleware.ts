@@ -2,31 +2,60 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
-const PUBLIC_PATHS = new Set([
-  '/', '/login', '/setup-organization', '/api/auth/login', '/api/auth/logout',
-  '/api/auth/callback', '/api/setup/create-organization',
+const PUBLIC = new Set([
+  '/', '/setup-organization',
+  '/login',                 // optional legacy
 ])
 
+// Treat only these API namespaces as public:
+const PUBLIC_API_PREFIXES = [
+  '/api/auth/',             // login/callback/logout/mfa/etc.
+  '/api/setup/',            // org creation & validation
+  '/_next/', '/favicon.ico',
+]
+
 function isPublic(path: string) {
-  if (path.startsWith('/api/')) return true
-  if (path.startsWith('/_next/')) return true
-  if (path === '/favicon.ico') return true
-  if (PUBLIC_PATHS.has(path)) return true
+  if (PUBLIC.has(path)) return true
+  if (PUBLIC_API_PREFIXES.some(p => path.startsWith(p))) return true
   return false
 }
 
 export function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl
-
+  const { pathname, search } = req.nextUrl
   if (isPublic(pathname)) return NextResponse.next()
 
-  // Require auth for everything else (e.g., /admin/**)
-  const access = req.cookies.get('access_token')?.value
-  if (!access) {
-    const loginUrl = new URL('/login', req.url)
-    loginUrl.searchParams.set('next', pathname)
-    return NextResponse.redirect(loginUrl)
+  // Convenience: rewrite /admin/* to /o/{org}/admin/* if cookie present
+  const orgCookie = req.cookies.get('org_id')?.value
+  if (pathname.startsWith('/admin/') && orgCookie) {
+    const url = req.nextUrl.clone()
+    url.pathname = `/o/${orgCookie}${pathname}`
+    return NextResponse.rewrite(url)
   }
+
+  // Enforce auth + org for /o/{org}/...
+  if (pathname.startsWith('/o/')) {
+    const segs = pathname.split('/')
+    const pathOrg = segs[2] || ''
+    const access = req.cookies.get('access_token')?.value
+    const cookieOrg = orgCookie
+
+    if (!access) {
+      const login = req.nextUrl.clone()
+      login.pathname = `/o/${pathOrg}/login`
+      login.searchParams.set('next', pathname + (search || ''))
+      return NextResponse.redirect(login)
+    }
+    if (!cookieOrg || cookieOrg !== pathOrg) {
+      // force the browser to pick up the right org
+      const login = req.nextUrl.clone()
+      login.pathname = `/o/${pathOrg}/login`
+      login.searchParams.set('next', pathname + (search || ''))
+      return NextResponse.redirect(login)
+    }
+    return NextResponse.next()
+  }
+
+  // Block anything else by default
   return NextResponse.next()
 }
 

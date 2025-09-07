@@ -63,6 +63,12 @@ interface CognitoUser {
   attributes: Record<string, string>
 }
 
+interface DuplicateInfo {
+  name?: string
+  id: string
+  loginUrl: string
+}
+
 type SetupStep = 'aws-config' | 'cognito-users' | 'complete'
 
 export default function SetupOrganizationPage() {
@@ -93,34 +99,27 @@ export default function SetupOrganizationPage() {
   const [cognitoUsers, setCognitoUsers] = useState<CognitoUser[]>([])
   const [selectedAdminUser, setSelectedAdminUser] = useState<string>("")
   const [validationStatus, setValidationStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle')
+  const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null)
 
   useEffect(() => {
-    // Check if user is already authenticated
-    const timeout = setTimeout(() => {
-      if (checkAuth()) {
-        router.push("/admin/dashboard")
-      } else {
-        setCheckingAuth(false)
-        // Check if we have pending org data from landing page
-        const pendingOrg = localStorage.getItem("pending_org_creation")
-        if (pendingOrg) {
-          try {
-            const data = JSON.parse(pendingOrg)
-            setOrgData(data)
-            localStorage.removeItem("pending_org_creation")
-          } catch (e) {
-            console.error("Error parsing pending org data:", e)
-            // Redirect back to landing if no valid data
-            router.push("/")
-          }
-        } else {
-          // No pending data, redirect to landing page
-          router.push("/")
-        }
+    // do not auto-redirect to dashboard here
+    setCheckingAuth(false)
+    // Check if we have pending org data from landing page
+    const pendingOrg = localStorage.getItem("pending_org_creation")
+    if (pendingOrg) {
+      try {
+        const data = JSON.parse(pendingOrg)
+        setOrgData(data)
+        localStorage.removeItem("pending_org_creation")
+      } catch (e) {
+        console.error("Error parsing pending org data:", e)
+        // Redirect back to landing if no valid data
+        router.push("/")
       }
-    }, 300)
-
-    return () => clearTimeout(timeout)
+    } else {
+      // No pending data, redirect to landing page
+      router.push("/")
+    }
   }, [router])
 
   const validateCognitoConfig = async () => {
@@ -131,6 +130,7 @@ export default function SetupOrganizationPage() {
 
     setValidationStatus('validating')
     setError("")
+    setDuplicateInfo(null)
 
     try {
       const response = await fetch('/api/setup/validate-cognito', {
@@ -147,7 +147,14 @@ export default function SetupOrganizationPage() {
         return true
       } else {
         setValidationStatus('invalid')
-        setError(result.message || 'Invalid AWS configuration')
+        
+        // Check if it's a duplicate configuration error
+        if (response.status === 409 && result.existingOrganization) {
+          setDuplicateInfo(result.existingOrganization)
+          setError(result.message || 'Configuration already in use')
+        } else {
+          setError(result.message || 'Invalid AWS configuration')
+        }
         return false
       }
     } catch (err: any) {
@@ -205,6 +212,10 @@ export default function SetupOrganizationPage() {
         localStorage.setItem('organization_id', result.organizationId)
         localStorage.setItem('organization_name', orgData.name)
       } else {
+        // Check if it's a duplicate configuration error
+        if (response.status === 409 && result.existingOrganization) {
+          setDuplicateInfo(result.existingOrganization)
+        }
         setError(result.message || 'Failed to create organization')
       }
     } catch (err: any) {
@@ -213,7 +224,12 @@ export default function SetupOrganizationPage() {
   }
 
   const handleBackToLogin = () => {
-    router.push('/login')
+    const orgId = localStorage.getItem('organization_id')
+    if (orgId) {
+      router.push(`/o/${orgId}/login`)
+    } else {
+      router.push('/login')
+    }
   }
 
   if (checkingAuth) {
@@ -304,7 +320,31 @@ export default function SetupOrganizationPage() {
             )}
             {currentStep === 'complete' && <CompleteStep orgData={orgData} />}
 
-            {error && (
+            {error && duplicateInfo && (
+              <Alert className="bg-yellow-500/10 border-yellow-500/20">
+                <AlertTriangle className="h-4 w-4" />
+                <div className="ml-2">
+                  <div className="font-medium text-yellow-200 mb-2">Configuration Already In Use</div>
+                  <div className="text-sm text-yellow-300 mb-3">{error}</div>
+                  <div className="flex flex-col gap-2">
+                    <Button 
+                      variant="outline"
+                      size="sm"
+                      onClick={() => router.push(duplicateInfo.loginUrl)}
+                      className="bg-yellow-600 hover:bg-yellow-700 border-yellow-500 text-white"
+                    >
+                      Go to Login Page
+                      <ArrowRight className="ml-2 h-3 w-3" />
+                    </Button>
+                    <p className="text-xs text-yellow-400">
+                      If you're the owner of{duplicateInfo.name ? ` "${duplicateInfo.name}"` : ' this organization'}, use the login button above. 
+                      Otherwise, contact support or use a different Cognito configuration.
+                    </p>
+                  </div>
+                </div>
+              </Alert>
+            )}
+            {error && !duplicateInfo && (
               <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription className="text-red-200">{error}</AlertDescription>
