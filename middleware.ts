@@ -36,6 +36,12 @@ export function middleware(req: NextRequest) {
   if (pathname.startsWith('/o/')) {
     const segs = pathname.split('/')
     const pathOrg = segs[2] || ''
+    
+    // Allow login pages without authentication
+    if (pathname === `/o/${pathOrg}/login`) {
+      return NextResponse.next()
+    }
+    
     const access = req.cookies.get('access_token')?.value
     const cookieOrg = orgCookie
 
