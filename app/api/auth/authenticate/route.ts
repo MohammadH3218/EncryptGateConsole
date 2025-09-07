@@ -164,12 +164,16 @@ export async function POST(req: Request) {
       // Step 2: Handle different auth states
       if (authResponse.ChallengeName) {
         // Handle MFA or other challenges
+        console.log(`🎯 Challenge required: ${authResponse.ChallengeName}`);
         return NextResponse.json({
-          success: false,
-          challenge: authResponse.ChallengeName,
-          message: `Authentication challenge required: ${authResponse.ChallengeName}`,
+          success: true, // Changed to true since challenge is expected
+          challenge: true,
+          challengeName: authResponse.ChallengeName,
           session: authResponse.Session,
-        }, { status: 200 });
+          message: `Authentication challenge required: ${authResponse.ChallengeName}`,
+          // Include challenge parameters if they exist
+          challengeParameters: authResponse.ChallengeParameters,
+        });
       }
 
       if (!authResponse.AuthenticationResult?.AccessToken) {

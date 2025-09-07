@@ -3,194 +3,177 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from "next/server";
 import {
+  CognitoIdentityProviderClient,
+  GetUserCommand,
+} from "@aws-sdk/client-cognito-identity-provider";
+import {
   DynamoDBClient,
-  QueryCommand,
   PutItemCommand,
+  ScanCommand,
   GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
-import {
-  CognitoIdentityProviderClient,
-  AdminAddUserToGroupCommand,
-  AdminGetUserCommand,
-} from "@aws-sdk/client-cognito-identity-provider";
 
-// Environment variables
-const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
-                 process.env.CLOUDSERVICES_TABLE || 
-                 "CloudServices";
-const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
-
-// DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
+const ORGS_TABLE = process.env.ORGANIZATIONS_TABLE_NAME || "Organizations";
+const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
 
-async function getCognitoConfig(orgId: string) {
-  try {
-    const resp = await ddb.send(
-      new GetItemCommand({
-        TableName: CS_TABLE,
-        Key: {
-          orgId:       { S: orgId },
-          serviceType: { S: "aws-cognito" },
-        },
-      })
-    );
-    
-    if (!resp.Item) {
-      throw new Error("No AWS Cognito configuration found. Please connect AWS Cognito first.");
-    }
-    
-    return {
-      userPoolId: resp.Item.userPoolId?.S!,
-      region:     resp.Item.region?.S!,
-    };
-  } catch (err) {
-    console.error("❌ Error fetching Cognito config:", err);
-    throw err;
-  }
-}
-
-// POST - Auto-register user during authentication
 export async function POST(req: Request) {
   try {
     const { email, tokens, organizationId, organizationName } = await req.json();
     
-    if (!email) {
+    if (!email || !tokens?.access || !organizationId) {
       return NextResponse.json(
-        { error: "Email is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!organizationId) {
-      return NextResponse.json(
-        { error: "Organization ID is required" },
+        { success: false, message: "Email, tokens, and organization ID are required" },
         { status: 400 }
       );
     }
 
     console.log(`🔄 Auto-registering user: ${email} for org: ${organizationId}`);
 
-    // Check if user already exists in security team
-    const existingUserResp = await ddb.send(
-      new GetItemCommand({
+    // Get organization's Cognito configuration to determine region
+    const cognitoConfig = await ddb.send(new GetItemCommand({
+      TableName: CS_TABLE,
+      Key: { orgId: { S: organizationId }, serviceType: { S: "aws-cognito" } }
+    }));
+
+    const region = cognitoConfig.Item?.region?.S || process.env.AWS_REGION || 'us-east-1';
+
+    // Create Cognito client
+    const cognitoClient = new CognitoIdentityProviderClient({
+      region: region,
+    });
+
+    try {
+      // Get user details from Cognito
+      console.log(`👤 Getting user details from Cognito`);
+      const getUserCommand = new GetUserCommand({
+        AccessToken: tokens.access,
+      });
+      
+      const userDetails = await cognitoClient.send(getUserCommand);
+      
+      const getAttributeValue = (attributeName: string) => {
+        const attr = userDetails.UserAttributes?.find(a => a.Name === attributeName);
+        return attr?.Value || "";
+      };
+
+      const userEmail = getAttributeValue("email") || email;
+      const userName = getAttributeValue("name") || 
+                      getAttributeValue("preferred_username") || 
+                      getAttributeValue("given_name") + " " + getAttributeValue("family_name") ||
+                      userEmail.split("@")[0];
+
+      // Check if this is the first user in the organization
+      console.log(`🔍 Checking if user is first in organization`);
+      const scanUsersCommand = new ScanCommand({
+        TableName: USERS_TABLE,
+        FilterExpression: "orgId = :orgId",
+        ExpressionAttributeValues: {
+          ":orgId": { S: organizationId }
+        }
+      });
+      
+      const existingUsers = await ddb.send(scanUsersCommand);
+      const isFirstUser = !existingUsers.Items || existingUsers.Items.length === 0;
+      
+      // Determine role
+      let role = "Security Analyst"; // Default role
+      if (isFirstUser) {
+        role = "Owner";
+        console.log(`👑 First user detected, assigning Owner role`);
+      }
+
+      // Check if user already exists
+      const getUserItemCommand = new GetItemCommand({
         TableName: USERS_TABLE,
         Key: {
           orgId: { S: organizationId },
-          email: { S: email },
-        },
-      })
-    );
+          email: { S: userEmail }
+        }
+      });
+      
+      const existingUser = await ddb.send(getUserItemCommand);
+      
+      if (existingUser.Item) {
+        // User exists, just update last login
+        await ddb.send(new PutItemCommand({
+          TableName: USERS_TABLE,
+          Item: {
+            orgId: { S: organizationId },
+            email: { S: userEmail },
+            name: { S: userName },
+            role: existingUser.Item.role, // Keep existing role
+            status: { S: "active" },
+            lastLogin: { S: new Date().toISOString() },
+            ...(existingUser.Item.addedAt && { addedAt: existingUser.Item.addedAt }),
+            ...(existingUser.Item.isFounder && { isFounder: existingUser.Item.isFounder }),
+          },
+        }));
+        
+        console.log(`✅ Updated existing user: ${userEmail} with role: ${existingUser.Item.role.S}`);
+        
+        return NextResponse.json({
+          success: true,
+          message: "User login updated successfully",
+          role: existingUser.Item.role.S,
+          isFirstUser: false,
+          organizationId,
+          organizationName,
+        });
+      }
 
-    if (existingUserResp.Item) {
-      console.log(`✅ User ${email} already exists in security team`);
-      return NextResponse.json({ 
-        message: "User already registered", 
-        role: existingUserResp.Item.role?.S || "Viewer",
+      // Add new user
+      await ddb.send(new PutItemCommand({
+        TableName: USERS_TABLE,
+        Item: {
+          orgId: { S: organizationId },
+          email: { S: userEmail },
+          name: { S: userName },
+          role: { S: role },
+          status: { S: "active" },
+          addedAt: { S: new Date().toISOString() },
+          lastLogin: { S: new Date().toISOString() },
+          ...(isFirstUser && { isFounder: { BOOL: true } }),
+        },
+      }));
+      
+      console.log(`✅ Auto-registered new user: ${userEmail} with role: ${role}`);
+
+      return NextResponse.json({
+        success: true,
+        message: "User registered successfully",
+        role,
+        isFirstUser,
         organizationId,
-        organizationName
+        organizationName,
+      });
+
+    } catch (cognitoError: any) {
+      console.error(`❌ Cognito error during auto-registration:`, cognitoError);
+      
+      // Don't fail the login process for auto-registration errors
+      return NextResponse.json({
+        success: true,
+        message: "Login successful, but user registration had issues",
+        role: "Security Analyst",
+        isFirstUser: false,
+        organizationId,
+        organizationName,
+        warning: "Auto-registration partially failed",
       });
     }
 
-    // Check if this is the first user in the organization
-    const existingUsersResp = await ddb.send(
-      new QueryCommand({
-        TableName: USERS_TABLE,
-        KeyConditionExpression: "orgId = :orgId",
-        ExpressionAttributeValues: {
-          ":orgId": { S: organizationId },
-        },
-        Select: "COUNT"
-      })
-    );
-
-    const isFirstUser = (existingUsersResp.Count || 0) === 0;
-    const role = isFirstUser ? "Owner" : "Viewer";
+  } catch (error: any) {
+    console.error("❌ Auto-registration error:", error);
     
-    console.log(`🔧 Setting ${isFirstUser ? 'Owner (first user)' : 'Viewer (default)'} role for ${email}`);
-
-    const { userPoolId, region: cognitoRegion } = await getCognitoConfig(organizationId);
-    
-    // Create Cognito client
-    const cognito = new CognitoIdentityProviderClient({
-      region: cognitoRegion,
-    });
-
-    // Get user info from Cognito
-    let actualName = email.split("@")[0]; // Default fallback
-    try {
-      const userResp = await cognito.send(new AdminGetUserCommand({
-        UserPoolId: userPoolId,
-        Username: email,
-      }));
-      
-      // Extract name from user attributes
-      const attributes = userResp.UserAttributes || [];
-      const getAttributeValue = (attrName: string) => {
-        const attr = attributes.find(a => a.Name === attrName);
-        return attr?.Value || "";
-      };
-      
-      // Prioritize preferred_username, then other name attributes
-      actualName = getAttributeValue("preferred_username") || 
-                   getAttributeValue("name") || 
-                   getAttributeValue("given_name") + " " + getAttributeValue("family_name") ||
-                   actualName;
-      
-      console.log(`✅ User ${email} found in Cognito with display name: ${actualName}`);
-    } catch (cognitoError: any) {
-      console.warn(`⚠️ Could not get user info from Cognito: ${cognitoError.message}`);
-    }
-
-    // Add user to role group in Cognito
-    try {
-      await cognito.send(new AdminAddUserToGroupCommand({
-        UserPoolId: userPoolId,
-        Username: email,
-        GroupName: role,
-      }));
-      console.log(`👥 Added user to Cognito group: ${role}`);
-    } catch (cognitoError: any) {
-      console.warn(`⚠️ Could not add user to Cognito group: ${cognitoError.message}`);
-      // Continue even if group assignment fails
-    }
-
-    // Add user to our SecurityTeamUsers table
-    await ddb.send(new PutItemCommand({
-      TableName: USERS_TABLE,
-      Item: {
-        orgId:     { S: organizationId },
-        email:     { S: email },
-        name:      { S: actualName },
-        role:      { S: role },
-        status:    { S: "active" },
-        addedAt:   { S: new Date().toISOString() },
-        lastLogin: { S: new Date().toISOString() },
-        autoRegistered: { BOOL: true }, // Mark as auto-registered
-      },
-    }));
-
-    console.log(`✅ User auto-registered successfully: ${email} as ${role}`);
+    // Don't fail the login for auto-registration errors
     return NextResponse.json({
-      id:        email,
-      name:      actualName,
-      email,
-      role,
-      status:    "active",
-      lastLogin: new Date().toISOString(),
-      isFirstUser,
-      organizationId,
-      organizationName
+      success: true,
+      message: "Login successful, but auto-registration failed",
+      role: "Security Analyst",
+      isFirstUser: false,
+      warning: "Auto-registration failed",
     });
-  } catch (err: any) {
-    console.error("❌ [auto-register:POST]", err);
-    
-    return NextResponse.json(
-      { 
-        error: "Auto-registration failed", 
-        message: err.message,
-        code: err.code || err.name
-      },
-      { status: 500 }
-    );
   }
 }
