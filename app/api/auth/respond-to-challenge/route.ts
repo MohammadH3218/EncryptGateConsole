@@ -10,6 +10,7 @@ import {
 import {
   DynamoDBClient,
   GetItemCommand,
+  ScanCommand,
 } from "@aws-sdk/client-dynamodb";
 
 // Helper function to compute SECRET_HASH when clientSecret is present
@@ -22,9 +23,9 @@ const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
 
 export async function POST(req: Request) {
   try {
-    const { orgId, username, session, challengeName, challengeResponses } = await req.json();
+    const { username, session, challengeName, challengeResponses } = await req.json();
     
-    if (!orgId || !username || !session || !challengeName || !challengeResponses) {
+    if (!username || !session || !challengeName || !challengeResponses) {
       return NextResponse.json(
         { success: false, message: "Missing required challenge response data" },
         { status: 400 }
@@ -33,132 +34,140 @@ export async function POST(req: Request) {
 
     console.log(`🔄 Responding to auth challenge: ${challengeName} for user: ${username}`);
 
-    // Get organization's Cognito configuration
-    const cognitoConfig = await ddb.send(new GetItemCommand({
+    // Scan all organizations to find Cognito configurations
+    const allCognitoConfigs = await ddb.send(new ScanCommand({
       TableName: CS_TABLE,
-      Key: { orgId: { S: orgId }, serviceType: { S: "aws-cognito" } }
+      FilterExpression: "serviceType = :serviceType",
+      ExpressionAttributeValues: {
+        ":serviceType": { S: "aws-cognito" }
+      }
     }));
 
-    if (!cognitoConfig.Item) {
+    if (!allCognitoConfigs.Items || allCognitoConfigs.Items.length === 0) {
       return NextResponse.json(
-        { success: false, message: "Cognito not configured for this organization" },
+        { success: false, message: "No Cognito configurations found" },
         { status: 400 }
       );
     }
 
-    const userPoolId = cognitoConfig.Item.userPoolId?.S;
-    const clientId = cognitoConfig.Item.clientId?.S;
-    const clientSecret = cognitoConfig.Item.clientSecret?.S;
-    const region = cognitoConfig.Item.region?.S;
+    console.log(`🔍 Found ${allCognitoConfigs.Items.length} Cognito configurations to try`);
+    
+    let successfulResponse = null;
+    let lastError = null;
+    
+    // Try challenge response against each Cognito configuration
+    for (const configItem of allCognitoConfigs.Items) {
 
-    if (!userPoolId || !clientId || !region) {
-      return NextResponse.json(
-        { success: false, message: "Incomplete Cognito configuration" },
-        { status: 400 }
-      );
-    }
+      const orgId = configItem.orgId?.S;
+      const userPoolId = configItem.userPoolId?.S;
+      const clientId = configItem.clientId?.S;
+      const clientSecret = configItem.clientSecret?.S;
+      const region = configItem.region?.S;
 
-    // Create Cognito client
-    const cognitoClient = new CognitoIdentityProviderClient({
-      region: region,
-    });
-
-    try {
-      console.log(`🎯 Handling challenge: ${challengeName}`);
-      
-      // Prepare challenge responses
-      const responses: Record<string, string> = { ...challengeResponses };
-      
-      // Add SECRET_HASH if client secret is present
-      if (clientSecret) {
-        responses.SECRET_HASH = secretHash(username, clientId, clientSecret);
-        console.log(`🔐 Including SECRET_HASH for challenge response`);
+      if (!userPoolId || !clientId || !region || !orgId) {
+        console.log(`⚠️ Skipping incomplete config for org ${orgId}`);
+        continue;
       }
-      
-      const challengeCommand = new RespondToAuthChallengeCommand({
-        ClientId: clientId,
-        ChallengeName: challengeName as any,
-        Session: session,
-        ChallengeResponses: responses,
+
+      console.log(`🔧 Trying org ${orgId} for challenge response`);
+
+      // Create Cognito client for this organization
+      const cognitoClient = new CognitoIdentityProviderClient({
+        region: region,
       });
 
-      const challengeResponse = await cognitoClient.send(challengeCommand);
-
-      // Handle different response types
-      if (challengeResponse.ChallengeName) {
-        // Another challenge is required
-        console.log(`🔄 Next challenge required: ${challengeResponse.ChallengeName}`);
-        return NextResponse.json({
-          success: true,
-          challenge: challengeResponse.ChallengeName,
-          session: challengeResponse.Session,
-          message: `Next challenge: ${challengeResponse.ChallengeName}`,
-        });
-      }
-
-      if (challengeResponse.AuthenticationResult?.AccessToken) {
-        // Challenge completed successfully
-        console.log(`✅ Challenge ${challengeName} completed successfully`);
+      try {
+        console.log(`🎯 Handling challenge: ${challengeName} for org ${orgId}`);
         
-        return NextResponse.json({
-          success: true,
-          message: "Challenge completed successfully",
-          tokens: {
-            accessToken: challengeResponse.AuthenticationResult.AccessToken,
-            idToken: challengeResponse.AuthenticationResult.IdToken,
-            refreshToken: challengeResponse.AuthenticationResult.RefreshToken,
-            expiresIn: challengeResponse.AuthenticationResult.ExpiresIn,
-          },
+        // Prepare challenge responses
+        const responses: Record<string, string> = { ...challengeResponses };
+        
+        // Add SECRET_HASH if client secret is present
+        if (clientSecret) {
+          responses.SECRET_HASH = secretHash(username, clientId, clientSecret);
+          console.log(`🔐 Including SECRET_HASH for challenge response`);
+        }
+        
+        const challengeCommand = new RespondToAuthChallengeCommand({
+          ClientId: clientId,
+          ChallengeName: challengeName as any,
+          Session: session,
+          ChallengeResponses: responses,
         });
+
+        const challengeResponse = await cognitoClient.send(challengeCommand);
+
+        // Handle different response types
+        if (challengeResponse.ChallengeName) {
+          // Another challenge is required
+          console.log(`🔄 Next challenge required: ${challengeResponse.ChallengeName}`);
+          return NextResponse.json({
+            success: true,
+            ChallengeName: challengeResponse.ChallengeName,
+            session: challengeResponse.Session,
+            message: `Next challenge: ${challengeResponse.ChallengeName}`,
+            secretCode: challengeResponse.ChallengeParameters?.SECRET_CODE,
+          });
+        }
+
+        if (challengeResponse.AuthenticationResult?.AccessToken) {
+          // Challenge completed successfully
+          console.log(`✅ Challenge ${challengeName} completed successfully for org ${orgId}`);
+          
+          return NextResponse.json({
+            success: true,
+            message: "Challenge completed successfully",
+            access_token: challengeResponse.AuthenticationResult.AccessToken,
+            id_token: challengeResponse.AuthenticationResult.IdToken,
+            refresh_token: challengeResponse.AuthenticationResult.RefreshToken,
+            organizationId: orgId,
+          });
+        }
+
+        // Unexpected response but continue trying other orgs
+        console.warn(`⚠️ Unexpected challenge response for ${challengeName} in org ${orgId}`);
+        continue;
+
+      } catch (cognitoError: any) {
+        console.error(`❌ Challenge response error for org ${orgId}:`, cognitoError.message);
+        lastError = cognitoError;
+        continue;
       }
-
-      // Unexpected response
-      console.warn(`⚠️ Unexpected challenge response for ${challengeName}`);
-      return NextResponse.json({
-        success: false,
-        message: "Unexpected challenge response",
-      }, { status: 500 });
-
-    } catch (cognitoError: any) {
-      console.error(`❌ Challenge response error:`, cognitoError);
-      console.error(`❌ Error details:`, {
-        name: cognitoError.name,
-        message: cognitoError.message,
-        challengeName,
-        username
-      });
+    }
+    
+    // If no successful response, return the last error
+    if (lastError) {
+      console.error(`❌ Challenge response failed across all organizations`);
       
       let userMessage = "Challenge response failed";
       
-      if (cognitoError.name === "NotAuthorizedException") {
+      if (lastError.name === "NotAuthorizedException") {
         userMessage = "Invalid challenge response. Please check your input.";
-        if (clientSecret) {
-          console.error(`❌ NotAuthorized during challenge with secreted client - SECRET_HASH might be incorrect`);
-        }
-      } else if (cognitoError.name === "InvalidParameterException") {
-        userMessage = "Invalid challenge parameters.";
-      } else if (cognitoError.name === "CodeMismatchException") {
+      } else if (lastError.name === "CodeMismatchException") {
         userMessage = "Invalid verification code. Please try again.";
-      } else if (cognitoError.name === "ExpiredCodeException") {
+      } else if (lastError.name === "ExpiredCodeException") {
         userMessage = "Verification code has expired. Please request a new one.";
-      } else if (cognitoError.name === "InvalidPasswordException") {
-        userMessage = "Password does not meet requirements. Please check the password policy.";
-      } else if (cognitoError.name === "LimitExceededException") {
-        userMessage = "Too many attempts. Please try again later.";
-      } else if (cognitoError.message) {
-        userMessage = cognitoError.message;
+      } else if (lastError.name === "InvalidPasswordException") {
+        userMessage = "Password does not meet requirements.";
+      } else if (lastError.message) {
+        userMessage = lastError.message;
       }
       
       return NextResponse.json(
         { 
           success: false, 
           message: userMessage, 
-          error: cognitoError.name,
-          detail: cognitoError.message
+          detail: lastError.message
         },
         { status: 400 }
       );
     }
+    
+    // Should not reach here
+    return NextResponse.json(
+      { success: false, message: "No Cognito configurations available" },
+      { status: 500 }
+    );
 
   } catch (error: any) {
     console.error("❌ Challenge response error:", error);
