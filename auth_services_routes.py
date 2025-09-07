@@ -718,3 +718,351 @@ def health_check():
         "environment": os.environ.get("FLASK_ENV", "production"),
         "server_time": datetime.now().isoformat()
     }), 200
+
+@auth_services_routes.route("/setup-mfa", methods=["POST", "OPTIONS"])
+def setup_mfa_endpoint():
+    """Setup MFA with access token"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        access_token = data.get('access_token')
+        
+        if not access_token:
+            return jsonify({"detail": "Access token is required"}), 400
+            
+        logger.info("Setting up MFA with access token")
+        
+        try:
+            # Get user details first to validate token and get username
+            user_response = cognito_client.get_user(AccessToken=access_token)
+            username = user_response.get("Username", "user")
+            logger.info(f"Retrieved username: {username} from access token")
+        except Exception as user_error:
+            logger.error(f"Failed to get user details: {user_error}")
+            return jsonify({"detail": f"Invalid access token: {str(user_error)}"}), 401
+            
+        # Associate software token
+        try:
+            associate_response = cognito_client.associate_software_token(AccessToken=access_token)
+        except Exception as assoc_error:
+            logger.error(f"Failed to associate software token: {assoc_error}")
+            return jsonify({"detail": f"MFA setup failed: {str(assoc_error)}"}), 500
+        
+        # Get the secret code
+        secret_code = associate_response.get("SecretCode")
+        if not secret_code:
+            logger.error("No secret code in response")
+            return jsonify({"detail": "Failed to generate MFA secret code"}), 500
+        
+        logger.info(f"Generated secret code for MFA setup: {secret_code}")
+        
+        return jsonify({
+            "secretCode": secret_code,
+            "message": "MFA setup initiated successfully",
+            "username": username
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in setup_mfa_endpoint: {e}")
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+@auth_services_routes.route("/verify-mfa-setup", methods=["POST", "OPTIONS"])
+def verify_mfa_setup_endpoint():
+    """Verify MFA setup with access token and verification code"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        access_token = data.get('access_token')
+        code = data.get('code')
+        
+        if not access_token:
+            return jsonify({"detail": "Access token is required"}), 400
+            
+        if not code:
+            return jsonify({"detail": "Verification code is required"}), 400
+        
+        # Ensure code is exactly 6 digits
+        code = code.strip()
+        if not code.isdigit() or len(code) != 6:
+            return jsonify({"detail": "Verification code must be exactly 6 digits"}), 400
+    
+        try:
+            # Get user info for logging
+            try:
+                user_info = cognito_client.get_user(AccessToken=access_token)
+                username = user_info.get("Username", "unknown")
+                logger.info(f"Verifying MFA setup for user: {username}")
+            except Exception as user_error:
+                logger.warning(f"Could not get username: {user_error}")
+                username = "unknown"
+            
+            # Verify software token
+            logger.info(f"Calling verify_software_token with code: {code}")
+            
+            response = cognito_client.verify_software_token(
+                AccessToken=access_token,
+                UserCode=code,
+                FriendlyDeviceName="EncryptGate Auth App"
+            )
+            
+            # Check the status
+            status = response.get("Status")
+            logger.info(f"MFA verification status: {status}")
+            
+            if status == "SUCCESS":
+                # Set the user's MFA preference to require TOTP
+                try:
+                    logger.info("Setting MFA preference")
+                    cognito_client.set_user_mfa_preference(
+                        AccessToken=access_token,
+                        SoftwareTokenMfaSettings={
+                            "Enabled": True,
+                            "PreferredMfa": True
+                        }
+                    )
+                    logger.info("MFA preference set successfully")
+                except Exception as pref_error:
+                    logger.warning(f"MFA verified but couldn't set preference: {pref_error}")
+                    # Continue anyway since the token was verified
+                
+                return jsonify({
+                    "message": "MFA setup verified successfully",
+                    "status": status
+                })
+            else:
+                logger.warning(f"Verification returned non-SUCCESS status: {status}")
+                return jsonify({"detail": f"MFA verification failed with status: {status}"}), 400
+            
+        except Exception as verify_error:
+            logger.error(f"MFA verification error: {verify_error}")
+            return jsonify({"detail": str(verify_error)}), 400
+            
+    except Exception as e:
+        logger.error(f"Error in verify_mfa_setup_endpoint: {e}")
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+@auth_services_routes.route("/test-mfa-code", methods=["POST", "OPTIONS"])
+def test_mfa_code_endpoint():
+    """Test MFA codes against a secret (useful for debugging)"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        secret = data.get('secret')
+        code = data.get('code')
+        
+        if not secret:
+            return jsonify({
+                "valid": False, 
+                "error": "Missing secret",
+                "server_time": datetime.now().isoformat()
+            }), 400
+        
+        # Create a TOTP object with the secret
+        import pyotp
+        totp = pyotp.TOTP(secret)
+        current_time = time.time()
+        current_code = totp.now()
+        
+        # If no code is provided, just return the current valid code
+        if not code:
+            return jsonify({
+                "valid": True,
+                "current_code": current_code,
+                "timestamp": int(current_time),
+                "time_window": f"{int(current_time) % 30}/30 seconds",
+                "server_time": datetime.now().isoformat()
+            })
+        
+        # Verify the code with a window
+        is_valid = totp.verify(code, valid_window=5)
+        
+        return jsonify({
+            "valid": is_valid,
+            "provided_code": code,
+            "current_code": current_code,
+            "timestamp": int(current_time),
+            "time_window": f"{int(current_time) % 30}/30 seconds",
+            "server_time": datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error in test_mfa_code_endpoint: {e}")
+        return jsonify({
+            "valid": False, 
+            "error": str(e),
+            "server_time": datetime.now().isoformat()
+        }), 500
+
+@auth_services_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
+def verify_mfa_endpoint():
+    """Verify MFA during login"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+        
+        session = data.get('session')
+        code = data.get('code')
+        username = data.get('username')
+        orgId = data.get('orgId')
+        
+        # Validate required fields
+        if not all([session, username, code]):
+            missing = [field for field, value in [('session', session), ('username', username), ('code', code)] if not value]
+            return jsonify({"detail": f"Missing required fields: {', '.join(missing)}"}), 400
+        
+        # Validate code format
+        if not code.isdigit() or len(code) != 6:
+            return jsonify({"detail": "MFA code must be exactly 6 digits"}), 400
+        
+        logger.info(f"=== MFA verification for user: {username} with code: {code} ===")
+        
+        # Get org config
+        if orgId:
+            cfg = get_org_cognito(orgId)
+        else:
+            default_org_id = os.getenv("DEFAULT_ORGANIZATION_ID", "company1")
+            cfg = get_org_cognito(default_org_id)
+            orgId = default_org_id
+            
+        if not cfg:
+            return jsonify({"detail": f"No Cognito configuration for org {orgId}"}), 400
+            
+        client_id = cfg["clientId"]
+        client_secret = cfg.get("clientSecret")
+        region = cfg["region"]
+        org_cognito_client = boto3.client("cognito-idp", region_name=region)
+        
+        try:
+            # Use the improved MFA challenge response function
+            auth_result = respond_to_mfa_challenge(
+                org_cognito_client, client_id, username, session, 
+                mfa_code=code, client_secret=client_secret
+            )
+            
+            # Return the authentication tokens
+            logger.info("MFA verification successful - returning tokens")
+            return jsonify({
+                "status": "SUCCESS",
+                "id_token": auth_result.get("IdToken"),
+                "access_token": auth_result.get("AccessToken"),
+                "refresh_token": auth_result.get("RefreshToken"),
+                "token_type": auth_result.get("TokenType"),
+                "expires_in": auth_result.get("ExpiresIn"),
+                "orgId": orgId
+            })
+            
+        except Exception as mfa_error:
+            logger.error(f"MFA verification failed: {mfa_error}")
+            return jsonify({"detail": str(mfa_error)}), 400
+            
+    except Exception as e:
+        logger.error(f"Error in MFA verification endpoint: {e}")
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
+
+@auth_services_routes.route("/confirm-mfa-setup", methods=["POST", "OPTIONS"])
+def confirm_mfa_setup_endpoint():
+    """MFA SETUP CONFIRMATION endpoint"""
+    if request.method == "OPTIONS":
+        return handle_cors_preflight()
+    
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"detail": "No JSON data provided"}), 400
+            
+        username = data.get('username')
+        session = data.get('session')
+        code = data.get('code')
+        orgId = data.get('orgId')
+        
+        # Validate required fields
+        if not all([username, session, code]):
+            missing = [field for field, value in [('username', username), ('session', session), ('code', code)] if not value]
+            return jsonify({"detail": f"Missing required fields: {', '.join(missing)}"}), 400
+        
+        # Validate code format
+        if not code.isdigit() or len(code) != 6:
+            return jsonify({"detail": "MFA code must be exactly 6 digits"}), 400
+        
+        logger.info(f"=== MFA setup confirmation for user: {username} with code: {code} ===")
+        
+        # Get org config
+        if orgId:
+            cfg = get_org_cognito(orgId)
+        else:
+            default_org_id = os.getenv("DEFAULT_ORGANIZATION_ID", "company1")
+            cfg = get_org_cognito(default_org_id)
+            orgId = default_org_id
+            
+        if not cfg:
+            return jsonify({"detail": f"No Cognito configuration for org {orgId}"}), 400
+            
+        client_id = cfg["clientId"]
+        client_secret = cfg.get("clientSecret")
+        region = cfg["region"]
+        org_cognito_client = boto3.client("cognito-idp", region_name=region)
+        
+        try:
+            # Step 1: Verify the software token to confirm MFA setup
+            logger.info("Step 1: Verifying software token for MFA setup")
+            
+            verify_params = {
+                "Session": session,
+                "UserCode": code
+            }
+            
+            # Verify the software token
+            verify_response = org_cognito_client.verify_software_token(**verify_params)
+            logger.info(f"Token verification response: {verify_response.get('Status')}")
+            
+            if verify_response.get("Status") != "SUCCESS":
+                return jsonify({"detail": "Invalid MFA code. Please check your authenticator app and try again."}), 400
+            
+            # Step 2: Complete the MFA setup challenge to finalize authentication
+            logger.info("Step 2: Completing MFA setup challenge")
+            auth_result = respond_to_mfa_challenge(
+                org_cognito_client, client_id, username, verify_response.get("Session"), 
+                mfa_code=None, client_secret=client_secret
+            )
+            
+            if "AuthenticationResult" in auth_result:
+                # Success - return the authentication tokens
+                tokens = auth_result["AuthenticationResult"]
+                logger.info("MFA setup completed successfully - returning tokens")
+                return jsonify({
+                    "success": True,
+                    "access_token": tokens.get("AccessToken"),
+                    "id_token": tokens.get("IdToken"), 
+                    "refresh_token": tokens.get("RefreshToken"),
+                    "token_type": tokens.get("TokenType"),
+                    "expires_in": tokens.get("ExpiresIn"),
+                    "message": "MFA setup completed successfully",
+                    "status": "SUCCESS",
+                    "orgId": orgId
+                }), 200
+            else:
+                logger.error(f"Unexpected response after MFA setup: {auth_result}")
+                return jsonify({"detail": "MFA setup verification succeeded but authentication failed"}), 500
+            
+        except Exception as setup_error:
+            logger.error(f"MFA setup failed: {setup_error}")
+            return jsonify({"detail": str(setup_error)}), 400
+            
+    except Exception as e:
+        logger.error(f"Error in MFA setup confirmation endpoint: {e}")
+        return jsonify({"detail": f"Server error: {str(e)}"}), 500
