@@ -25,7 +25,7 @@ export async function GET(req: Request) {
 
   const domain = r.Item.domain?.S
   const clientId = r.Item.clientId?.S
-  const redirectUri = r.Item.redirectUri?.S || `${url.origin}/api/auth/callback`
+  const redirectUri = r.Item.redirectUri?.S
 
   if (!domain || !clientId || !redirectUri) {
     return new NextResponse('Missing Cognito config values', { status: 400 })

@@ -18,11 +18,11 @@ const ORGS_TABLE = process.env.ORGANIZATIONS_TABLE_NAME || "Organizations";
 
 export async function POST(req: Request) {
   try {
-    const { userPoolId, clientId, region, accessKey, secretKey } = await req.json();
+    const { userPoolId, clientId, domain, redirectUri, region, accessKey, secretKey } = await req.json();
     
-    if (!userPoolId || !clientId || !region || !accessKey || !secretKey) {
+    if (!userPoolId || !clientId || !domain || !redirectUri || !region || !accessKey || !secretKey) {
       return NextResponse.json(
-        { valid: false, message: "Missing required fields" },
+        { valid: false, message: "Missing required fields including domain and redirect URI" },
         { status: 400 }
       );
     }
