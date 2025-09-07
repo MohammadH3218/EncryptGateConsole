@@ -276,13 +276,56 @@ export default function LoginPage() {
     }
   }
 
-  // helper to store tokens + clear temp
-  const finalizeLogin = (access: string, id: string, refresh: string) => {
+  // helper to store tokens + clear temp + auto-register user
+  const finalizeLogin = async (access: string, id: string, refresh: string) => {
     localStorage.setItem("access_token", access)
     localStorage.setItem("id_token", id)
     localStorage.setItem("refresh_token", refresh)
     localStorage.setItem("userType", "admin")
     sessionStorage.removeItem("temp_password")
+    
+    // Auto-register user in security team if first login
+    try {
+      // Get organization context if available
+      const orgId = localStorage.getItem('organization_id') || undefined
+      const orgName = localStorage.getItem('organization_name') || undefined
+      
+      const response = await fetchWithRetry(
+        `${apiBaseUrl}/api/auth/auto-register`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ 
+            email, 
+            tokens: { access, id, refresh },
+            organizationId: orgId,
+            organizationName: orgName
+          }),
+        }
+      )
+      
+      if (response.ok) {
+        const userData = await response.json()
+        console.log("✅ User auto-registered:", userData.role)
+        
+        if (userData.isFirstUser) {
+          console.log("🎉 First user registered as Owner!")
+        }
+        
+        // Update organization context if received
+        if (userData.organizationId) {
+          localStorage.setItem('organization_id', userData.organizationId)
+        }
+        if (userData.organizationName) {
+          localStorage.setItem('organization_name', userData.organizationName)
+        }
+      }
+    } catch (autoRegError) {
+      console.warn("⚠️ Auto-registration failed, but continuing with login:", autoRegError)
+      // Don't fail login if auto-registration fails
+    }
+    
     router.push("/admin/dashboard")
   }
 
