@@ -17,33 +17,7 @@ export default function LandingPage() {
   const [adminName, setAdminName] = useState("")
   const [error, setError] = useState("")
   const [isCreating, setIsCreating] = useState(false)
-  const [checkingAuth, setCheckingAuth] = useState(true)
-
-  useEffect(() => {
-    // Check if user is already authenticated with valid tokens
-    const timeout = setTimeout(() => {
-      const accessToken = localStorage.getItem("access_token")
-      const userType = localStorage.getItem("userType")
-      
-      // Only redirect if we have both access token AND user type
-      // This ensures the user has completed full login process
-      if (accessToken && userType) {
-        if (userType === "admin") {
-          router.push("/admin/dashboard")
-        } else if (userType === "employee") {
-          router.push("/employee/dashboard")
-        } else {
-          // Invalid user type, show landing page
-          setCheckingAuth(false)
-        }
-      } else {
-        // No valid authentication, show landing page
-        setCheckingAuth(false)
-      }
-    }, 300)
-
-    return () => clearTimeout(timeout)
-  }, [router])
+  // Removed automatic redirect logic - landing page always shows
 
   const handleCreateOrganization = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -76,25 +50,7 @@ export default function LandingPage() {
     router.push("/login")
   }
 
-  if (checkingAuth) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4 relative overflow-hidden">
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
-          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/5 rounded-full blur-3xl animate-pulse delay-1000"></div>
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/3 rounded-full blur-3xl animate-pulse delay-500"></div>
-        </div>
-        
-        <div className="relative z-10 text-center space-y-4">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto animate-pulse">
-            <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-          </div>
-          <div className="text-white text-lg font-medium">Loading...</div>
-          <div className="text-gray-400 text-sm">Checking authentication</div>
-        </div>
-      </div>
-    )
-  }
+  // Landing page always renders - no loading state needed
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4 relative overflow-hidden">
