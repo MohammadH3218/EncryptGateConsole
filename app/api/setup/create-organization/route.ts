@@ -228,7 +228,10 @@ export async function POST(req: Request) {
           lastSynced: { S: orgCreationTime },
           userCount: { N: "1" },
           createdAt: { S: orgCreationTime },
-          ...(cognito.clientSecret && { hasClientSecret: { BOOL: true } }),
+          ...(cognito.clientSecret && { 
+            clientSecret: { S: cognito.clientSecret },
+            hasClientSecret: { BOOL: true } 
+          }),
         },
       }));
       console.log(`✅ Cognito configuration stored`);
