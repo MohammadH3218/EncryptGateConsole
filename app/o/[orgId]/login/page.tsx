@@ -11,8 +11,10 @@ import {
   CardFooter,
 } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, ArrowRight, Lock, AlertTriangle } from "lucide-react"
+import { Loader2, ArrowRight, Lock, AlertTriangle, Eye, EyeOff } from "lucide-react"
 
 export default function OrgAwareLoginPage() {
   const router = useRouter()
@@ -25,6 +27,10 @@ export default function OrgAwareLoginPage() {
   
   const [isLoading, setIsLoading] = useState(false)
   const [orgName, setOrgName] = useState<string>("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+  const [authError, setAuthError] = useState("")
 
   useEffect(() => {
     // Get org name from localStorage if available
@@ -34,15 +40,56 @@ export default function OrgAwareLoginPage() {
     }
   }, [])
 
-  const handleSignIn = async () => {
+  const handleSignIn = async (e: React.FormEvent) => {
+    e.preventDefault()
     setIsLoading(true)
-    try {
-      // Redirect to the org-aware login endpoint
-      const nextParam = encodeURIComponent(next)
-      window.location.href = `/api/auth/login?orgId=${orgId}&next=${nextParam}`
-    } catch (err) {
+    setAuthError("")
+    
+    if (!email || !password) {
+      setAuthError("Please enter both email and password")
       setIsLoading(false)
-      console.error('Login redirect failed:', err)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/auth/authenticate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgId,
+          email: email.trim(),
+          password,
+        })
+      })
+
+      const result = await response.json()
+
+      if (result.success && result.tokens) {
+        // Store tokens in secure cookies by calling a cookie-setting endpoint
+        const cookieResponse = await fetch('/api/auth/set-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orgId,
+            tokens: result.tokens,
+            user: result.user
+          })
+        })
+
+        if (cookieResponse.ok) {
+          // Redirect to dashboard or next URL
+          router.push(next)
+        } else {
+          setAuthError("Session setup failed. Please try again.")
+        }
+      } else {
+        setAuthError(result.message || "Authentication failed")
+      }
+    } catch (err: any) {
+      console.error('Authentication failed:', err)
+      setAuthError(err.message || "Network error. Please try again.")
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -92,7 +139,7 @@ export default function OrgAwareLoginPage() {
               {orgName ? `Welcome to ${orgName}` : 'Organization Login'}
             </CardTitle>
             <CardDescription className="text-gray-400">
-              Sign in with your organization credentials
+              Enter your credentials to access your organization
             </CardDescription>
             {orgId && (
               <div className="text-xs text-gray-500 font-mono bg-[#1a1a1a] px-2 py-1 rounded">
@@ -103,37 +150,82 @@ export default function OrgAwareLoginPage() {
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {errorMessage && (
+          {(errorMessage || authError) && (
             <Alert
               variant="destructive"
               className="bg-red-500/10 border-red-500/20 animate-in slide-in-from-top-2 duration-300"
             >
               <AlertTriangle className="h-4 w-4" />
-              <AlertDescription className="text-sm text-red-200">{errorMessage}</AlertDescription>
+              <AlertDescription className="text-sm text-red-200">
+                {authError || errorMessage}
+              </AlertDescription>
             </Alert>
           )}
 
-          <div className="text-center space-y-4">
-            <p className="text-sm text-gray-400">
-              Click below to sign in using your AWS Cognito credentials
-            </p>
-          </div>
+          <form onSubmit={handleSignIn} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-white">
+                Email
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@company.com"
+                className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder:text-gray-400"
+                disabled={isLoading}
+                required
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-white">
+                Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder:text-gray-400 pr-10"
+                  disabled={isLoading}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
+                  disabled={isLoading}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+          </form>
         </CardContent>
 
         <CardFooter className="flex flex-col space-y-4 pt-6">
           <Button
             onClick={handleSignIn}
+            type="submit"
             className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed group"
-            disabled={isLoading}
+            disabled={isLoading || !email || !password}
           >
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Redirecting...
+                Signing In...
               </>
             ) : (
               <>
-                Sign In with Cognito
+                Sign In
                 <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
               </>
             )}
