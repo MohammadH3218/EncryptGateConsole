@@ -359,7 +359,7 @@ def handle_cors_preflight():
 
 @auth_services_routes.route("/authenticate", methods=["OPTIONS", "POST"])
 def authenticate_user_route():
-    """UPDATED AUTHENTICATION ENDPOINT with multi-org support"""
+    """UPDATED AUTHENTICATION ENDPOINT with multi-org support and fallback"""
     if request.method == "OPTIONS":
         return handle_cors_preflight()
 
@@ -384,38 +384,39 @@ def authenticate_user_route():
                     "success": False, 
                     "message": f"No Cognito configuration for org {orgId}"
                 }), 400
-                
-            # Validate required config
-            missing = [k for k in ("clientId", "userPoolId") if not cfg.get(k)]
-            if missing:
-                return jsonify({
-                    "success": False, 
-                    "message": f"Cognito config missing: {', '.join(missing)} for org {orgId}"
-                }), 400
-                
-            logger.info(f"Cognito cfg resolved org={orgId} type={cfg['serviceType']} pool={cfg['userPoolId']} clientId={cfg['clientId']} region={cfg['region']}")
-            
-            # Use org-specific configuration
-            client_id = cfg["clientId"]
-            client_secret = cfg.get("clientSecret")
-            user_pool_id = cfg["userPoolId"]
-            region = cfg["region"]
-            
-            # Create org-specific Cognito client
-            org_cognito_client = boto3.client("cognito-idp", region_name=region)
             
         else:
-            # Fallback to global configuration for backward compatibility
-            if not CLIENT_ID or not USER_POOL_ID:
+            # Fallback to default organization
+            default_org_id = os.getenv("DEFAULT_ORGANIZATION_ID", "company1")
+            logger.info(f"No orgId provided, using default organization: {default_org_id}")
+            
+            cfg = get_org_cognito(default_org_id)
+            if not cfg:
                 return jsonify({
                     "success": False, 
-                    "message": "No organization specified and global Cognito not configured"
+                    "message": f"Please set up your organization first. No configuration found for {default_org_id}. Visit /setup-organization to get started."
                 }), 400
+            
+            orgId = default_org_id  # Set orgId for response
                 
-            client_id = CLIENT_ID
-            client_secret = CLIENT_SECRET
-            user_pool_id = USER_POOL_ID
-            org_cognito_client = cognito_client
+        # Validate required config
+        missing = [k for k in ("clientId", "userPoolId") if not cfg.get(k)]
+        if missing:
+            return jsonify({
+                "success": False, 
+                "message": f"Cognito config missing: {', '.join(missing)} for org {orgId}"
+            }), 400
+            
+        logger.info(f"Cognito cfg resolved org={orgId} type={cfg['serviceType']} pool={cfg['userPoolId']} clientId={cfg['clientId']} region={cfg['region']}")
+        
+        # Use org-specific configuration
+        client_id = cfg["clientId"]
+        client_secret = cfg.get("clientSecret")
+        user_pool_id = cfg["userPoolId"]
+        region = cfg["region"]
+        
+        # Create org-specific Cognito client
+        org_cognito_client = boto3.client("cognito-idp", region_name=region)
         
         # Step 1: Initiate authentication using the org-specific config
         logger.info(f"=== Starting authentication flow for user: {username} in org: {orgId or 'global'} ===")

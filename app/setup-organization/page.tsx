@@ -102,24 +102,21 @@ export default function SetupOrganizationPage() {
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null)
 
   useEffect(() => {
-    // do not auto-redirect to dashboard here
     setCheckingAuth(false)
-    // Check if we have pending org data from landing page
-    const pendingOrg = localStorage.getItem("pending_org_creation")
-    if (pendingOrg) {
-      try {
-        const data = JSON.parse(pendingOrg)
-        setOrgData(data)
-        localStorage.removeItem("pending_org_creation")
-      } catch (e) {
-        console.error("Error parsing pending org data:", e)
-        // Redirect back to landing if no valid data
-        router.push("/")
-      }
-    } else {
-      // No pending data, redirect to landing page
-      router.push("/")
-    }
+    // Remove the redirect logic - allow direct access to setup page
+    // const pendingOrg = localStorage.getItem("pending_org_creation")
+    // if (pendingOrg) {
+    //   try {
+    //     const data = JSON.parse(pendingOrg)
+    //     setOrgData(data)
+    //     localStorage.removeItem("pending_org_creation")
+    //   } catch (e) {
+    //     console.error("Error parsing pending org data:", e)
+    //     router.push("/")
+    //   }
+    // } else {
+    //   router.push("/")
+    // }
   }, [router])
 
   const validateCognitoConfig = async () => {
