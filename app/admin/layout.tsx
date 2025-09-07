@@ -14,14 +14,19 @@ export default function AdminLayout({
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Check for authentication token in localStorage
-    const token = localStorage.getItem("access_token")
-    
-    if (!token) {
-      // No token found, redirect to login
-      router.push('/login')
+    // Only run auth check if we're actually in an admin route
+    if (typeof window !== "undefined" && window.location.pathname.startsWith('/admin')) {
+      const token = localStorage.getItem("access_token")
+      
+      if (!token) {
+        // No token found, redirect to login
+        router.push('/login')
+      } else {
+        // Token found, user is authenticated
+        setIsAuthenticated(true)
+      }
     } else {
-      // Token found, user is authenticated
+      // Not an admin route, skip auth check
       setIsAuthenticated(true)
     }
     

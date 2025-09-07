@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Loader2, ArrowRight, Lock, Building, Shield, Users, Mail } from "lucide-react"
-import { checkAuth } from "@/lib/auth"
 
 export default function LandingPage() {
   const router = useRouter()
@@ -18,6 +17,12 @@ export default function LandingPage() {
   const [error, setError] = useState("")
   const [isCreating, setIsCreating] = useState(false)
   // Removed automatic redirect logic - landing page always shows
+  
+  console.log("LandingPage component is rendering...")
+  
+  useEffect(() => {
+    console.log("LandingPage mounted - no redirects should happen from here")
+  }, [])
 
   const handleCreateOrganization = async (e: React.FormEvent) => {
     e.preventDefault()

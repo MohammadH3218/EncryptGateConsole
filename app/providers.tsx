@@ -6,11 +6,10 @@ import { SecurityCopilotProvider } from "@/components/security-copilot/security-
 import { RoleProvider } from "@/contexts/RoleContext"
 
 export function Providers({ children }: { children: ReactNode }) {
+  // Temporarily disabled providers to debug redirect issue
   return (
-    <RoleProvider>
-      <DetectionsProvider>
-        <SecurityCopilotProvider>{children}</SecurityCopilotProvider>
-      </DetectionsProvider>
-    </RoleProvider>
+    <>
+      {children}
+    </>
   )
 }
