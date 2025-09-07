@@ -22,6 +22,12 @@ function isPublic(path: string) {
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl
+  
+  // Redirect old /login to setup-organization
+  if (pathname === '/login') {
+    return NextResponse.redirect(new URL('/setup-organization', req.url))
+  }
+  
   if (isPublic(pathname)) return NextResponse.next()
 
   // Convenience: rewrite /admin/* to /o/{org}/admin/* if cookie present
