@@ -69,11 +69,11 @@ interface DuplicateInfo {
   loginUrl: string
 }
 
-type SetupStep = 'aws-config' | 'cognito-users' | 'complete'
+type SetupStep = 'org-info' | 'aws-config' | 'cognito-users' | 'complete'
 
 export default function SetupOrganizationPage() {
   const router = useRouter()
-  const [currentStep, setCurrentStep] = useState<SetupStep>('aws-config')
+  const [currentStep, setCurrentStep] = useState<SetupStep>('org-info')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [checkingAuth, setCheckingAuth] = useState(true)
@@ -170,6 +170,14 @@ export default function SetupOrganizationPage() {
 
     try {
       switch (currentStep) {
+        case 'org-info':
+          if (!orgData.name || !orgData.adminName || !orgData.adminEmail) {
+            setError("Please fill in all organization details")
+            return
+          }
+          setCurrentStep('aws-config')
+          break
+
         case 'aws-config':
           const isValid = await validateCognitoConfig()
           if (isValid) {
@@ -254,15 +262,16 @@ export default function SetupOrganizationPage() {
       <div className="w-full max-w-2xl relative z-10">
         {/* Progress indicator */}
         <div className="mb-8 flex items-center justify-center space-x-4">
-          {(['aws-config', 'cognito-users', 'complete'] as SetupStep[]).map((step, index) => {
+          {(['org-info', 'aws-config', 'cognito-users', 'complete'] as SetupStep[]).map((step, index) => {
             const stepNames = {
+              'org-info': 'Organization',
               'aws-config': 'AWS Setup',
               'cognito-users': 'Admin User',
               'complete': 'Complete'
             }
             
             const isActive = step === currentStep
-            const isCompleted = ['aws-config', 'cognito-users', 'complete'].indexOf(currentStep) > index
+            const isCompleted = ['org-info', 'aws-config', 'cognito-users', 'complete'].indexOf(currentStep) > index
             
             return (
               <div key={step} className="flex items-center">
@@ -280,7 +289,7 @@ export default function SetupOrganizationPage() {
                 }`}>
                   {stepNames[step]}
                 </span>
-                {index < 2 && <ArrowRight className="w-4 h-4 text-gray-600 mx-4" />}
+                {index < 3 && <ArrowRight className="w-4 h-4 text-gray-600 mx-4" />}
               </div>
             )
           })}
@@ -295,13 +304,19 @@ export default function SetupOrganizationPage() {
               <div>
                 <CardTitle className="text-2xl text-white">Setup Your Organization</CardTitle>
                 <CardDescription className="text-gray-400">
-                  Step {['aws-config', 'cognito-users', 'complete'].indexOf(currentStep) + 1} of 3
+                  Step {['org-info', 'aws-config', 'cognito-users', 'complete'].indexOf(currentStep) + 1} of 4
                 </CardDescription>
               </div>
             </div>
           </CardHeader>
 
           <CardContent className="space-y-6">
+            {currentStep === 'org-info' && (
+              <OrganizationInfoStep 
+                orgData={orgData}
+                setOrgData={setOrgData}
+              />
+            )}
             {currentStep === 'aws-config' && (
               <AWSConfigStep 
                 config={cognitoConfig} 
