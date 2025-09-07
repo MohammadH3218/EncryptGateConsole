@@ -1,8 +1,5 @@
 from flask import Blueprint, request, jsonify, make_response
 from auth_services_routes import (
-    authenticate_user,
-    verify_mfa,
-    confirm_signup,
     handle_cors_preflight
 )
 import logging 
@@ -63,8 +60,9 @@ def test_route():
     logger.info("Test route accessed successfully.")
     return jsonify({"message": "GET /test route works!"}), 200
 
-@auth_routes.route("/login", methods=["POST", "OPTIONS"])
-def login():
+# DISABLED: This route conflicts with /authenticate in auth_services_routes.py
+# @auth_routes.route("/login", methods=["POST", "OPTIONS"])
+def login_disabled():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
         
@@ -89,7 +87,8 @@ def login():
     try:
         # Pass username and password to authenticate_user
         logger.info(f"Calling authenticate_user for: {username}")
-        auth_response = authenticate_user(username, password)
+        # auth_response = authenticate_user(username, password)
+        return jsonify({"detail": "This route is disabled. Use /api/auth/authenticate instead."}), 501
         
         logger.info(f"Auth response type: {type(auth_response)}")
         if isinstance(auth_response, tuple):
@@ -130,8 +129,9 @@ def login():
     resp.headers.add("Access-Control-Allow-Credentials", "true")
     return resp
 
-@auth_routes.route("/confirm-signup", methods=["POST", "OPTIONS"])
-def confirm_signup_endpoint():
+# DISABLED: Function confirm_signup no longer exists
+# @auth_routes.route("/confirm-signup", methods=["POST", "OPTIONS"])
+def confirm_signup_endpoint_disabled():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
         
@@ -146,7 +146,8 @@ def confirm_signup_endpoint():
         return jsonify({"detail": "All fields are required"}), 400
 
     try:
-        signup_response = confirm_signup(email, temp_password, new_password)
+        # signup_response = confirm_signup(email, temp_password, new_password)
+        return jsonify({"detail": "This route is disabled."}), 501
         if not signup_response:
             logger.warning(f"Failed to confirm sign-up for {email}")
             return jsonify({"detail": "Failed to confirm sign-up"}), 400
@@ -171,8 +172,9 @@ def confirm_signup_endpoint():
     resp.headers.add("Access-Control-Allow-Credentials", "true")
     return resp
 
-@auth_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
-def verify_mfa_endpoint():
+# DISABLED: Function verify_mfa no longer exists
+# @auth_routes.route("/verify-mfa", methods=["POST", "OPTIONS"])
+def verify_mfa_endpoint_disabled():
     if request.method == "OPTIONS":
         return handle_cors_preflight()
         
@@ -188,7 +190,8 @@ def verify_mfa_endpoint():
 
     try:
         logger.info(f"Calling verify_mfa for user: {username}")
-        auth_result = verify_mfa(session, code, username)
+        # auth_result = verify_mfa(session, code, username)
+        return jsonify({"detail": "This route is disabled. Use /api/auth/respond-to-challenge instead."}), 501
         
         if isinstance(auth_result, tuple):
             logger.warning(f"MFA verification error: {auth_result[0]}")
