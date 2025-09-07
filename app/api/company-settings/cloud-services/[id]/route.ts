@@ -19,13 +19,13 @@ import {
 } from "@aws-sdk/client-workmail";
 
 // Only use the org ID env var
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
 const TABLE = 
   process.env.CLOUDSERVICES_TABLE_NAME || 
   process.env.CLOUDSERVICES_TABLE || 
   "CloudServices";
 
-console.log("🔧 Cloud Services [id] API starting with:", { ORG_ID, TABLE });
+console.log("🔧 Cloud Services [id] API starting with:", { DEFAULT_ORG_ID, TABLE });
 
 // Use default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
@@ -40,7 +40,7 @@ export async function PUT(
     const [orgId, serviceType] = id.split('_');
     
     // Validate parameters
-    if (orgId !== ORG_ID || !serviceType) {
+    if (orgId !== DEFAULT_ORG_ID || !serviceType) {
       return NextResponse.json(
         { error: "Invalid service ID format" },
         { status: 400 }
@@ -51,7 +51,7 @@ export async function PUT(
     const existingService = await ddb.send(new GetItemCommand({
       TableName: TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         serviceType: { S: serviceType },
       },
     }));
@@ -146,7 +146,7 @@ async function handleCognitoUpdate(serviceType: string, body: any) {
     new UpdateItemCommand({
       TableName: TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         serviceType: { S: serviceType },
       },
       UpdateExpression: updateExpression,
@@ -157,7 +157,7 @@ async function handleCognitoUpdate(serviceType: string, body: any) {
   
   // Return the updated service (don't include the secret in response)
   return NextResponse.json({
-    id: `${ORG_ID}_${serviceType}`,
+    id: `${DEFAULT_ORG_ID}_${serviceType}`,
     name: "AWS Cognito",
     serviceType: serviceType,
     status: "connected",
@@ -231,7 +231,7 @@ async function handleWorkMailUpdate(serviceType: string, body: any) {
     new UpdateItemCommand({
       TableName: TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         serviceType: { S: serviceType },
       },
       UpdateExpression: updateExpression,
@@ -242,7 +242,7 @@ async function handleWorkMailUpdate(serviceType: string, body: any) {
   
   // Return the updated service
   return NextResponse.json({
-    id: `${ORG_ID}_${serviceType}`,
+    id: `${DEFAULT_ORG_ID}_${serviceType}`,
     name: "AWS WorkMail",
     serviceType: serviceType,
     status: "connected",
@@ -264,7 +264,7 @@ export async function DELETE(
     const [orgId, serviceType] = id.split('_');
     
     // Validate parameters
-    if (orgId !== ORG_ID || !serviceType) {
+    if (orgId !== DEFAULT_ORG_ID || !serviceType) {
       return NextResponse.json(
         { error: "Invalid service ID format" },
         { status: 400 }
@@ -276,7 +276,7 @@ export async function DELETE(
       new DeleteItemCommand({
         TableName: TABLE,
         Key: {
-          orgId: { S: ORG_ID },
+          orgId: { S: DEFAULT_ORG_ID },
           serviceType: { S: serviceType },
         },
       })

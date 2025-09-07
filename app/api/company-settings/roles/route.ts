@@ -15,7 +15,7 @@ import {
 import { Role, DEFAULT_ROLES, PERMISSIONS } from '@/types/roles';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
 const ROLES_TABLE = process.env.ROLES_TABLE_NAME || 'SecurityRoles';
 const USER_ROLES_TABLE = process.env.USER_ROLES_TABLE_NAME || 'SecurityUserRoles';
 
@@ -141,7 +141,7 @@ async function initializeDefaultRoles(orgId: string): Promise<void> {
 // GET: List all roles for the organization
 export async function GET() {
   try {
-    console.log('📋 Fetching roles for organization:', ORG_ID);
+    console.log('📋 Fetching roles for organization:', DEFAULT_ORG_ID);
 
     // Ensure tables exist first
     await ensureTablesExist();
@@ -151,7 +151,7 @@ export async function GET() {
       TableName: ROLES_TABLE,
       KeyConditionExpression: 'orgId = :orgId',
       ExpressionAttributeValues: {
-        ':orgId': { S: ORG_ID }
+        ':orgId': { S: DEFAULT_ORG_ID }
       }
     }));
 
@@ -159,14 +159,14 @@ export async function GET() {
 
     // If no roles exist, initialize default roles
     if (roles.length === 0) {
-      await initializeDefaultRoles(ORG_ID);
+      await initializeDefaultRoles(DEFAULT_ORG_ID);
       
       // Re-fetch after initialization
       const retryResponse = await ddb.send(new QueryCommand({
         TableName: ROLES_TABLE,
         KeyConditionExpression: 'orgId = :orgId',
         ExpressionAttributeValues: {
-          ':orgId': { S: ORG_ID }
+          ':orgId': { S: DEFAULT_ORG_ID }
         }
       }));
       
@@ -214,7 +214,7 @@ export async function POST(request: Request) {
     console.log('➕ Creating new role:', name);
 
     // Generate role ID
-    const roleId = `${ORG_ID}-${name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    const roleId = `${DEFAULT_ORG_ID}-${name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     
     const newRole: Role = {
       id: roleId,
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
     // Save to DynamoDB
     await ddb.send(new PutItemCommand({
       TableName: ROLES_TABLE,
-      Item: roleToItem(newRole, ORG_ID),
+      Item: roleToItem(newRole, DEFAULT_ORG_ID),
       ConditionExpression: 'attribute_not_exists(roleId)'
     }));
 

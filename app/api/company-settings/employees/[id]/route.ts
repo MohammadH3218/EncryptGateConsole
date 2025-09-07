@@ -9,12 +9,12 @@ import {
 } from "@aws-sdk/client-dynamodb";
 
 // Environment variables
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees";
 
-if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
+// Note: In production, ORG_ID should be extracted from request context
 
-console.log("🔧 Employee [id] API starting with:", { ORG_ID, EMPLOYEES_TABLE });
+console.log("🔧 Employee [id] API starting with:", { DEFAULT_ORG_ID, EMPLOYEES_TABLE });
 
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
@@ -32,7 +32,7 @@ export async function DELETE(
     const employeeResp = await ddb.send(new GetItemCommand({
       TableName: EMPLOYEES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         email: { S: email },
       },
     }));
@@ -52,7 +52,7 @@ export async function DELETE(
     await ddb.send(new DeleteItemCommand({
       TableName: EMPLOYEES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         email: { S: email },
       },
     }));

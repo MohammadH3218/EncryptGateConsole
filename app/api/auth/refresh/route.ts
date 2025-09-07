@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     // Get Cognito config for the org
     const r = await ddb.send(new GetItemCommand({
       TableName: CLOUD_TABLE,
-      Key: { orgId: { S: orgId }, serviceType: { S: 'cognito' } }
+      Key: { orgId: { S: orgId }, serviceType: { S: 'aws-cognito' } }
     }))
     
     if (!r.Item) {

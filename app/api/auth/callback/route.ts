@@ -56,7 +56,7 @@ export async function GET(req: Request) {
   // fetch config
   const r = await ddb.send(new GetItemCommand({
     TableName: CLOUD_TABLE,
-    Key: { orgId: { S: st.orgId }, serviceType: { S: 'cognito' } }
+    Key: { orgId: { S: st.orgId }, serviceType: { S: 'aws-cognito' } }
   }))
   if (!r.Item) return NextResponse.redirect(`/o/${st.orgId}/login?error=no_cognito_config`)
 

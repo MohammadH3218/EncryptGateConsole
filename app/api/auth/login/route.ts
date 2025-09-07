@@ -19,7 +19,7 @@ export async function GET(req: Request) {
   // fetch CloudServices(orgId, 'cognito')
   const r = await ddb.send(new GetItemCommand({
     TableName: CLOUD_TABLE,
-    Key: { orgId: { S: orgId }, serviceType: { S: 'cognito' } }
+    Key: { orgId: { S: orgId }, serviceType: { S: 'aws-cognito' } }
   }))
   if (!r.Item) return new NextResponse('Cognito not configured for org', { status: 400 })
 

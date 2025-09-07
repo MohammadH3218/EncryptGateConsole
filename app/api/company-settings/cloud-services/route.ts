@@ -11,13 +11,13 @@ import {
 } from "@aws-sdk/client-dynamodb";
 
 // Only two env-vars now: your org ID and table name
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
 const TABLE  =
   process.env.CLOUDSERVICES_TABLE_NAME ||
   process.env.CLOUDSERVICES_TABLE         ||
   "CloudServices";
 
-console.log("🔧 Cloud Services API starting with:", { ORG_ID, TABLE });
+console.log("🔧 Cloud Services API starting with:", { DEFAULT_ORG_ID, TABLE });
 
 // Instantiate DynamoDBClient with the default credential/provider chain.
 // Amplify will inject AWS_REGION and your SSR IAM role at runtime.
@@ -35,7 +35,7 @@ export async function GET(req: Request) {
       TableName: TABLE,
       KeyConditionExpression: "orgId = :orgId",
       ExpressionAttributeValues: {
-        ":orgId": { S: ORG_ID },
+        ":orgId": { S: DEFAULT_ORG_ID },
       },
     }));
     console.log(`✅ Query returned ${resp.Count} items`);
@@ -134,7 +134,7 @@ async function handleCognitoPost(body: any) {
   // Build DynamoDB item with proper typing
   const now = new Date().toISOString();
   const item: Record<string, any> = {
-    orgId:       { S: ORG_ID },
+    orgId:       { S: DEFAULT_ORG_ID },
     serviceType: { S: serviceType },
     userPoolId:  { S: userPoolId },
     clientId:    { S: clientId },
@@ -158,7 +158,7 @@ async function handleCognitoPost(body: any) {
 
   // Return the new service (don't include the secret in the response for security)
   return NextResponse.json({
-    id:         `${ORG_ID}_${serviceType}`,
+    id:         `${DEFAULT_ORG_ID}_${serviceType}`,
     name:       "AWS Cognito",
     serviceType: serviceType,
     status:     "connected",
@@ -184,7 +184,7 @@ async function handleWorkMailPost(body: any) {
   // Build DynamoDB item with proper typing
   const now = new Date().toISOString();
   const item: Record<string, any> = {
-    orgId:          { S: ORG_ID },
+    orgId:          { S: DEFAULT_ORG_ID },
     serviceType:    { S: serviceType },
     organizationId: { S: organizationId },
     region:         { S: region },
@@ -207,7 +207,7 @@ async function handleWorkMailPost(body: any) {
 
   // Return the new service
   return NextResponse.json({
-    id:             `${ORG_ID}_${serviceType}`,
+    id:             `${DEFAULT_ORG_ID}_${serviceType}`,
     name:           "AWS WorkMail",
     serviceType:    serviceType,
     status:         "connected",

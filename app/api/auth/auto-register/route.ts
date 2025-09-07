@@ -15,24 +15,21 @@ import {
 } from "@aws-sdk/client-cognito-identity-provider";
 
 // Environment variables
-const ORG_ID = process.env.ORGANIZATION_ID!;
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
                  process.env.CLOUDSERVICES_TABLE || 
                  "CloudServices";
 const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 
-if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
-
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
-async function getCognitoConfig() {
+async function getCognitoConfig(orgId: string) {
   try {
     const resp = await ddb.send(
       new GetItemCommand({
         TableName: CS_TABLE,
         Key: {
-          orgId:       { S: ORG_ID },
+          orgId:       { S: orgId },
           serviceType: { S: "aws-cognito" },
         },
       })
@@ -55,7 +52,7 @@ async function getCognitoConfig() {
 // POST - Auto-register user during authentication
 export async function POST(req: Request) {
   try {
-    const { email, tokens } = await req.json();
+    const { email, tokens, organizationId, organizationName } = await req.json();
     
     if (!email) {
       return NextResponse.json(
@@ -64,14 +61,21 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log(`🔄 Auto-registering user: ${email}`);
+    if (!organizationId) {
+      return NextResponse.json(
+        { error: "Organization ID is required" },
+        { status: 400 }
+      );
+    }
+
+    console.log(`🔄 Auto-registering user: ${email} for org: ${organizationId}`);
 
     // Check if user already exists in security team
     const existingUserResp = await ddb.send(
       new GetItemCommand({
         TableName: USERS_TABLE,
         Key: {
-          orgId: { S: ORG_ID },
+          orgId: { S: organizationId },
           email: { S: email },
         },
       })
@@ -81,7 +85,9 @@ export async function POST(req: Request) {
       console.log(`✅ User ${email} already exists in security team`);
       return NextResponse.json({ 
         message: "User already registered", 
-        role: existingUserResp.Item.role?.S || "Viewer"
+        role: existingUserResp.Item.role?.S || "Viewer",
+        organizationId,
+        organizationName
       });
     }
 
@@ -91,7 +97,7 @@ export async function POST(req: Request) {
         TableName: USERS_TABLE,
         KeyConditionExpression: "orgId = :orgId",
         ExpressionAttributeValues: {
-          ":orgId": { S: ORG_ID },
+          ":orgId": { S: organizationId },
         },
         Select: "COUNT"
       })
@@ -102,7 +108,7 @@ export async function POST(req: Request) {
     
     console.log(`🔧 Setting ${isFirstUser ? 'Owner (first user)' : 'Viewer (default)'} role for ${email}`);
 
-    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
+    const { userPoolId, region: cognitoRegion } = await getCognitoConfig(organizationId);
     
     // Create Cognito client
     const cognito = new CognitoIdentityProviderClient({
@@ -152,7 +158,7 @@ export async function POST(req: Request) {
     await ddb.send(new PutItemCommand({
       TableName: USERS_TABLE,
       Item: {
-        orgId:     { S: ORG_ID },
+        orgId:     { S: organizationId },
         email:     { S: email },
         name:      { S: actualName },
         role:      { S: role },
@@ -171,7 +177,9 @@ export async function POST(req: Request) {
       role,
       status:    "active",
       lastLogin: new Date().toISOString(),
-      isFirstUser
+      isFirstUser,
+      organizationId,
+      organizationName
     });
   } catch (err: any) {
     console.error("❌ [auto-register:POST]", err);
