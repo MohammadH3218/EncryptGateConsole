@@ -27,7 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { checkAuth } from "@/lib/auth"
 
-// AWS regions for Cognito/WorkMail
+// AWS regions for Cognito & WorkMail
 const AWS_REGIONS = [
   { value: 'us-east-1', label: 'US East (N. Virginia)' },
   { value: 'us-east-2', label: 'US East (Ohio)' },
