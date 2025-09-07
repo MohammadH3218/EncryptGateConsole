@@ -62,11 +62,12 @@ export async function PATCH(
 ) {
   try {
     const email = decodeURIComponent(params.id);
-    const { role: newRole } = await req.json();
+    const { roleIds } = await req.json();
+    const newRole = Array.isArray(roleIds) && roleIds.length > 0 ? roleIds[0] : undefined;
     
     if (!newRole) {
       return NextResponse.json(
-        { error: "Role is required" },
+        { error: "roleIds must contain at least one role ID" },
         { status: 400 }
       );
     }
