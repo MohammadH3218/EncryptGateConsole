@@ -104,5 +104,18 @@ def cors_test():
         "headers_received": dict(request.headers)
     })
 
+# JSON error handlers to prevent HTML error pages
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"ok": False, "error": "not_found", "message": "Endpoint not found"}), 404
+
+@app.errorhandler(500)
+def server_error(e):
+    return jsonify({"ok": False, "error": "server_error", "message": "Internal server error"}), 500
+
+@app.errorhandler(405)
+def method_not_allowed(e):
+    return jsonify({"ok": False, "error": "method_not_allowed", "message": "Method not allowed"}), 405
+
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=8000, debug=False)
