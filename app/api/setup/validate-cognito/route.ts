@@ -71,7 +71,7 @@ export async function POST(req: Request) {
           "#region": "region"
         },
         ExpressionAttributeValues: {
-          ":serviceType": { S: "cognito" },
+          ":serviceType": { S: "aws-cognito" },
           ":userPoolId": { S: userPoolId },
           ":region": { S: region }
         }
@@ -98,7 +98,7 @@ export async function POST(req: Request) {
         TableName: CS_TABLE,
         FilterExpression: "serviceType = :serviceType AND clientId = :clientId",
         ExpressionAttributeValues: {
-          ":serviceType": { S: "cognito" },
+          ":serviceType": { S: "aws-cognito" },
           ":clientId": { S: clientId }
         }
       });

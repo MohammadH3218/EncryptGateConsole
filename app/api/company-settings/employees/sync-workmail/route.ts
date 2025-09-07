@@ -15,29 +15,29 @@ import {
 } from "@aws-sdk/client-workmail";
 
 // Environment variables
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees";
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
                  process.env.CLOUDSERVICES_TABLE || 
                  "CloudServices";
 
-if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
+// Note: In production, ORG_ID should be extracted from request context
 
-console.log("🔧 WorkMail Sync API starting with:", { ORG_ID, EMPLOYEES_TABLE, CS_TABLE });
+console.log("🔧 WorkMail Sync API starting with:", { DEFAULT_ORG_ID, EMPLOYEES_TABLE, CS_TABLE });
 
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 // Helper function to get WorkMail configuration from DynamoDB
 async function getWorkMailConfig() {
-  console.log(`🔍 Fetching WorkMail config for org ${ORG_ID} from table ${CS_TABLE}`);
+  console.log(`🔍 Fetching WorkMail config for org ${DEFAULT_ORG_ID} from table ${CS_TABLE}`);
   
   try {
     const resp = await ddb.send(
       new GetItemCommand({
         TableName: CS_TABLE,
         Key: {
-          orgId:       { S: ORG_ID },
+          orgId:       { S: DEFAULT_ORG_ID },
           serviceType: { S: "aws-workmail" },
         },
       })
@@ -133,7 +133,7 @@ export async function POST(req: Request) {
           const putRequests = batch.map(emp => ({
             PutRequest: {
               Item: {
-                orgId: { S: ORG_ID },
+                orgId: { S: DEFAULT_ORG_ID },
                 email: { S: emp.email },
                 name: { S: emp.name },
                 department: { S: emp.department },

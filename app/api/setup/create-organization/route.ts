@@ -73,7 +73,7 @@ export async function POST(req: Request) {
           "#region": "region"
         },
         ExpressionAttributeValues: {
-          ":serviceType": { S: "cognito" },
+          ":serviceType": { S: "aws-cognito" },
           ":userPoolId": { S: cognito.userPoolId },
           ":region": { S: cognito.region }
         }
@@ -219,7 +219,7 @@ export async function POST(req: Request) {
         TableName: CS_TABLE,
         Item: {
           orgId: { S: organizationId },
-          serviceType: { S: "cognito" },
+          serviceType: { S: "aws-cognito" },
           name: { S: `Cognito User Pool - ${organization.name}` },
           domain: { S: `${cognito.userPoolId}.auth.${cognito.region}.amazoncognito.com` },
           userPoolId: { S: cognito.userPoolId },

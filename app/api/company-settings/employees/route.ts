@@ -16,15 +16,14 @@ import {
 // Environment and clients
 // ───────────────────────────────────────────────────────────────────────────────
 const DDB_REGION = process.env.AWS_REGION || process.env.REGION || 'us-east-1';
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMPLOYEES_TABLE =
   process.env.EMPLOYEES_TABLE_NAME || 'Employees';
 
 // for sync:
 const WORKMAIL_ORG = process.env.WORKMAIL_ORGANIZATION_ID;
 
-if (!ORG_ID)
-  throw new Error('Missing ORGANIZATION_ID env var');
+// Note: In production, ORG_ID should be extracted from request context
 
 const ddb = new DynamoDBClient({ region: DDB_REGION });
 const wmc = new WorkMailClient({ region: DDB_REGION });
@@ -40,7 +39,7 @@ export async function GET(req: Request) {
         TableName: EMPLOYEES_TABLE,
         KeyConditionExpression: 'orgId = :orgId',
         ExpressionAttributeValues: {
-          ':orgId': { S: ORG_ID },
+          ':orgId': { S: DEFAULT_ORG_ID },
         },
       })
     );
@@ -93,7 +92,7 @@ export async function POST(req: Request) {
       new PutItemCommand({
         TableName: EMPLOYEES_TABLE,
         Item: {
-          orgId:               { S: ORG_ID },
+          orgId:               { S: DEFAULT_ORG_ID },
           email:               { S: email },
           name:                { S: name },
           department:          { S: department || '' },
@@ -165,7 +164,7 @@ export async function PUT(req: Request) {
         new PutItemCommand({
           TableName: EMPLOYEES_TABLE,
           Item: {
-            orgId:               { S: ORG_ID },
+            orgId:               { S: DEFAULT_ORG_ID },
             workMailUserId:      { S: u.Id! },
             email:               { S: u.Email! },
             name:                { S: u.Name! },

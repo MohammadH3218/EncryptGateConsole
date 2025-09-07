@@ -17,27 +17,28 @@ import {
   AdminGetUserCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
 
-// Environment variables
-const ORG_ID = process.env.ORGANIZATION_ID!;
+// Environment variables - Made optional for org-aware deployment
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
                  process.env.CLOUDSERVICES_TABLE || 
                  "CloudServices";
 const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 
-if (!ORG_ID) throw new Error("Missing ORGANIZATION_ID env var");
+// Note: In production, ORG_ID should be extracted from request context
+// This fallback is for backward compatibility during migration
 
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 async function getCognitoConfig() {
-  console.log(`🔍 Fetching Cognito config for org ${ORG_ID} from table ${CS_TABLE}`);
+  console.log(`🔍 Fetching Cognito config for org ${DEFAULT_ORG_ID} from table ${CS_TABLE}`);
   
   try {
     const resp = await ddb.send(
       new GetItemCommand({
         TableName: CS_TABLE,
         Key: {
-          orgId:       { S: ORG_ID },
+          orgId:       { S: DEFAULT_ORG_ID },
           serviceType: { S: "aws-cognito" },
         },
       })
@@ -72,7 +73,7 @@ export async function GET(req: Request) {
         TableName: USERS_TABLE,
         KeyConditionExpression: "orgId = :orgId",
         ExpressionAttributeValues: {
-          ":orgId": { S: ORG_ID },
+          ":orgId": { S: DEFAULT_ORG_ID },
         },
       })
     );
@@ -138,7 +139,7 @@ export async function POST(req: Request) {
         TableName: USERS_TABLE,
         KeyConditionExpression: "orgId = :orgId",
         ExpressionAttributeValues: {
-          ":orgId": { S: ORG_ID },
+          ":orgId": { S: DEFAULT_ORG_ID },
         },
         Select: "COUNT"
       })
@@ -215,7 +216,7 @@ export async function POST(req: Request) {
     await ddb.send(new PutItemCommand({
       TableName: USERS_TABLE,
       Item: {
-        orgId:     { S: ORG_ID },
+        orgId:     { S: DEFAULT_ORG_ID },
         email:     { S: email },
         name:      { S: name },
         role:      { S: role },
@@ -296,7 +297,7 @@ export async function DELETE(
     await ddb.send(new DeleteItemCommand({
       TableName: USERS_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         email: { S: email },
       },
     }));

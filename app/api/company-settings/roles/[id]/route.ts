@@ -12,7 +12,7 @@ import {
 import { Role, PERMISSIONS } from '@/types/roles';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
-const ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
 const ROLES_TABLE = process.env.ROLES_TABLE_NAME || 'SecurityRoles';
 const USER_ROLES_TABLE = process.env.USER_ROLES_TABLE_NAME || 'SecurityUserRoles';
 
@@ -47,7 +47,7 @@ export async function GET(
     const response = await ddb.send(new GetItemCommand({
       TableName: ROLES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         roleId: { S: roleId }
       }
     }));
@@ -94,7 +94,7 @@ export async function PUT(
     const getResponse = await ddb.send(new GetItemCommand({
       TableName: ROLES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         roleId: { S: roleId }
       }
     }));
@@ -184,7 +184,7 @@ export async function PUT(
     await ddb.send(new UpdateItemCommand({
       TableName: ROLES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         roleId: { S: roleId }
       },
       UpdateExpression: `SET ${updateExpressions.join(', ')}`,
@@ -227,7 +227,7 @@ export async function DELETE(
     const getResponse = await ddb.send(new GetItemCommand({
       TableName: ROLES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         roleId: { S: roleId }
       }
     }));
@@ -272,7 +272,7 @@ export async function DELETE(
     await ddb.send(new DeleteItemCommand({
       TableName: ROLES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: DEFAULT_ORG_ID },
         roleId: { S: roleId }
       }
     }));
