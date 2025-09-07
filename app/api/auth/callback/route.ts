@@ -1,90 +1,72 @@
-// app/api/auth/callback/route.ts
 import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb'
 import { Buffer } from 'buffer'
-import {
-  DynamoDBClient,
-  UpdateItemCommand,
-} from '@aws-sdk/client-dynamodb'
 
 export const runtime = 'nodejs'
-
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
-const ORG_ID = process.env.ORGANIZATION_ID!
-const USERS_TABLE = process.env.USERS_TABLE_NAME || 'SecurityTeamUsers'
+const CLOUD_TABLE = process.env.CLOUD_TABLE_NAME || 'CloudServices'
 
-// Helper function to decode JWT token and extract user email
 function decodeJWT(token: string) {
   try {
     const [header, payload, signature] = token.split('.')
     const decodedPayload = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'))
     return decodedPayload
   } catch (error) {
-    console.error('❌ Error decoding JWT token:', error)
     return null
   }
 }
 
-// Helper function to update user's lastLogin timestamp
-async function updateUserLastLogin(userEmail: string) {
+export async function GET(req: Request) {
+  const url = new URL(req.url)
+  const code = url.searchParams.get('code')
+  const stateRaw = url.searchParams.get('state')
+  const baseUrl = url.origin
+
+  if (!code || !stateRaw) return NextResponse.redirect('/login?error=missing_params')
+
+  let orgId: string
   try {
-    console.log('🔄 Updating lastLogin for user:', userEmail)
-    
-    await ddb.send(new UpdateItemCommand({
-      TableName: USERS_TABLE,
-      Key: {
-        orgId: { S: ORG_ID },
-        email: { S: userEmail }
-      },
-      UpdateExpression: 'SET lastLogin = :lastLogin',
-      ExpressionAttributeValues: {
-        ':lastLogin': { S: new Date().toISOString() }
-      },
-      ReturnValues: 'NONE'
-    }))
-    
-    console.log('✅ Successfully updated lastLogin for:', userEmail)
-  } catch (error) {
-    console.error('⚠️ Failed to update lastLogin for:', userEmail, error)
+    orgId = JSON.parse(decodeURIComponent(stateRaw)).orgId
+  } catch {
+    return NextResponse.redirect('/login?error=bad_state')
   }
-}
 
-export async function GET(req: NextRequest) {
+  // fetch config
+  const r = await ddb.send(new GetItemCommand({
+    TableName: CLOUD_TABLE,
+    Key: { orgId: { S: orgId }, serviceType: { S: 'cognito' } }
+  }))
+  if (!r.Item) return NextResponse.redirect('/login?error=no_cognito_config')
+
+  const domain = r.Item.domain?.S
+  const clientId = r.Item.clientId?.S
+  const clientSecret = r.Item.clientSecret?.S
+  const redirectUri = r.Item.redirectUri?.S || `${url.origin}/api/auth/callback`
+
+  if (!domain || !clientId || !redirectUri) {
+    return NextResponse.redirect('/login?error=missing_config')
+  }
+
+  const tokenUrl = `https://${domain}/oauth2/token`
   try {
-    console.log('↪️  Entering callback handler')
-    console.log('🔍 Raw Request URL:', req.url)
+    // Try with Authorization header if clientSecret is present
+    let tokenRes = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...(clientSecret ? { 'Authorization': 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64') } : {})
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        code,
+        redirect_uri: redirectUri,
+      }).toString(),
+    })
 
-    const { searchParams } = new URL(req.url)
-    const code = searchParams.get('code')
-    console.log('🔑 Authorization code received:', code ? 'YES' : 'NO')
-
-    // HARDCODED VALUES - using the exact values provided
-    const domain = 'us-east-1kpxz426n8.auth.us-east-1.amazoncognito.com'
-    const clientId = 'u7p7ddajvruk8rccoajj8o5h0'
-    const clientSecret = 'REDACTED_COGNITO_CLIENT_SECRET'
-    const redirectUri = 'https://console-encryptgate.net/api/auth/callback'
-    
-    // Set absolute base URL for redirects
-    const baseUrl = 'https://console-encryptgate.net'
-    
-    console.log('🔧 Using domain:', domain)
-    console.log('🔧 Using clientId:', clientId)
-    console.log('🔧 Client secret length:', clientSecret.length)
-    console.log('🌐 Using redirectUri:', redirectUri)
-
-    if (!code) {
-      console.warn('⚠️ No code parameter found; redirecting to login')
-      return NextResponse.redirect(`${baseUrl}/api/auth/login`)
-    }
-
-    // Exchange code for tokens
-    const tokenUrl = `https://${domain}/oauth2/token`
-    console.log('🚀 Fetching tokens from URL:', tokenUrl)
-
-    try {
-      // TRY METHOD 2: Include client_id and client_secret in the body
-      // Instead of using the Authorization header
-      const tokenRes = await fetch(tokenUrl, {
+    if (!tokenRes.ok && clientSecret) {
+      // Try with client_secret in body if Authorization header fails
+      tokenRes = await fetch(tokenUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -92,77 +74,39 @@ export async function GET(req: NextRequest) {
         body: new URLSearchParams({
           grant_type: 'authorization_code',
           client_id: clientId,
-          client_secret: clientSecret, // Include secret in the body
+          client_secret: clientSecret,
           redirect_uri: redirectUri,
           code,
         }).toString(),
       })
-
-      console.log('🎫 Token response status:', tokenRes.status)
-      
-      if (!tokenRes.ok) {
-        let errorText = 'Unknown error';
-        try {
-          errorText = await tokenRes.text();
-          console.error('❌ Token exchange failed:', errorText);
-        } catch (textError) {
-          console.error('❌ Token exchange failed and could not read response');
-        }
-        
-        return NextResponse.redirect(`${baseUrl}/api/auth/login?error=token_exchange_failed&details=${encodeURIComponent(errorText)}`)
-      }
-
-      const tokenData = await tokenRes.json();
-      console.log('✅ Token types received:', Object.keys(tokenData).join(', '));
-      
-      const { id_token, access_token, refresh_token } = tokenData;
-      
-      if (!id_token || !access_token) {
-        console.error('❌ Missing required tokens in response');
-        return NextResponse.redirect(`${baseUrl}/api/auth/login?error=missing_tokens`);
-      }
-
-      // Decode the ID token to get user information
-      const userInfo = decodeJWT(id_token)
-      if (userInfo && userInfo.email) {
-        // Update user's lastLogin timestamp for activity status
-        await updateUserLastLogin(userInfo.email)
-      } else {
-        console.warn('⚠️ Could not extract email from ID token for activity tracking')
-      }
-
-    const res = NextResponse.redirect(`${baseUrl}/admin/dashboard`);
-    const cookieOpts = {
-        httpOnly: true,
-        secure: true, 
-        sameSite: 'lax' as const,  // 'lax' is important for redirects
-        path: '/',                 // Ensure cookies are available on all paths
-        maxAge: 3600,              // Set expiration time in seconds (1 hour)
-    };
-
-    res.cookies.set('id_token', id_token, cookieOpts);
-    res.cookies.set('access_token', access_token, cookieOpts);
-    if (refresh_token) {
-        res.cookies.set('refresh_token', refresh_token, {
-            ...cookieOpts,
-            maxAge: 30 * 24 * 60 * 60, // 30 days for refresh token
-        });
     }
 
-      console.log('🚩 Successfully set cookies, redirecting to dashboard');
-      return res;
-    } catch (fetchError: any) {
-      console.error('💥 Error during token exchange:', fetchError.message || fetchError);
-      console.error('Error stack:', fetchError.stack);
-      
-      return NextResponse.redirect(`${baseUrl}/api/auth/login?error=fetch_error&details=${encodeURIComponent(fetchError.message || 'Unknown fetch error')}`);
+    if (!tokenRes.ok) {
+      let errorText = 'Unknown error';
+      try {
+        errorText = await tokenRes.text();
+      } catch {}
+      return NextResponse.redirect(`${baseUrl}/api/auth/login?error=token_exchange_failed&details=${encodeURIComponent(errorText)}`)
     }
 
+    const tokenData = await tokenRes.json();
+    const { id_token, access_token, refresh_token, expires_in } = tokenData;
+
+    if (!id_token || !access_token) {
+      return NextResponse.redirect(`${baseUrl}/api/auth/login?error=missing_tokens`);
+    }
+
+    // Optionally decode and use user info
+    // const userInfo = decodeJWT(id_token)
+
+    const res = NextResponse.redirect(`${baseUrl}/admin`);
+    const opts = { httpOnly: true, path: '/', maxAge: Math.max(300, Number(expires_in || 3600)) };
+    res.cookies.set('id_token', id_token, opts);
+    res.cookies.set('access_token', access_token, opts);
+    if (refresh_token) res.cookies.set('refresh_token', refresh_token, { ...opts, maxAge: 30*24*3600 });
+    res.cookies.set('org_id', orgId, { ...opts, httpOnly: false });
+    return res;
   } catch (err: any) {
-    console.error('💥 Unhandled error in callback:', err.message || err);
-    console.error('Error stack:', err.stack);
-    
-    // Use a hardcoded URL with error details for debugging
-    return NextResponse.redirect('https://console-encryptgate.net/api/auth/login?error=unhandled_error');
+    return NextResponse.redirect(`${baseUrl}/api/auth/login?error=unhandled_error&details=${encodeURIComponent(err.message || 'Unknown error')}`);
   }
 }
