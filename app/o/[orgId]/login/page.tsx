@@ -113,49 +113,47 @@ export default function OrgAwareLoginPage() {
 
       const result = await response.json()
 
-      // Handle Flask API response format
-      const hasTokens = result.access_token && result.id_token;
-      const hasChallenge = result.ChallengeName;
-
-      if (hasTokens) {
-        // Successful authentication - convert to expected format
+      // Handle the new response format
+      if (result.status === "SUCCESS" && result.access_token) {
+        // Successful authentication
         const tokens = {
           accessToken: result.access_token,
           idToken: result.id_token,
           refreshToken: result.refresh_token
         };
-        // Store tokens in secure cookies by calling a cookie-setting endpoint
+        
+        // Store tokens in secure cookies
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             orgId,
             tokens,
-            user: result.user
+            user: result.user || { email, name: email.split('@')[0] }
           })
         })
 
         if (cookieResponse.ok) {
-          // Redirect to dashboard or next URL
           router.push(next)
         } else {
           setAuthError("Session setup failed. Please try again.")
         }
-      } else if (hasChallenge) {
+      } else if (result.status === "CHALLENGE" || result.ChallengeName) {
         // Handle authentication challenges
         setSession(result.session)
         
-        const challengeName = result.ChallengeName;
+        const challengeName = result.challenge || result.ChallengeName;
         if (challengeName === "NEW_PASSWORD_REQUIRED") {
           setShowPasswordChange(true)
         } else if (challengeName === "SOFTWARE_TOKEN_MFA") {
-          // User already has MFA configured - just show MFA input dialog
           setShowMFA(true)
         } else if (challengeName === "MFA_SETUP") {
-          // This should be rare - only for truly new MFA setup
-          // For now, just show MFA input since most users will already have TOTP
-          console.log("MFA_SETUP challenge received - showing MFA input dialog");
-          setShowMFA(true)
+          if (result.secretCode) {
+            setMfaSecretCode(result.secretCode)
+            setShowMFASetup(true)
+          } else {
+            setShowMFA(true) // Fallback
+          }
         } else {
           setAuthError(`Challenge required: ${challengeName || "unknown"}`)
         }
@@ -203,33 +201,27 @@ export default function OrgAwareLoginPage() {
           orgId,
           username: email,
           session,
-          challengeName: "NEW_PASSWORD_REQUIRED",
-          challengeResponses: {
-            NEW_PASSWORD: newPassword,
-          }
+          newPassword
         })
       })
 
       const result = await response.json()
-
-      // Handle Flask API response format
-      const hasTokens = result.access_token && result.id_token;
-      const hasChallenge = result.ChallengeName;
       
-      if (hasTokens) {
+      // Handle response similar to handleSignIn
+      if (result.status === "SUCCESS" && result.access_token) {
         const tokens = {
           accessToken: result.access_token,
           idToken: result.id_token,
           refreshToken: result.refresh_token
         };
-        // Password changed successfully, store tokens
+        
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             orgId,
             tokens,
-            user: { email, name: email.split('@')[0] } // Basic user info
+            user: { email, name: email.split('@')[0] }
           })
         })
 
@@ -239,19 +231,20 @@ export default function OrgAwareLoginPage() {
         } else {
           setAuthError("Session setup failed. Please try again.")
         }
-      } else if (hasChallenge) {
-        // Another challenge required (like MFA)
-        const challengeName = result.ChallengeName;
+      } else if (result.status === "CHALLENGE" || result.ChallengeName) {
+        const challengeName = result.challenge || result.ChallengeName;
         setSession(result.session)
         setShowPasswordChange(false)
         
         if (challengeName === "SOFTWARE_TOKEN_MFA") {
-          // User already has MFA configured - just show MFA input dialog
           setShowMFA(true)
         } else if (challengeName === "MFA_SETUP") {
-          // This should be rare - for now, just show MFA input dialog
-          console.log("MFA_SETUP challenge received after password change - showing MFA input dialog");
-          setShowMFA(true)
+          if (result.secretCode) {
+            setMfaSecretCode(result.secretCode)
+            setShowMFASetup(true)
+          } else {
+            setShowMFA(true)
+          }
         } else {
           setAuthError(`Additional challenge required: ${challengeName || "unknown"}`)
         }
@@ -343,19 +336,13 @@ export default function OrgAwareLoginPage() {
           orgId,
           username: email,
           session,
-          challengeName: "SOFTWARE_TOKEN_MFA",
-          challengeResponses: {
-            SOFTWARE_TOKEN_MFA_CODE: mfaCode,
-          }
+          mfaCode
         })
       })
       
       const result = await response.json()
       
-      // Handle Flask API response format
-      const hasTokens = result.access_token && result.id_token;
-
-      if (hasTokens) {
+      if (result.status === "SUCCESS" && result.access_token) {
         await finalizeLogin(result.access_token, result.id_token || "", result.refresh_token || "")
       } else {
         setAuthError(result.detail || result.message || "MFA verification failed")
@@ -447,7 +434,7 @@ export default function OrgAwareLoginPage() {
     setForgotPasswordError("")
     
     try {
-      const response = await fetch('/api/auth/forgot-password', {
+      const response = await fetch(`${apiBaseUrl}/api/auth/forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: forgotPasswordEmail })
@@ -501,7 +488,7 @@ export default function OrgAwareLoginPage() {
     setForgotPasswordError("")
     
     try {
-      const response = await fetch('/api/auth/confirm-forgot-password', {
+      const response = await fetch(`${apiBaseUrl}/api/auth/confirm-forgot-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -666,6 +653,13 @@ export default function OrgAwareLoginPage() {
           </Button>
 
           <div className="text-center space-y-2">
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Forgot your password?
+            </button>
             <p className="text-center text-xs text-gray-500">
               Secure access to your organization dashboard
             </p>
