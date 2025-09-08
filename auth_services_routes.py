@@ -315,6 +315,10 @@ def respond_to_mfa_challenge(client, client_id: str, username: str, session: str
         if "AuthenticationResult" in response:
             logger.info("MFA challenge completed successfully - tokens received")
             return response["AuthenticationResult"]
+        elif "AccessToken" in response:
+            # Handle direct token response (sometimes happens with MFA_SETUP)
+            logger.info("MFA challenge completed successfully - tokens received at root level")
+            return response
         else:
             challenge = response.get("ChallengeName")
             logger.error(f"Unexpected challenge '{challenge}' returned instead of tokens")
@@ -1040,10 +1044,27 @@ def confirm_mfa_setup_endpoint():
                 mfa_code=None, client_secret=client_secret
             )
             
+            # Check if we have tokens (either wrapped in AuthenticationResult or at root level)
+            tokens = None
             if "AuthenticationResult" in auth_result:
-                # Success - return the authentication tokens
                 tokens = auth_result["AuthenticationResult"]
-                logger.info("MFA setup completed successfully - returning tokens")
+                logger.info("MFA setup completed successfully - tokens in AuthenticationResult")
+            elif "AccessToken" in auth_result:
+                # Tokens returned at root level (common with MFA_SETUP completion)
+                tokens = auth_result
+                logger.info("MFA setup completed successfully - tokens at root level")
+            
+            if tokens:
+                # Set MFA preference as enabled (best effort, don't fail if this throws)
+                try:
+                    org_cognito_client.set_user_mfa_preference(
+                        AccessToken=tokens.get("AccessToken"),
+                        SoftwareTokenMfaSettings={"Enabled": True, "PreferredMfa": True}
+                    )
+                    logger.info("MFA preference set successfully")
+                except Exception as pref_error:
+                    logger.warning(f"set_user_mfa_preference failed (non-fatal): {pref_error}")
+                
                 return jsonify({
                     "success": True,
                     "access_token": tokens.get("AccessToken"),
@@ -1056,7 +1077,7 @@ def confirm_mfa_setup_endpoint():
                     "orgId": orgId
                 }), 200
             else:
-                logger.error(f"Unexpected response after MFA setup: {auth_result}")
+                logger.error(f"Unexpected response after MFA setup - no tokens found: {auth_result}")
                 return jsonify({"detail": "MFA setup verification succeeded but authentication failed"}), 500
             
         except Exception as setup_error:
