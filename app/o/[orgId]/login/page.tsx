@@ -25,52 +25,6 @@ import {
 import { Loader2, ArrowRight, Lock, AlertTriangle, Eye, EyeOff, X, Mail, CheckCircle, Copy, Check } from "lucide-react"
 import { fetchWithRetry } from "@/utils/auth"
 
-// Helper function to extract user information from authentication result
-const extractUserInfo = (authResult: any, fallbackEmail: string) => {
-  // Try to get user info from the authentication result
-  if (authResult.user) {
-    const name = authResult.user.preferred_username || authResult.user.name || authResult.user.displayName || fallbackEmail.split('@')[0]
-    return {
-      email: authResult.user.email || fallbackEmail,
-      name: name
-    }
-  }
-  
-  // Try to decode the ID token to get user attributes (preferred method for Cognito)
-  if (authResult.id_token) {
-    try {
-      const payload = JSON.parse(atob(authResult.id_token.split('.')[1]))
-      // Prioritize preferred_username as confirmed by user
-      let name = fallbackEmail.split('@')[0] // fallback
-      
-      if (payload.preferred_username && payload.preferred_username !== payload.email && payload.preferred_username.trim() !== '') {
-        name = payload.preferred_username
-      } else if (payload.name && payload.name.trim() !== '') {
-        name = payload.name
-      } else if (payload.given_name && payload.family_name) {
-        name = `${payload.given_name} ${payload.family_name}`
-      } else if (payload.given_name && payload.given_name.trim() !== '') {
-        name = payload.given_name
-      } else if (payload.nickname && payload.nickname.trim() !== '') {
-        name = payload.nickname
-      }
-      
-      return {
-        email: payload.email || fallbackEmail,
-        name: name
-      }
-    } catch (error) {
-      console.warn('Failed to decode ID token:', error)
-    }
-  }
-  
-  // Fallback
-  return {
-    email: fallbackEmail,
-    name: fallbackEmail.split('@')[0]
-  }
-}
-
 export default function OrgAwareLoginPage() {
   const router = useRouter()
   const params = useParams()
@@ -113,25 +67,12 @@ export default function OrgAwareLoginPage() {
   const [confirmForgotPassword, setConfirmForgotPassword] = useState("")
   const [forgotPasswordError, setForgotPasswordError] = useState("")
   const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false)
-  const [isFromSetup, setIsFromSetup] = useState(false)
 
   useEffect(() => {
     // Get org name from localStorage if available
     const storedOrgName = localStorage.getItem('organization_name')
     if (storedOrgName) {
       setOrgName(storedOrgName)
-    }
-    
-    // Check if user is coming from setup and pre-populate email
-    const fromSetup = localStorage.getItem('setup_redirect_from_setup')
-    const setupAdminEmail = localStorage.getItem('setup_admin_email')
-    
-    if (fromSetup === 'true' && setupAdminEmail) {
-      setEmail(setupAdminEmail)
-      setIsFromSetup(true)
-      // Clear the setup flags
-      localStorage.removeItem('setup_redirect_from_setup')
-      localStorage.removeItem('setup_admin_email')
     }
     
     // Initialize API base URL
@@ -183,14 +124,13 @@ export default function OrgAwareLoginPage() {
         };
         
         // Store tokens in secure cookies
-        const userInfo = extractUserInfo(result, email)
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             orgId,
             tokens,
-            user: userInfo
+            user: result.user || { email, name: email.split('@')[0] }
           })
         })
 
@@ -285,14 +225,13 @@ export default function OrgAwareLoginPage() {
           refreshToken: result.refresh_token
         };
         
-        const userInfo = extractUserInfo(result, email)
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             orgId,
             tokens,
-            user: userInfo
+            user: { email, name: email.split('@')[0] }
           })
         })
 
@@ -370,10 +309,6 @@ export default function OrgAwareLoginPage() {
       console.warn("⚠️ Auto-registration failed, but continuing with login:", error)
     }
     
-    // Extract user info from tokens
-    const mockResult = { id_token: idToken, access_token: accessToken }
-    const userInfo = extractUserInfo(mockResult, email)
-    
     // Store tokens and redirect
     const cookieResponse = await fetch('/api/auth/set-session', {
       method: 'POST',
@@ -385,7 +320,7 @@ export default function OrgAwareLoginPage() {
           idToken,
           refreshToken
         },
-        user: userInfo
+        user: { email, name: email.split('@')[0] }
       })
     })
 
@@ -647,10 +582,7 @@ export default function OrgAwareLoginPage() {
               {orgName ? `Welcome to ${orgName}` : 'Organization Login'}
             </CardTitle>
             <CardDescription className="text-gray-400">
-              {isFromSetup 
-                ? "Your organization has been set up successfully! Please enter your password to continue."
-                : "Enter your credentials to access your organization"
-              }
+              Enter your credentials to access your organization
             </CardDescription>
             {orgId && (
               <div className="text-xs text-gray-500 font-mono bg-[#1a1a1a] px-2 py-1 rounded">
@@ -661,15 +593,6 @@ export default function OrgAwareLoginPage() {
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {isFromSetup && (
-            <Alert className="bg-green-500/10 border-green-500/20 animate-in slide-in-from-top-2 duration-300">
-              <CheckCircle className="h-4 w-4" />
-              <AlertDescription className="text-sm text-green-200">
-                Organization setup completed successfully! Please log in to continue.
-              </AlertDescription>
-            </Alert>
-          )}
-          
           {(errorMessage || authError) && (
             <Alert
               variant="destructive"
