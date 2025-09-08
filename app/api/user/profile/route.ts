@@ -1,39 +1,66 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import jwt from 'jsonwebtoken'
-import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb'
+import { DynamoDBClient, QueryCommand, GetItemCommand } from '@aws-sdk/client-dynamodb'
 
 // DynamoDB setup
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
 const CLOUDSERVICES_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 'CloudServices'
+const ORGANIZATIONS_TABLE = process.env.ORGANIZATIONS_TABLE_NAME || 'Organizations'
+const USERS_TABLE = process.env.USERS_TABLE_NAME || 'SecurityTeamUsers'
 
-// Helper function to get organization info
+// Helper function to get organization info from Organizations table
 async function getOrganizationInfo(orgId: string) {
   try {
-    const response = await ddb.send(new QueryCommand({
-      TableName: CLOUDSERVICES_TABLE,
-      KeyConditionExpression: 'orgId = :orgId',
-      ExpressionAttributeValues: {
-        ':orgId': { S: orgId }
-      },
-      Limit: 1
+    // First try Organizations table
+    const response = await ddb.send(new GetItemCommand({
+      TableName: ORGANIZATIONS_TABLE,
+      Key: {
+        'organizationId': { S: orgId }
+      }
     }))
     
-    const item = response.Items?.[0]
-    if (item) {
+    const item = response.Item
+    if (item && item.name?.S) {
       return {
-        id: item.orgId?.S || orgId,
-        name: item.name?.S || 'Your Organization'
+        id: orgId,
+        name: item.name.S
       }
     }
   } catch (error) {
-    console.warn(`Failed to fetch org info for ${orgId}:`, error)
+    console.warn(`Failed to fetch org info from Organizations table for ${orgId}:`, error)
   }
   
   return {
     id: orgId,
     name: 'Your Organization'
   }
+}
+
+// Helper function to get user display name from Users table
+async function getUserDisplayName(orgId: string, userEmail: string, fallbackName: string) {
+  try {
+    // Query Users table by orgId and email
+    const response = await ddb.send(new QueryCommand({
+      TableName: USERS_TABLE,
+      KeyConditionExpression: 'orgId = :orgId',
+      FilterExpression: 'email = :email',
+      ExpressionAttributeValues: {
+        ':orgId': { S: orgId },
+        ':email': { S: userEmail }
+      },
+      Limit: 1
+    }))
+    
+    const item = response.Items?.[0]
+    if (item && item.name?.S) {
+      return item.name.S
+    }
+  } catch (error) {
+    console.warn(`Failed to fetch user display name for ${userEmail} in org ${orgId}:`, error)
+  }
+  
+  return fallbackName
 }
 
 // Default permissions for each role
@@ -115,7 +142,7 @@ export async function GET(request: NextRequest) {
     const orgInfo = await getOrganizationInfo(orgId)
     
     // Extract display name from various token fields, fallback to email local part
-    const displayName = (
+    const tokenDisplayName = (
       claims.name || 
       claims.given_name || 
       claims.preferred_username || 
@@ -123,6 +150,10 @@ export async function GET(request: NextRequest) {
       (claims.email || claims['cognito:username'])?.split('@')[0] ||
       'User'
     )
+    
+    // Try to get stored display name from Users table, fallback to token name
+    const userEmail = claims.email || claims['cognito:username']
+    const displayName = await getUserDisplayName(orgId, userEmail, tokenDisplayName)
 
     const profile = {
       ok: true,
