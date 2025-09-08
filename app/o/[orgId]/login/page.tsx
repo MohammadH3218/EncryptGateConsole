@@ -47,6 +47,7 @@ export default function OrgAwareLoginPage() {
   const [showPasswordChange, setShowPasswordChange] = useState(false)
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
+  const [displayName, setDisplayName] = useState("")
   
   // MFA states
   const [showMFA, setShowMFA] = useState(false)
@@ -206,7 +207,11 @@ export default function OrgAwareLoginPage() {
           orgId,
           username: email,
           session,
-          newPassword
+          challengeName: "NEW_PASSWORD_REQUIRED",
+          challengeResponses: {
+            NEW_PASSWORD: newPassword,
+            "userAttributes.preferred_username": displayName || email.split('@')[0]
+          }
         })
       })
 
@@ -714,6 +719,19 @@ export default function OrgAwareLoginPage() {
                 <div className="bg-[#1f1f1f] border border-[#2f2f2f] rounded px-3 py-2 text-gray-300">
                   {email || "Your account"}
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="display-name" className="text-white">Display Name</Label>
+                <Input
+                  id="display-name"
+                  type="text"
+                  placeholder="Enter your display name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                  disabled={isLoading}
+                />
               </div>
 
               <div className="space-y-2">

@@ -528,6 +528,15 @@ def respond_to_challenge_endpoint():
         else:
             return jsonify({"detail": "Must provide newPassword, mfaCode, or challengeResponses"}), 400
         
+        # Extract user attributes from challenge responses for NEW_PASSWORD_REQUIRED
+        user_attributes = {}
+        if determined_challenge_name == "NEW_PASSWORD_REQUIRED" and challenge_responses:
+            for key, value in challenge_responses.items():
+                if key.startswith("userAttributes."):
+                    attr_name = key.replace("userAttributes.", "")
+                    user_attributes[attr_name] = value
+                    logger.info(f"Extracted user attribute: {attr_name}")
+        
         # Add SECRET_HASH if client secret is present
         if client_secret:
             responses["SECRET_HASH"] = _calculate_secret_hash(username, client_id, client_secret)
@@ -536,12 +545,25 @@ def respond_to_challenge_endpoint():
         logger.info(f"=== Responding to {determined_challenge_name} challenge for user: {username} in org: {orgId or 'global'} ===")
         
         try:
-            response = org_cognito_client.respond_to_auth_challenge(
-                ClientId=client_id,
-                ChallengeName=determined_challenge_name,
-                Session=session,
-                ChallengeResponses=responses
-            )
+            # Use the specialized NEW_PASSWORD_REQUIRED handler if we have user attributes
+            if determined_challenge_name == "NEW_PASSWORD_REQUIRED" and user_attributes:
+                logger.info(f"Using NEW_PASSWORD_REQUIRED handler with user attributes: {list(user_attributes.keys())}")
+                response = respond_to_new_password_challenge(
+                    org_cognito_client, 
+                    client_id, 
+                    username, 
+                    challenge_responses.get("NEW_PASSWORD"), 
+                    session, 
+                    user_attributes, 
+                    client_secret
+                )
+            else:
+                response = org_cognito_client.respond_to_auth_challenge(
+                    ClientId=client_id,
+                    ChallengeName=determined_challenge_name,
+                    Session=session,
+                    ChallengeResponses=responses
+                )
         except Exception as challenge_error:
             logger.error(f"Challenge response failed: {challenge_error}")
             return jsonify({"detail": str(challenge_error)}), 400
