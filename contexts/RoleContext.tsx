@@ -44,17 +44,10 @@ export function RoleProvider({ children }: RoleProviderProps) {
   // Fetch user profile and roles
   const fetchUserProfile = async () => {
     try {
-      const token = localStorage.getItem('access_token')
-      if (!token) {
-        setLoading(false)
-        return
-      }
-
-      // Fetch user profile
+      // With httpOnly cookies, we don't need to send Authorization header
+      // The cookies will be sent automatically
       const userResponse = await fetch('/api/user/profile', {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        credentials: 'include' // Ensure cookies are included
       })
 
       if (userResponse.ok) {

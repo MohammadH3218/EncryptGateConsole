@@ -134,6 +134,11 @@ export default function OrgAwareLoginPage() {
         })
 
         if (cookieResponse.ok) {
+          // Also store tokens in localStorage for components that need them
+          localStorage.setItem('access_token', result.access_token)
+          if (result.id_token) localStorage.setItem('id_token', result.id_token)
+          if (result.refresh_token) localStorage.setItem('refresh_token', result.refresh_token)
+          
           router.push(next)
         } else {
           setAuthError("Session setup failed. Please try again.")
@@ -226,6 +231,11 @@ export default function OrgAwareLoginPage() {
         })
 
         if (cookieResponse.ok) {
+          // Also store tokens in localStorage for components that need them
+          localStorage.setItem('access_token', result.access_token)
+          if (result.id_token) localStorage.setItem('id_token', result.id_token)
+          if (result.refresh_token) localStorage.setItem('refresh_token', result.refresh_token)
+          
           setShowPasswordChange(false)
           router.push(next)
         } else {
@@ -310,6 +320,11 @@ export default function OrgAwareLoginPage() {
     })
 
     if (cookieResponse.ok) {
+      // Also store tokens in localStorage for components that need them
+      localStorage.setItem('access_token', accessToken)
+      if (idToken) localStorage.setItem('id_token', idToken)
+      if (refreshToken) localStorage.setItem('refresh_token', refreshToken)
+      
       router.push(next)
     } else {
       setAuthError("Session setup failed. Please try again.")
