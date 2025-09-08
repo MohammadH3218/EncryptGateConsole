@@ -187,8 +187,6 @@ export default function SetupOrganizationPage() {
             setError("Please select an admin user from your Cognito user pool")
             return
           }
-          
-          // Proceed with organization creation regardless of user status
           await createOrganization()
           break
       }
@@ -218,13 +216,6 @@ export default function SetupOrganizationPage() {
         // Store organization context for login
         localStorage.setItem('organization_id', result.organizationId)
         localStorage.setItem('organization_name', orgData.name)
-        
-        // Also store the selected admin user info immediately for login
-        const selectedUserInfo = cognitoUsers.find(user => user.username === selectedAdminUser)
-        if (selectedUserInfo) {
-          localStorage.setItem('setup_admin_email', selectedUserInfo.email)
-          localStorage.setItem('setup_redirect_from_setup', 'true')
-        }
       } else {
         // Check if it's a duplicate configuration error
         if (response.status === 409 && result.existingOrganization) {
@@ -239,19 +230,9 @@ export default function SetupOrganizationPage() {
 
   const handleBackToLogin = () => {
     const orgId = localStorage.getItem('organization_id')
-    
     if (orgId) {
-      // Ensure user info is stored for login page
-      const selectedUserInfo = cognitoUsers.find(user => user.username === selectedAdminUser)
-      if (selectedUserInfo) {
-        localStorage.setItem('setup_admin_email', selectedUserInfo.email)
-        localStorage.setItem('setup_redirect_from_setup', 'true')
-      }
-      
-      // Force redirect to login page - no restrictions based on user status
       router.push(`/o/${orgId}/login`)
     } else {
-      // Fallback - this shouldn't happen but just in case
       router.push('/login')
     }
   }
@@ -349,7 +330,7 @@ export default function SetupOrganizationPage() {
                 orgData={orgData}
               />
             )}
-            {currentStep === 'complete' && <CompleteStep orgData={orgData} onRedirect={handleBackToLogin} />}
+            {currentStep === 'complete' && <CompleteStep orgData={orgData} />}
 
             {error && duplicateInfo && (
               <Alert className="bg-yellow-500/10 border-yellow-500/20">
@@ -410,11 +391,11 @@ export default function SetupOrganizationPage() {
                   {loading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {currentStep === 'aws-config' ? 'Validating...' : currentStep === 'cognito-users' ? 'Setting up...' : 'Processing...'}
+                      {currentStep === 'aws-config' ? 'Validating...' : 'Processing...'}
                     </>
                   ) : (
                     <>
-                      {currentStep === 'cognito-users' ? 'Complete Setup & Go to Login' : 'Next'}
+                      {currentStep === 'cognito-users' ? 'Create Organization' : 'Next'}
                       <ArrowRight className="ml-2 h-4 w-4" />
                     </>
                   )}
@@ -661,17 +642,7 @@ function CognitoUsersStep({
   )
 }
 
-function CompleteStep({ orgData, onRedirect }: { orgData: OrganizationData, onRedirect: () => void }) {
-  
-  // Auto-redirect after 5 seconds as a fallback
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      onRedirect()
-    }, 5000)
-    
-    return () => clearTimeout(timer)
-  }, [onRedirect])
-  
+function CompleteStep({ orgData }: { orgData: OrganizationData }) {
   return (
     <div className="text-center space-y-4">
       <CheckCircle className="w-16 h-16 text-green-500 mx-auto" />
@@ -681,10 +652,7 @@ function CompleteStep({ orgData, onRedirect }: { orgData: OrganizationData, onRe
       </p>
       <div className="bg-[#1a1a1a] p-4 rounded-lg mt-6">
         <p className="text-sm text-gray-300">
-          Your organization is now ready. Click the button below to proceed to login, where you can handle any password changes or MFA setup.
-        </p>
-        <p className="text-xs text-gray-500 mt-2">
-          (Auto-redirecting in 5 seconds...)
+          Your organization is now ready. You can log in using your AWS Cognito credentials.
         </p>
       </div>
     </div>
