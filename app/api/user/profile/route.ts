@@ -1,6 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import jwt from 'jsonwebtoken'
+import { DynamoDBClient, QueryCommand } from '@aws-sdk/client-dynamodb'
+
+// DynamoDB setup
+const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
+const CLOUDSERVICES_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 'CloudServices'
+
+// Helper function to get organization info
+async function getOrganizationInfo(orgId: string) {
+  try {
+    const response = await ddb.send(new QueryCommand({
+      TableName: CLOUDSERVICES_TABLE,
+      KeyConditionExpression: 'orgId = :orgId',
+      ExpressionAttributeValues: {
+        ':orgId': { S: orgId }
+      },
+      Limit: 1
+    }))
+    
+    const item = response.Items?.[0]
+    if (item) {
+      return {
+        id: item.orgId?.S || orgId,
+        name: item.name?.S || 'Your Organization'
+      }
+    }
+  } catch (error) {
+    console.warn(`Failed to fetch org info for ${orgId}:`, error)
+  }
+  
+  return {
+    id: orgId,
+    name: 'Your Organization'
+  }
+}
 
 // Default permissions for each role
 const DEFAULT_ROLE_PERMS = {
@@ -68,24 +102,58 @@ export async function GET(request: NextRequest) {
     const permissions = expandRolePermissions(rolesArray)
     const orgId = claims['custom:orgId'] || claims.orgId || request.headers.get('x-org-id')
 
-    const profile = {
-      ok: true,
-      id: claims.sub,
-      email: claims.email || claims['cognito:username'],
-      name: claims.name || claims.preferred_username || claims['cognito:username']?.split('@')[0],
-      username: claims['cognito:username'] || claims.email,
-      role: rolesArray[0] || 'Viewer', // Primary role
-      roles: rolesArray, // All roles
-      permissions: permissions,
-      organizationId: orgId,
-      organizationName: claims['custom:orgName'] || 'Your Organization',
-      isAdmin: permissions.includes('*'),
-      isOwner: rolesArray.includes('Owner'),
-      createdAt: new Date(claims.iat * 1000).toISOString(),
-      lastActive: new Date().toISOString()
+    if (!orgId) {
+      console.log('❌ No organization ID found in token or headers')
+      return NextResponse.json({ 
+        ok: false, 
+        error: 'Organization ID not found',
+        details: 'No orgId in token or x-org-id header' 
+      }, { status: 400 })
     }
 
-    console.log(`✅ Profile loaded for user: ${profile.email} with roles: [${rolesArray.join(', ')}]`)
+    // Get organization info from database
+    const orgInfo = await getOrganizationInfo(orgId)
+    
+    // Extract display name from various token fields, fallback to email local part
+    const displayName = (
+      claims.name || 
+      claims.given_name || 
+      claims.preferred_username || 
+      claims['custom:displayName'] ||
+      (claims.email || claims['cognito:username'])?.split('@')[0] ||
+      'User'
+    )
+
+    const profile = {
+      ok: true,
+      user: {
+        id: claims.sub,
+        email: claims.email || claims['cognito:username'],
+        name: displayName,
+        username: claims['cognito:username'] || claims.email,
+        rawRoles: rolesArray,
+        permissions: permissions,
+        isAdmin: permissions.includes('*'),
+        isOwner: rolesArray.includes('Owner'),
+        createdAt: new Date(claims.iat * 1000).toISOString(),
+        lastActive: new Date().toISOString()
+      },
+      org: {
+        id: orgId,
+        name: orgInfo.name
+      },
+      // Legacy fields for backward compatibility
+      id: claims.sub,
+      email: claims.email || claims['cognito:username'],
+      name: displayName,
+      role: rolesArray[0] || 'Viewer',
+      roles: rolesArray,
+      permissions: permissions,
+      organizationId: orgId,
+      organizationName: orgInfo.name
+    }
+
+    console.log(`✅ Profile loaded for user: ${profile.user.email} (${profile.user.name}) in org: ${profile.org.name} with roles: [${rolesArray.join(', ')}]`)
     
     return NextResponse.json(profile)
   } catch (error: any) {

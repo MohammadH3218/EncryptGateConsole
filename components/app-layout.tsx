@@ -23,7 +23,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { useRole, PermissionGate } from "@/contexts/RoleContext"
+import { useSession } from "@/providers/SessionProvider"
+import { can } from "@/lib/session"
 import { apiGet, apiPost } from "@/lib/api"
 
 interface AppLayoutProps {
@@ -50,7 +51,7 @@ const getUserInfoFromToken = () => {
 }
 
 export function AppLayout({ children, username, notificationsCount = 0 }: AppLayoutProps) {
-  const { hasPermission, user, organizationName } = useRole()
+  const session = useSession()
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
   const [userInfo, setUserInfo] = useState({ email: "", name: "" })
@@ -129,19 +130,19 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   const getOrgPath = (path: string) => orgId ? `/o/${orgId}${path}` : path
 
   const allMainNavItems = [
-    { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["view_dashboard"] },
-    { icon: Mail, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["view_all_emails"] },
-    { icon: AlertTriangle, label: "Detections", href: getOrgPath("/admin/detections"), permissions: ["view_detections"] },
-    { icon: FileText, label: "Allow/Block List", href: getOrgPath("/admin/allow-block-list"), permissions: ["manage_detections"] },
-    { icon: UserCheck, label: "Assignments", href: getOrgPath("/admin/assignments"), permissions: ["view_investigations"] },
-    { icon: FileText, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests"), permissions: ["manage_detections"] },
-    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["view_users"] },
+    { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["dashboard.read"] },
+    { icon: Mail, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["detections.read"] },
+    { icon: AlertTriangle, label: "Detections", href: getOrgPath("/admin/detections"), permissions: ["detections.read"] },
+    { icon: FileText, label: "Allow/Block List", href: getOrgPath("/admin/allow-block-list"), permissions: ["blocked_emails.read"] },
+    { icon: UserCheck, label: "Assignments", href: getOrgPath("/admin/assignments"), permissions: ["assignments.read"] },
+    { icon: FileText, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests"), permissions: ["pushed_requests.read"] },
+    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["team.read"] },
   ]
 
   const allCompanySettingsItems = [
-    { icon: Lock, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["manage_cloud_services"] },
-    { icon: User, label: "User Management", href: getOrgPath("/admin/company-settings/user-management"), permissions: ["view_users"] },
-    { icon: Shield, label: "Roles & Permissions", href: getOrgPath("/admin/company-settings/roles"), permissions: ["view_roles"] },
+    { icon: Lock, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["*"] }, // Admin/Owner only
+    { icon: User, label: "User Management", href: getOrgPath("/admin/company-settings/user-management"), permissions: ["team.read"] },
+    { icon: Shield, label: "Roles & Permissions", href: getOrgPath("/admin/company-settings/roles"), permissions: ["*"] }, // Admin/Owner only
   ]
 
   const allUserSettingsItems = [
@@ -152,11 +153,11 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
 
   // Filter navigation items based on user permissions
   const mainNavItems = allMainNavItems.filter(item => 
-    item.permissions.length === 0 || item.permissions.some(permission => hasPermission(permission))
+    item.permissions.length === 0 || item.permissions.some(permission => can(session?.user?.permissions, permission))
   )
 
   const companySettingsItems = allCompanySettingsItems.filter(item => 
-    item.permissions.length === 0 || item.permissions.some(permission => hasPermission(permission))
+    item.permissions.length === 0 || item.permissions.some(permission => can(session?.user?.permissions, permission))
   )
 
   const userSettingsItems = allUserSettingsItems // User settings always accessible
@@ -287,9 +288,9 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
               </div>
               <span className="text-white font-semibold text-lg">EncryptGate</span>
             </div>
-            {organizationName && (
+            {session?.org?.name && (
               <div className="text-gray-400 text-sm truncate">
-                {organizationName}
+                {session.org.name}
               </div>
             )}
           </div>
@@ -379,8 +380,8 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{userInfo.name || userInfo.email}</p>
-                    <p className="text-gray-400 text-xs">Security Admin</p>
+                    <p className="text-white text-sm font-medium truncate">{session?.user?.name || userInfo.name || userInfo.email}</p>
+                    <p className="text-gray-400 text-xs">{session?.user?.rawRoles?.[0] || 'User'}</p>
                   </div>
                 </div>
               </DropdownMenuTrigger>
