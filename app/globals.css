@@ -98,6 +98,56 @@
   background-color: #2a2a2a;
 }
 
+/* === Dark theme autofill fixes (Chrome/Edge/Safari + Firefox) === */
+
+:root {
+  /* Dark input colors to match your theme */
+  --input-bg: #1f1f1f;         /* matches your dark input background */
+  --input-fg: #ffffff;         /* white text for readability */
+  --input-border: #2f2f2f;     /* subtle border */
+  --input-focus: #3b82f6;      /* blue focus color */
+}
+
+/* Chrome/Edge/Safari autofill override */
+input:-webkit-autofill,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  /* Overpaint the browser's white/yellow autofill background */
+  -webkit-box-shadow: 0 0 0px 1000px var(--input-bg) inset !important;
+  box-shadow: 0 0 0px 1000px var(--input-bg) inset !important;
+
+  /* Set text color & caret so it's readable on dark background */
+  -webkit-text-fill-color: var(--input-fg) !important;
+  caret-color: var(--input-fg) !important;
+
+  /* Keep rounded corners consistent with your inputs */
+  border-radius: 0.5rem;
+
+  /* Prevent quick flash when autofill is applied */
+  transition: background-color 99999s ease-in-out 0s !important;
+}
+
+/* When the autofill dropdown is hovered/selected/focused */
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus,
+select:-webkit-autofill:hover,
+select:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0px 1000px var(--input-bg) inset !important;
+  box-shadow: 0 0 0px 1000px var(--input-bg) inset !important;
+  -webkit-text-fill-color: var(--input-fg) !important;
+  caret-color: var(--input-fg) !important;
+}
+
+/* Firefox autofill support */
+input:-moz-autofill,
+textarea:-moz-autofill,
+select:-moz-autofill {
+  background-color: var(--input-bg) !important;
+  color: var(--input-fg) !important;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
