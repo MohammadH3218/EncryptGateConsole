@@ -26,6 +26,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { checkAuth } from "@/lib/auth"
+import { setOrgContext } from "@/lib/orgContext"
 
 // AWS regions for Cognito & WorkMail
 const AWS_REGIONS = [
@@ -214,6 +215,7 @@ export default function SetupOrganizationPage() {
       if (response.ok) {
         setCurrentStep('complete')
         // Store organization context for login
+        setOrgContext(result.organizationId)
         localStorage.setItem('organization_id', result.organizationId)
         localStorage.setItem('organization_name', orgData.name)
       } else {
@@ -231,6 +233,7 @@ export default function SetupOrganizationPage() {
   const handleBackToLogin = () => {
     const orgId = localStorage.getItem('organization_id')
     if (orgId) {
+      setOrgContext(orgId) // Ensure it's persisted
       router.push(`/o/${orgId}/login`)
     } else {
       router.push('/login')

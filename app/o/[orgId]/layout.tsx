@@ -1,6 +1,7 @@
 import { SessionProvider } from "@/providers/SessionProvider"
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
+import OrgContextSync from "@/components/OrgContextSync"
 
 interface OrgLayoutProps {
   children: React.ReactNode
@@ -21,6 +22,7 @@ export default function OrgLayout({ children, params }: OrgLayoutProps) {
 
   return (
     <SessionProvider token={accessToken} orgId={orgId}>
+      <OrgContextSync orgId={orgId} />
       {children}
     </SessionProvider>
   )
