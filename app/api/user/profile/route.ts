@@ -223,29 +223,142 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 })
     }
 
-    const roles = claims['cognito:groups'] || claims.roles || []
-    const rolesArray = Array.isArray(roles) ? roles : [roles]
-    const permissions = expandRolePermissions(rolesArray)
-    
-    // Check if user has permission to update profiles (Admin/Owner only)
-    if (!permissions.includes('*')) {
+    const orgId = claims['custom:orgId'] || claims.orgId || request.headers.get('x-org-id')
+    if (!orgId) {
       return NextResponse.json({ 
         ok: false, 
-        error: 'Insufficient permissions',
-        message: 'Only Admin or Owner can update user profiles'
-      }, { status: 403 })
+        error: 'Organization ID not found'
+      }, { status: 400 })
     }
 
     const updateData = await request.json()
+    const userEmail = claims.email || claims['cognito:username']
     
-    // For now, return success since we don't have a database implementation
-    // In a real implementation, you would update the user in your database
-    console.log(`✅ Profile update requested by ${claims.email} with data:`, updateData)
+    // Import additional dependencies for Cognito and DynamoDB operations
+    const { 
+      CognitoIdentityProviderClient, 
+      AdminUpdateUserAttributesCommand,
+      AdminGetUserCommand 
+    } = require('@aws-sdk/client-cognito-identity-provider')
+    const { UpdateItemCommand, PutItemCommand } = require('@aws-sdk/client-dynamodb')
+    
+    let updatedFields: any = {}
+    
+    // Update display name in Users table if provided
+    if (updateData.name && updateData.name.trim() !== '') {
+      try {
+        await ddb.send(new UpdateItemCommand({
+          TableName: USERS_TABLE,
+          Key: {
+            'orgId': { S: orgId },
+            'email': { S: userEmail }
+          },
+          UpdateExpression: 'SET #name = :name, updatedAt = :updatedAt',
+          ExpressionAttributeNames: {
+            '#name': 'name'
+          },
+          ExpressionAttributeValues: {
+            ':name': { S: updateData.name.trim() },
+            ':updatedAt': { S: new Date().toISOString() }
+          }
+        }))
+        
+        updatedFields.name = updateData.name.trim()
+        console.log(`✅ Updated display name in Users table for ${userEmail}`)
+      } catch (error) {
+        console.error('❌ Failed to update display name in Users table:', error)
+      }
+    }
+
+    // Update preferred_username in Cognito if provided and different from current
+    if (updateData.preferredUsername && updateData.preferredUsername.trim() !== '') {
+      try {
+        // Get Cognito configuration
+        const cognitoConfig = await getCognitoConfig(orgId)
+        if (cognitoConfig) {
+          const cognitoClient = new CognitoIdentityProviderClient({
+            region: cognitoConfig.region,
+            credentials: cognitoConfig.accessKeyId && cognitoConfig.secretAccessKey ? {
+              accessKeyId: cognitoConfig.accessKeyId,
+              secretAccessKey: cognitoConfig.secretAccessKey,
+            } : undefined,
+          })
+
+          // Update preferred_username attribute in Cognito
+          await cognitoClient.send(new AdminUpdateUserAttributesCommand({
+            UserPoolId: cognitoConfig.userPoolId,
+            Username: userEmail,
+            UserAttributes: [
+              {
+                Name: 'preferred_username',
+                Value: updateData.preferredUsername.trim()
+              }
+            ]
+          }))
+          
+          updatedFields.preferredUsername = updateData.preferredUsername.trim()
+          console.log(`✅ Updated preferred_username in Cognito for ${userEmail}`)
+        }
+      } catch (error) {
+        console.error('❌ Failed to update preferred_username in Cognito:', error)
+        return NextResponse.json({
+          ok: false,
+          error: 'Failed to update username',
+          details: 'Could not update username in authentication system'
+        }, { status: 500 })
+      }
+    }
+
+    // Update other profile fields in Users table
+    const otherFields = ['jobTitle', 'department', 'phone', 'bio']
+    const updateExpressions = []
+    const attributeNames: any = {}
+    const attributeValues: any = {}
+    let expressionIndex = 0
+
+    for (const field of otherFields) {
+      if (updateData[field] !== undefined) {
+        const attrName = `#field${expressionIndex}`
+        const attrValue = `:value${expressionIndex}`
+        
+        updateExpressions.push(`${attrName} = ${attrValue}`)
+        attributeNames[attrName] = field
+        attributeValues[attrValue] = { S: String(updateData[field] || '') }
+        updatedFields[field] = updateData[field]
+        expressionIndex++
+      }
+    }
+
+    // Update additional profile fields if any
+    if (updateExpressions.length > 0) {
+      try {
+        updateExpressions.push('updatedAt = :updatedAt')
+        attributeValues[':updatedAt'] = { S: new Date().toISOString() }
+
+        await ddb.send(new UpdateItemCommand({
+          TableName: USERS_TABLE,
+          Key: {
+            'orgId': { S: orgId },
+            'email': { S: userEmail }
+          },
+          UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+          ExpressionAttributeNames: attributeNames,
+          ExpressionAttributeValues: attributeValues
+        }))
+        
+        console.log(`✅ Updated additional profile fields for ${userEmail}`)
+      } catch (error) {
+        console.error('❌ Failed to update profile fields in Users table:', error)
+      }
+    }
+    
+    console.log(`✅ Profile updated successfully for ${userEmail} with fields:`, updatedFields)
     
     return NextResponse.json({ 
       ok: true,
-      message: 'Profile update requested successfully',
-      updatedFields: updateData
+      success: true,
+      message: 'Profile updated successfully',
+      updatedFields: updatedFields
     })
   } catch (error: any) {
     console.error('❌ Profile update error:', error)
@@ -255,4 +368,31 @@ export async function PUT(request: NextRequest) {
       details: error.message 
     }, { status: 500 })
   }
+}
+
+// Helper function to get Cognito configuration (reused from change-password)
+async function getCognitoConfig(orgId: string) {
+  try {
+    const response = await ddb.send(new GetItemCommand({
+      TableName: 'CloudServices',
+      Key: {
+        'orgId': { S: orgId },
+        'serviceType': { S: 'aws-cognito' }
+      }
+    }))
+
+    if (response.Item) {
+      return {
+        userPoolId: response.Item.userPoolId?.S,
+        clientId: response.Item.clientId?.S,
+        clientSecret: response.Item.clientSecret?.S,
+        region: response.Item.region?.S || process.env.AWS_REGION || 'us-east-1',
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      }
+    }
+  } catch (error) {
+    console.error('Failed to get Cognito config:', error)
+  }
+  return null
 }
