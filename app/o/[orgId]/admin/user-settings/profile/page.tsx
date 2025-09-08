@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -11,27 +11,22 @@ import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { KeyRound, Loader2, User2 } from "lucide-react"
-import { Alert, AlertDescription } from "@/components/ui/alert"
+import { KeyRound } from "lucide-react"
 
 export default function ProfilePage() {
   const router = useRouter()
-  const params = useParams()
   const { toast } = useToast()
   const [isLoading, setIsLoading] = useState(false)
   const [isPasswordLoading, setIsPasswordLoading] = useState(false)
-  const [isPageLoading, setIsPageLoading] = useState(true)
   const [activeTab, setActiveTab] = useState("profile")
   const [profile, setProfile] = useState({
-    name: "",
-    email: "",
-    preferredUsername: "",
-    jobTitle: "",
-    department: "",
-    phone: "",
-    bio: "",
+    name: "John Doe",
+    email: "john.doe@company.com",
+    jobTitle: "Security Admin",
+    department: "IT Security",
+    phone: "+1 (555) 123-4567",
+    bio: "Experienced security professional with a focus on email security and threat detection.",
   })
-  const [originalProfile, setOriginalProfile] = useState({})
   const [passwords, setPasswords] = useState({
     current: "",
     new: "",
@@ -42,96 +37,19 @@ export default function ProfilePage() {
     new: "",
     confirm: "",
   })
-  const [profileError, setProfileError] = useState("")
 
-  // Load user profile data on mount
-  useEffect(() => {
-    loadProfile()
-  }, [])
 
-  const loadProfile = async () => {
-    try {
-      setIsPageLoading(true)
-      const response = await fetch('/api/user/profile', {
-        method: 'GET',
-        credentials: 'include'
-      })
-      
-      if (!response.ok) {
-        throw new Error('Failed to load profile')
-      }
-      
-      const data = await response.json()
-      if (data.ok) {
-        // Extract profile data from response
-        const profileData = {
-          name: data.user?.name || data.name || "",
-          email: data.user?.email || data.email || "",
-          preferredUsername: data.user?.name || data.name || "", // Current preferred_username
-          jobTitle: data.user?.jobTitle || "",
-          department: data.user?.department || "",
-          phone: data.user?.phone || "",
-          bio: data.user?.bio || "",
-        }
-        
-        setProfile(profileData)
-        setOriginalProfile(profileData)
-      } else {
-        setProfileError(data.error || 'Failed to load profile')
-      }
-    } catch (error: any) {
-      console.error('Failed to load profile:', error)
-      setProfileError(error.message || 'Failed to load profile')
-    } finally {
-      setIsPageLoading(false)
-    }
-  }
-
-  const handleSaveProfile = async () => {
+  const handleSaveProfile = () => {
     setIsLoading(true)
-    setProfileError("")
 
-    try {
-      const response = await fetch('/api/user/profile', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify(profile)
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to update profile')
-      }
-
-      const result = await response.json()
-      
-      if (result.ok || result.success) {
-        setOriginalProfile(profile)
-        toast({
-          title: "Profile Updated",
-          description: "Your profile has been updated successfully.",
-        })
-      } else {
-        setProfileError(result.error || 'Failed to update profile')
-        toast({
-          title: "Update Failed",
-          description: result.error || 'Failed to update profile',
-          variant: "destructive"
-        })
-      }
-    } catch (error: any) {
-      console.error('Profile update error:', error)
-      setProfileError(error.message || 'Failed to update profile')
-      toast({
-        title: "Update Failed",
-        description: error.message || 'Failed to update profile',
-        variant: "destructive"
-      })
-    } finally {
+    // Simulate API call
+    setTimeout(() => {
       setIsLoading(false)
-    }
+      toast({
+        title: "Profile Updated",
+        description: "Your profile has been updated successfully.",
+      })
+    }, 1000)
   }
 
   const validatePasswordForm = () => {
@@ -167,94 +85,33 @@ export default function ProfilePage() {
     return valid
   }
 
-  const handleChangePassword = async () => {
+  const handleChangePassword = () => {
     if (!validatePasswordForm()) return
 
     setIsPasswordLoading(true)
 
-    try {
-      const response = await fetch('/api/user/change-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({
-          currentPassword: passwords.current,
-          newPassword: passwords.new
-        })
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        toast({
-          title: "Password Changed",
-          description: "Your password has been updated successfully.",
-        })
-
-        // Reset form
-        setPasswords({
-          current: "",
-          new: "",
-          confirm: "",
-        })
-        setErrors({
-          current: "",
-          new: "",
-          confirm: "",
-        })
-      } else {
-        // Handle specific password change errors
-        if (result.message?.toLowerCase().includes('current password')) {
-          setErrors(prev => ({ ...prev, current: result.message }))
-        } else {
-          toast({
-            title: "Password Change Failed",
-            description: result.message || 'Failed to change password',
-            variant: "destructive"
-          })
-        }
-      }
-    } catch (error: any) {
-      console.error('Password change error:', error)
-      toast({
-        title: "Password Change Failed", 
-        description: error.message || 'Failed to change password',
-        variant: "destructive"
-      })
-    } finally {
+    // Simulate API call
+    setTimeout(() => {
       setIsPasswordLoading(false)
-    }
-  }
+      toast({
+        title: "Password Changed",
+        description: "Your password has been updated successfully.",
+      })
 
-  // Show loading spinner while data is loading
-  if (isPageLoading) {
-    return (
-      <AppLayout username="" notificationsCount={3}>
-        <FadeInSection>
-          <div className="max-w-3xl mx-auto flex items-center justify-center min-h-[400px]">
-            <div className="text-center">
-              <Loader2 className="w-8 h-8 text-white animate-spin mx-auto mb-4" />
-              <div className="text-white text-lg">Loading profile...</div>
-            </div>
-          </div>
-        </FadeInSection>
-      </AppLayout>
-    )
+      // Reset form
+      setPasswords({
+        current: "",
+        new: "",
+        confirm: "",
+      })
+    }, 1500)
   }
 
   return (
-    <AppLayout username={profile.name || profile.email} notificationsCount={3}>
+    <AppLayout username={profile.name} notificationsCount={3}>
       <FadeInSection>
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold mb-6 text-white">Your Profile</h2>
-          
-          {profileError && (
-            <Alert variant="destructive" className="mb-6">
-              <AlertDescription>{profileError}</AlertDescription>
-            </Alert>
-          )}
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="mb-6 bg-[#1f1f1f] border-[#1f1f1f]">
@@ -284,34 +141,14 @@ export default function ProfilePage() {
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
-                      <Label htmlFor="name">Display Name</Label>
+                      <Label htmlFor="name">Full Name</Label>
                       <Input
                         id="name"
                         value={profile.name}
                         onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                        placeholder="Enter your display name"
                       />
-                      <p className="text-xs text-muted-foreground">
-                        This is how your name appears to other team members.
-                      </p>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="preferredUsername">Username</Label>
-                      <div className="relative">
-                        <User2 className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                        <Input
-                          id="preferredUsername"
-                          value={profile.preferredUsername}
-                          onChange={(e) => setProfile({ ...profile, preferredUsername: e.target.value })}
-                          placeholder="Enter your username"
-                          className="pl-10"
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Your username for login and display purposes.
-                      </p>
-                    </div>
-                    <div className="space-y-2 sm:col-span-2">
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
