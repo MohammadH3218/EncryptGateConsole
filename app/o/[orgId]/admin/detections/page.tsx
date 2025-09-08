@@ -2,6 +2,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useRouter, useParams } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
 import { Button } from "@/components/ui/button"
@@ -92,6 +93,7 @@ const getUserInfoFromTokens = () => {
 
 export default function AdminDetectionsPage() {
   const router = useRouter()
+  const params = useParams()
   const [searchQuery, setSearchQuery] = useState("")
   const [detections, setDetections] = useState<Detection[]>([])
   const [filteredDetections, setFilteredDetections] = useState<Detection[]>([])
@@ -546,14 +548,14 @@ export default function AdminDetectionsPage() {
       }
       
       // Navigate to investigation page (this should always work)
-      const navigationUrl = `/admin/investigate/${encodedMessageId}`
+      const navigationUrl = `/o/${params.orgId}/admin/investigate/${encodedMessageId}`
       console.log('🧭 Navigating to:', navigationUrl)
       
       router.push(navigationUrl)
     } catch (error) {
       console.error('❌ Unexpected error during investigation setup:', error)
       // Always try to navigate to investigation page as last resort
-      const fallbackUrl = `/admin/investigate/${encodeURIComponent(detection.emailMessageId)}`
+      const fallbackUrl = `/o/${params.orgId}/admin/investigate/${encodeURIComponent(detection.emailMessageId)}`
       console.log('🔄 Fallback navigation to:', fallbackUrl)
       router.push(fallbackUrl)
     }

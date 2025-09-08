@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
 import { Button } from "@/components/ui/button"
@@ -47,6 +47,7 @@ import { useWorkMailUsers, WorkMailUser } from "@/hooks/useWorkMailUsers"
 
 export default function UserManagementPage() {
   const router = useRouter()
+  const params = useParams()
   const { toast } = useToast()
 
   const { services } = useCloudServices()
@@ -373,7 +374,7 @@ export default function UserManagementPage() {
           <div className="mt-4">
             <Button
               onClick={() =>
-                router.push("/admin/company-settings/cloud-services")
+                router.push(`/o/${params.orgId}/admin/company-settings/cloud-services`)
               }
             >
               Connect Service

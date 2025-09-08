@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, useParams } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -51,6 +51,7 @@ interface Invitation {
 
 export default function RolesPage() {
   const router = useRouter()
+  const params = useParams()
   const searchParams = useSearchParams()
   const userId = searchParams.get("user")
   const [searchQuery, setSearchQuery] = useState("")
@@ -425,7 +426,7 @@ export default function RolesPage() {
               <p className="text-gray-400 mb-6 max-w-md">
                 You need to connect a cloud service before you can manage roles and permissions.
               </p>
-              <Button onClick={() => router.push("/admin/company-settings/cloud-services")} className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">Connect Service</Button>
+              <Button onClick={() => router.push(`/o/${params.orgId}/admin/company-settings/cloud-services`)} className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">Connect Service</Button>
             </CardContent>
           </Card>
         ) : (

@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import { Role, hasPermission, getUserPermissions } from '@/types/roles'
+import { apiGet } from '@/lib/api'
 
 interface User {
   id: string
@@ -44,28 +45,25 @@ export function RoleProvider({ children }: RoleProviderProps) {
   // Fetch user profile and roles
   const fetchUserProfile = async () => {
     try {
-      // With httpOnly cookies, we don't need to send Authorization header
-      // The cookies will be sent automatically
-      const userResponse = await fetch('/api/user/profile', {
-        credentials: 'include' // Ensure cookies are included
-      })
+      // Use the new API helper that handles auth headers and org context
+      const userData = await apiGet('/api/user/profile')
 
-      if (userResponse.ok) {
-        const userData = await userResponse.json()
-        
-        // Fetch available roles
-        const rolesResponse = await fetch('/api/company-settings/roles')
+      if (userData.ok) {
+        // Try to fetch available roles (optional, fallback to userData roles)
         let availableRoles: Role[] = []
-        
-        if (rolesResponse.ok) {
-          const rolesData = await rolesResponse.json()
+        try {
+          const rolesData = await apiGet('/api/company-settings/roles')
           availableRoles = rolesData.roles || []
+        } catch (error) {
+          console.warn('Could not fetch available roles, using roles from user data')
         }
 
-        // Map user role to Role objects
-        const userRoles = availableRoles.filter(role => 
-          userData.role === role.name || userData.roles?.includes(role.name)
-        )
+        // Map user role to Role objects or use simple role structure
+        const userRoles = availableRoles.length > 0 
+          ? availableRoles.filter(role => 
+              userData.role === role.name || userData.roles?.includes(role.name)
+            )
+          : userData.roles?.map((roleName: string) => ({ name: roleName, permissions: [] })) || []
 
         // Extract organization context
         const orgId = userData.organizationId || process.env.NEXT_PUBLIC_ORGANIZATION_ID || 'default-org'

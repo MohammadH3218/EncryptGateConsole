@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useRole, PermissionGate } from "@/contexts/RoleContext"
+import { apiGet, apiPost } from "@/lib/api"
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -167,24 +168,12 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   // Fetch team members from API
   const fetchTeamMembers = async () => {
     try {
-      const token = localStorage.getItem("access_token")
-      
-      const response = await fetch("/api/auth/team-members", {
-        headers: {
-          ...(token && { "Authorization": `Bearer ${token}` }),
-          "Content-Type": "application/json",
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        console.log('📋 Team members data received:', data)
-        setTeamMembers(data.team_members || [])
-      } else {
-        console.error('❌ Failed to fetch team members:', response.status, response.statusText)
-      }
+      const data = await apiGet('/api/auth/team-members')
+      console.log('📋 Team members data received:', data)
+      setTeamMembers(data.team_members || data.teamMembers || [])
     } catch (error) {
       console.error("Failed to fetch team members:", error)
+      // Don't throw error, just log it - team members is not critical
     }
   }
 
@@ -194,15 +183,10 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
       const token = localStorage.getItem("access_token")
       if (!token) return
 
-      await fetch("/api/auth/activity/heartbeat", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      })
+      await apiPost("/api/auth/activity/heartbeat", {})
     } catch (error) {
       console.error("Failed to send heartbeat:", error)
+      // Don't throw error, heartbeat is not critical
     }
   }
 

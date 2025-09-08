@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter, useSearchParams, useParams } from "next/navigation"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
 import { Button } from "@/components/ui/button"
@@ -91,6 +91,7 @@ interface EmailsResponse {
 
 export default function AdminAllEmailsPage() {
   const router = useRouter()
+  const params = useParams()
   const searchParams = useSearchParams()
   const employeeFilter = searchParams.get("employee") || ""
 
@@ -1089,7 +1090,7 @@ export default function AdminAllEmailsPage() {
                 <div className="flex gap-2 justify-center">
                   <Button 
                     variant="outline" 
-                    onClick={() => router.push('/admin/company-settings/user-management')}
+                    onClick={() => router.push(`/o/${params.orgId}/admin/company-settings/user-management`)}
                     className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                   >
                     <Users className="mr-2 h-4 w-4" />
