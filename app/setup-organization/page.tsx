@@ -231,6 +231,12 @@ export default function SetupOrganizationPage() {
   const handleBackToLogin = () => {
     const orgId = localStorage.getItem('organization_id')
     if (orgId) {
+      // Store the selected admin user info for auto-login attempt
+      const selectedUserInfo = cognitoUsers.find(user => user.username === selectedAdminUser)
+      if (selectedUserInfo) {
+        localStorage.setItem('setup_admin_email', selectedUserInfo.email)
+        localStorage.setItem('setup_redirect_from_setup', 'true')
+      }
       router.push(`/o/${orgId}/login`)
     } else {
       router.push('/login')

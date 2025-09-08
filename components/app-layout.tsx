@@ -42,7 +42,29 @@ const getUserInfoFromToken = () => {
     const p = idTok ? decode(idTok) : accTok ? decode(accTok) : {};
 
     const email = p.email || p["cognito:username"] || p.username || "";
-    const name = p.preferred_username || p.name || p.given_name || p.nickname || email || "";
+    
+    // Try multiple Cognito attribute variations for the display name
+    let name = "";
+    
+    // Check for preferred_username first (the main Cognito display name attribute)
+    if (p.preferred_username && p.preferred_username !== email && p.preferred_username.trim() !== '') {
+      name = p.preferred_username;
+    } else if (p.name && p.name.trim() !== '') {
+      name = p.name;
+    } else if (p.given_name && p.family_name) {
+      name = `${p.given_name} ${p.family_name}`;
+    } else if (p.given_name && p.given_name.trim() !== '') {
+      name = p.given_name;
+    } else if (p.nickname && p.nickname.trim() !== '') {
+      name = p.nickname;
+    } else if (p["custom:preferred_username"] && p["custom:preferred_username"].trim() !== '') {
+      name = p["custom:preferred_username"];
+    } else if (p["custom:display_name"] && p["custom:display_name"].trim() !== '') {
+      name = p["custom:display_name"];
+    } else if (email) {
+      // Fallback to email local part
+      name = email.split('@')[0];
+    }
 
     return { email, name };
   } catch {
