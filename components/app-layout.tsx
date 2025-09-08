@@ -73,14 +73,22 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
 
   // Get user info from JWT token on component mount
   useEffect(() => {
-    // Always prefer JWT token info over passed username prop
-    const info = getUserInfoFromToken()
-    // Fallback to username prop only if JWT doesn't have name info
-    if (!info.name && username) {
-      info.name = username
+    // If we have session data, prefer that over JWT token parsing
+    if (session?.user?.name) {
+      setUserInfo({ 
+        email: session.user.email || '', 
+        name: session.user.name 
+      })
+    } else {
+      // Fallback to JWT token parsing
+      const info = getUserInfoFromToken()
+      // Fallback to username prop only if JWT doesn't have name info
+      if (!info.name && username) {
+        info.name = username
+      }
+      setUserInfo(info)
     }
-    setUserInfo(info)
-  }, [username])
+  }, [username, session?.user?.name, session?.user?.email])
 
   // Initialize data and set up intervals on mount
   useEffect(() => {

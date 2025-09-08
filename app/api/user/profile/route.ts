@@ -142,10 +142,11 @@ export async function GET(request: NextRequest) {
     const orgInfo = await getOrganizationInfo(orgId)
     
     // Extract display name from various token fields, fallback to email local part
+    // Match the same order as AppLayout for consistency
     const tokenDisplayName = (
+      claims.preferred_username || 
       claims.name || 
       claims.given_name || 
-      claims.preferred_username || 
       claims['custom:displayName'] ||
       (claims.email || claims['cognito:username'])?.split('@')[0] ||
       'User'
