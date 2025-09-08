@@ -58,6 +58,17 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   const router = useRouter()
   const pathname = usePathname()
 
+  // Extract orgId from current pathname
+  const getOrgId = () => {
+    const pathSegments = pathname.split('/')
+    if (pathSegments[1] === 'o' && pathSegments[2]) {
+      return pathSegments[2]
+    }
+    return null
+  }
+  
+  const orgId = getOrgId()
+
   // Get user info from JWT token on component mount
   useEffect(() => {
     // Always prefer JWT token info over passed username prop
@@ -113,26 +124,29 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
     }
   }, [])
 
+  // Get organization-aware URLs
+  const getOrgPath = (path: string) => orgId ? `/o/${orgId}${path}` : path
+
   const allMainNavItems = [
-    { icon: Shield, label: "Dashboard", href: "/admin/dashboard", permissions: ["view_dashboard"] },
-    { icon: Mail, label: "All Emails", href: "/admin/all-emails", permissions: ["view_all_emails"] },
-    { icon: AlertTriangle, label: "Detections", href: "/admin/detections", permissions: ["view_detections"] },
-    { icon: FileText, label: "Allow/Block List", href: "/admin/allow-block-list", permissions: ["manage_detections"] },
-    { icon: UserCheck, label: "Assignments", href: "/admin/assignments", permissions: ["view_investigations"] },
-    { icon: FileText, label: "Pushed Requests", href: "/admin/pushed-requests", permissions: ["manage_detections"] },
-    { icon: Users, label: "Manage Employees", href: "/admin/manage-employees", permissions: ["view_users"] },
+    { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["view_dashboard"] },
+    { icon: Mail, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["view_all_emails"] },
+    { icon: AlertTriangle, label: "Detections", href: getOrgPath("/admin/detections"), permissions: ["view_detections"] },
+    { icon: FileText, label: "Allow/Block List", href: getOrgPath("/admin/allow-block-list"), permissions: ["manage_detections"] },
+    { icon: UserCheck, label: "Assignments", href: getOrgPath("/admin/assignments"), permissions: ["view_investigations"] },
+    { icon: FileText, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests"), permissions: ["manage_detections"] },
+    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["view_users"] },
   ]
 
   const allCompanySettingsItems = [
-    { icon: Lock, label: "Cloud Services", href: "/admin/company-settings/cloud-services", permissions: ["manage_cloud_services"] },
-    { icon: User, label: "User Management", href: "/admin/company-settings/user-management", permissions: ["view_users"] },
-    { icon: Shield, label: "Roles & Permissions", href: "/admin/company-settings/roles", permissions: ["view_roles"] },
+    { icon: Lock, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["manage_cloud_services"] },
+    { icon: User, label: "User Management", href: getOrgPath("/admin/company-settings/user-management"), permissions: ["view_users"] },
+    { icon: Shield, label: "Roles & Permissions", href: getOrgPath("/admin/company-settings/roles"), permissions: ["view_roles"] },
   ]
 
   const allUserSettingsItems = [
-    { icon: User, label: "Profile", href: "/admin/user-settings/profile", permissions: [] }, // Always accessible
-    { icon: Bell, label: "Notifications", href: "/admin/user-settings/notifications", permissions: [] }, // Always accessible
-    { icon: Lock, label: "Security", href: "/admin/user-settings/security", permissions: [] }, // Always accessible
+    { icon: User, label: "Profile", href: getOrgPath("/admin/user-settings/profile"), permissions: [] }, // Always accessible
+    { icon: Bell, label: "Notifications", href: getOrgPath("/admin/user-settings/notifications"), permissions: [] }, // Always accessible
+    { icon: Lock, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: [] }, // Always accessible
   ]
 
   // Filter navigation items based on user permissions
@@ -388,7 +402,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 bg-[#0f0f0f] border border-[#2f2f2f] shadow-xl">
                 <DropdownMenuItem 
-                  onClick={() => handleNavigation("/admin/user-settings/profile")}
+                  onClick={() => handleNavigation(getOrgPath("/admin/user-settings/profile"))}
                   className="text-white hover:bg-[#1f1f1f] hover:text-white cursor-pointer focus:bg-[#1f1f1f] focus:text-white transition-all duration-200"
                 >
                   <User className="mr-2 h-4 w-4 text-blue-400" />

@@ -5,7 +5,7 @@ import { userProfileService } from '@/lib/user-profile-service'
 export async function GET() {
   try {
     const cookieStore = cookies()
-    const token = cookieStore.get('session_token')?.value
+    const token = cookieStore.get('access_token')?.value
 
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -28,7 +28,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = cookies()
-    const token = cookieStore.get('session_token')?.value
+    const token = cookieStore.get('access_token')?.value
 
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

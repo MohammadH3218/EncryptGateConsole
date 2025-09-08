@@ -117,7 +117,13 @@ export default function OrgAwareDashboardPage() {
   const loadEmails = useCallback(async () => {
     try {
       console.log(`📧 Dashboard (${orgId}): Loading emails...`)
-      const response = await fetch('/api/email?limit=1000')
+      const token = localStorage.getItem("access_token")
+      const response = await fetch('/api/email?limit=1000', {
+        headers: {
+          ...(token && { "Authorization": `Bearer ${token}` }),
+          "Content-Type": "application/json",
+        },
+      })
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -135,7 +141,13 @@ export default function OrgAwareDashboardPage() {
   const loadDetections = useCallback(async () => {
     try {
       console.log(`🚨 Dashboard (${orgId}): Loading detections...`)
-      const response = await fetch('/api/detections?limit=1000')
+      const token = localStorage.getItem("access_token")
+      const response = await fetch('/api/detections?limit=1000', {
+        headers: {
+          ...(token && { "Authorization": `Bearer ${token}` }),
+          "Content-Type": "application/json",
+        },
+      })
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
