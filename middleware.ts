@@ -30,11 +30,15 @@ export function middleware(req: NextRequest) {
   
   if (isPublic(pathname)) return NextResponse.next()
 
+  // Get orgId from multiple sources (consistent with API)
+  const cookieOrg = req.cookies.get('orgId')?.value || req.cookies.get('org_id')?.value
+  const urlParams = new URL(req.url).searchParams
+  const urlOrg = urlParams.get('orgId')
+  
   // Convenience: rewrite /admin/* to /o/{org}/admin/* if cookie present
-  const orgCookie = req.cookies.get('org_id')?.value
-  if (pathname.startsWith('/admin/') && orgCookie) {
+  if (pathname.startsWith('/admin/') && cookieOrg) {
     const url = req.nextUrl.clone()
-    url.pathname = `/o/${orgCookie}${pathname}`
+    url.pathname = `/o/${cookieOrg}${pathname}`
     return NextResponse.rewrite(url)
   }
 
@@ -49,7 +53,15 @@ export function middleware(req: NextRequest) {
     }
     
     const access = req.cookies.get('access_token')?.value
-    const cookieOrg = orgCookie
+    const hasOrg = Boolean(cookieOrg || pathOrg || urlOrg)
+    
+    // Only redirect to setup if we have NO org context anywhere and not on setup route
+    const isSetup = pathname.startsWith('/setup-organization')
+    if (!hasOrg && !isSetup) {
+      const setup = req.nextUrl.clone()
+      setup.pathname = '/setup-organization'
+      return NextResponse.redirect(setup)
+    }
 
     if (!access) {
       const login = req.nextUrl.clone()
@@ -57,7 +69,9 @@ export function middleware(req: NextRequest) {
       login.searchParams.set('next', pathname + (search || ''))
       return NextResponse.redirect(login)
     }
-    if (!cookieOrg || cookieOrg !== pathOrg) {
+    
+    // Be more tolerant - only redirect if there's a clear mismatch
+    if (cookieOrg && pathOrg && cookieOrg !== pathOrg) {
       // force the browser to pick up the right org
       const login = req.nextUrl.clone()
       login.pathname = `/o/${pathOrg}/login`
@@ -67,7 +81,12 @@ export function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  // Block anything else by default
+  // Block anything else by default - but redirect to setup if no org context
+  const hasAnyOrg = Boolean(cookieOrg || urlOrg)
+  if (!hasAnyOrg && !pathname.startsWith('/setup-organization')) {
+    return NextResponse.redirect(new URL('/setup-organization', req.url))
+  }
+  
   return NextResponse.next()
 }
 
