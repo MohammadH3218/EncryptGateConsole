@@ -1,20 +1,66 @@
 // app/api/auth/team-members/route.ts
 export const runtime = 'nodejs';
 
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import {
   DynamoDBClient,
   QueryCommand,
   CreateTableCommand,
   DescribeTableCommand,
 } from '@aws-sdk/client-dynamodb';
+import jwt from 'jsonwebtoken';
 
-// Environment variables
-const ORG_ID = process.env.ORGANIZATION_ID!;
 const USERS_TABLE = process.env.USERS_TABLE_NAME || 'SecurityTeamUsers';
 
 // DynamoDB client
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+
+// Helper to extract auth context from request
+function getAuthContext(request: NextRequest) {
+  try {
+    // Try Authorization header first
+    const authHeader = request.headers.get('Authorization');
+    let token = null;
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.replace('Bearer ', '').trim();
+    } else {
+      // Fallback to cookies
+      const cookieStore = cookies();
+      token = cookieStore.get('access_token')?.value || cookieStore.get('id_token')?.value;
+    }
+
+    if (!token) {
+      return { error: 'No authentication token found', status: 401 };
+    }
+
+    // Decode token (unverified for development)
+    const claims = jwt.decode(token) as any;
+    if (!claims) {
+      return { error: 'Invalid token format', status: 401 };
+    }
+
+    // Extract org ID and roles
+    const orgId = claims['custom:orgId'] || claims.orgId || request.headers.get('x-org-id');
+    const roles = claims['cognito:groups'] || claims.roles || [];
+
+    if (!orgId) {
+      return { error: 'Organization ID not found in token', status: 400 };
+    }
+
+    return {
+      success: true,
+      orgId,
+      roles: Array.isArray(roles) ? roles : [roles],
+      username: claims['cognito:username'] || claims.email,
+      email: claims.email
+    };
+  } catch (error) {
+    console.error('Auth context extraction failed:', error);
+    return { error: 'Failed to process authentication', status: 500 };
+  }
+}
 
 // Ensure SecurityTeamUsers table exists
 async function ensureUsersTableExists(): Promise<void> {
@@ -90,16 +136,32 @@ function generateAvatar(name: string, email: string): string {
 }
 
 // GET: fetch real team members from SecurityTeamUsers table
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     console.log('📋 Fetching team members from SecurityTeamUsers table...');
 
-    if (!ORG_ID) {
+    // Get auth context
+    const authCtx = getAuthContext(request);
+    if (!authCtx.success) {
       return NextResponse.json(
-        { error: 'Organization ID not configured' },
-        { status: 500 }
+        { ok: false, error: authCtx.error },
+        { status: authCtx.status }
       );
     }
+
+    const { orgId, roles, username } = authCtx;
+    
+    // Check permissions - only Admin/Owner can view team members
+    const hasPermission = roles.includes('Owner') || roles.includes('Admin') || roles.includes('SecurityAnalyst');
+    if (!hasPermission) {
+      console.log(`❌ Access denied - user ${username} with roles [${roles.join(', ')}] cannot view team members`);
+      return NextResponse.json(
+        { ok: false, error: 'forbidden', message: 'Insufficient permissions to view team members' },
+        { status: 403 }
+      );
+    }
+
+    console.log(`✅ User ${username} authorized to view team members for org ${orgId}`);
 
     // Ensure table exists first
     await ensureUsersTableExists();
@@ -110,7 +172,7 @@ export async function GET() {
         TableName: USERS_TABLE,
         KeyConditionExpression: 'orgId = :orgId',
         ExpressionAttributeValues: {
-          ':orgId': { S: ORG_ID },
+          ':orgId': { S: orgId },
         },
       })
     );
@@ -164,13 +226,15 @@ export async function GET() {
       users = sampleUsers;
     }
 
-    console.log(`✅ Found ${users.length} team members`);
+    console.log(`✅ Found ${users.length} team members for org ${orgId}`);
 
     return NextResponse.json({
+      ok: true,
       success: true,
       team_members: users,  // Use team_members to match frontend expectation
       teamMembers: users,   // Keep both for compatibility
-      count: users.length
+      count: users.length,
+      orgId: orgId
     });
 
   } catch (error: any) {
@@ -186,6 +250,8 @@ export async function GET() {
     
     return NextResponse.json(
       { 
+        ok: false,
+        success: false,
         error: errorMessage, 
         details: error.message,
         code: error.name

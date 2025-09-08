@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
-import { useRouter } from "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -35,6 +35,7 @@ interface InvestigationWithSeverity extends Investigation {
 }
 
 export default function AssignmentsPage() {
+  const params = useParams()
   const [searchQuery] = useState("")
   const [assignments] = useState<Assignment[]>(mockAssignments)
   const [inProgressInvestigations, setInProgressInvestigations] = useState<InvestigationWithSeverity[]>([])
@@ -63,7 +64,7 @@ export default function AssignmentsPage() {
   }, [])
 
   const handleContinueInvestigation = (id: string) => {
-    router.push(`/admin/investigate/${id}`)
+    router.push(`/o/${params.orgId}/admin/investigate/${id}`)
   }
 
 
