@@ -63,19 +63,6 @@ async function getUserDisplayName(orgId: string, userEmail: string, fallbackName
   return fallbackName
 }
 
-// Helper function to parse cookies
-function parseCookie(cookieHeader?: string) {
-  if (!cookieHeader) return {}
-  const cookies: Record<string, string> = {}
-  cookieHeader.split(';').forEach(cookie => {
-    const [key, value] = cookie.trim().split('=')
-    if (key && value) {
-      cookies[key] = decodeURIComponent(value)
-    }
-  })
-  return cookies
-}
-
 // Default permissions for each role
 const DEFAULT_ROLE_PERMS = {
   "Owner": ["*"],
@@ -140,25 +127,14 @@ export async function GET(request: NextRequest) {
     const roles = claims['cognito:groups'] || claims.roles || []
     const rolesArray = Array.isArray(roles) ? roles : [roles]
     const permissions = expandRolePermissions(rolesArray)
-    
-    // Check for orgId from multiple sources
-    const { searchParams } = new URL(request.url)
-    const cookieHeader = request.headers.get('cookie')
-    const parsedCookies = parseCookie(cookieHeader || undefined)
-    
-    const orgId = 
-      searchParams.get('orgId') || 
-      request.headers.get('x-org-id') ||
-      parsedCookies.orgId ||
-      claims['custom:orgId'] || 
-      claims.orgId
+    const orgId = claims['custom:orgId'] || claims.orgId || request.headers.get('x-org-id')
 
     if (!orgId) {
-      console.log('❌ No organization ID found in URL, headers, cookies, or token')
+      console.log('❌ No organization ID found in token or headers')
       return NextResponse.json({ 
         ok: false, 
         error: 'Organization ID not found',
-        details: 'No orgId in URL params, x-org-id header, orgId cookie, or token claims' 
+        details: 'No orgId in token or x-org-id header' 
       }, { status: 400 })
     }
 
