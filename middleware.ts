@@ -46,9 +46,17 @@ export function middleware(req: NextRequest) {
     const segs = pathname.split('/')
     const pathOrg = segs[2] || ''
     
-    // Allow login pages without authentication
-    if (pathname === `/o/${pathOrg}/admin/login`) {
-      return NextResponse.next()
+    // Allow login pages without authentication and set org hint cookie
+    if (pathname === `/o/${pathOrg}/login`) {
+      const response = NextResponse.next()
+      // Set a hint cookie so API calls can resolve orgId even before login
+      response.cookies.set('orgId_hint', pathOrg, {
+        httpOnly: false,
+        sameSite: 'lax',
+        path: '/',
+        secure: true,
+      })
+      return response
     }
     
     const access = req.cookies.get('access_token')?.value
@@ -56,14 +64,14 @@ export function middleware(req: NextRequest) {
 
     if (!access) {
       const login = req.nextUrl.clone()
-      login.pathname = `/o/${pathOrg}/admin/login`
+      login.pathname = `/o/${pathOrg}/login`
       login.searchParams.set('next', pathname + (search || ''))
       return NextResponse.redirect(login)
     }
     if (!cookieOrg || cookieOrg !== pathOrg) {
       // force the browser to pick up the right org
       const login = req.nextUrl.clone()
-      login.pathname = `/o/${pathOrg}/admin/login`
+      login.pathname = `/o/${pathOrg}/login`
       login.searchParams.set('next', pathname + (search || ''))
       return NextResponse.redirect(login)
     }

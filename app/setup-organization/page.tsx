@@ -240,8 +240,8 @@ export default function SetupOrganizationPage() {
     console.log('📊 SETUP: orgId from localStorage:', orgId)
     
     if (orgId) {
-      console.log(`➡️ SETUP: Redirecting to /o/${orgId}/admin/login`)
-      router.push(`/o/${orgId}/admin/login`)
+      console.log(`➡️ SETUP: Redirecting to /o/${orgId}/login`)
+      router.push(`/o/${orgId}/login`)
     } else {
       console.log('⚠️ SETUP: No orgId found, redirecting to /login (will be redirected by middleware)')
       router.push('/login')

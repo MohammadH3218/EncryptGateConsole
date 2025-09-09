@@ -12,7 +12,7 @@ export const useSession = () => {
 
 interface SessionProviderProps {
   children: React.ReactNode
-  token: string
+  token?: string
   orgId: string
 }
 
@@ -23,8 +23,12 @@ export function SessionProvider({ children, token, orgId }: SessionProviderProps
 
   useEffect(() => {
     const loadSessionData = async () => {
+      // If no token, this is pre-login - just set loading to false and continue
       if (!token || !orgId) {
+        console.log('💪 SessionProvider: No token/orgId - continuing without session (pre-login)')
         setLoading(false)
+        setSession(null)
+        setError(null)
         return
       }
 
@@ -77,8 +81,9 @@ export function SessionProvider({ children, token, orgId }: SessionProviderProps
     )
   }
 
-  // Don't render children if no session
-  if (!session) {
+  // Render children even without session for login pages
+  // Only show "no session" message if we had a token but failed to load session
+  if (!session && token) {
     return (
       <div className="min-h-screen bg-[#171717] flex items-center justify-center">
         <div className="text-center">

@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   if (!orgId) return new NextResponse('Missing orgId', { status: 400 })
 
   // Redirect to the org-specific login page with next parameter
-  const loginUrl = new URL(`/o/${orgId}/admin/login`, req.url)
+  const loginUrl = new URL(`/o/${orgId}/login`, req.url)
   if (next) {
     loginUrl.searchParams.set('next', next)
   }
