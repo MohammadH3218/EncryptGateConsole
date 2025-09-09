@@ -127,15 +127,39 @@ export async function GET(request: NextRequest) {
     const roles = claims['cognito:groups'] || claims.roles || []
     const rolesArray = Array.isArray(roles) ? roles : [roles]
     const permissions = expandRolePermissions(rolesArray)
-    const orgId = claims['custom:orgId'] || claims.orgId || request.headers.get('x-org-id')
+    // Try multiple ways to get orgId
+    let orgId = claims['custom:orgId'] || claims.orgId || request.headers.get('x-org-id')
+    
+    // Also try to extract from URL query params or referer for pre-login scenarios
+    if (!orgId) {
+      const url = new URL(request.url)
+      orgId = url.searchParams.get('orgId')
+    }
+    
+    // Try orgId_hint cookie set by middleware
+    if (!orgId) {
+      const cookieStore = cookies()
+      orgId = cookieStore.get('orgId_hint')?.value
+    }
+    
+    // Try to extract from referer path for login page scenarios
+    if (!orgId) {
+      const referer = request.headers.get('referer') || ''
+      const match = referer.match(/\/o\/([^/]+)\//)
+      if (match) {
+        orgId = match[1]
+      }
+    }
 
     if (!orgId) {
-      console.log('❌ No organization ID found in token or headers')
+      console.log('❌ No organization ID found - returning minimal profile for pre-login')
       return NextResponse.json({ 
         ok: false, 
-        error: 'Organization ID not found',
-        details: 'No orgId in token or x-org-id header' 
-      }, { status: 400 })
+        error: 'ORG_ID_MISSING',
+        message: 'No organization ID supplied yet (pre-login is allowed)',
+        user: null,
+        org: null
+      }, { status: 200 }) // Return 200, not 400, so UI doesn't redirect
     }
 
     // Get organization info from database

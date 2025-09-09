@@ -58,7 +58,7 @@ export async function POST(req: Request) {
           existingOrganization: {
             name: existingOrgName,
             id: existingOrgId,
-            loginUrl: `/o/${existingOrgId}/admin/login`
+            loginUrl: `/o/${existingOrgId}/login`
           }
         }, { status: 409 });
       }
@@ -88,7 +88,7 @@ export async function POST(req: Request) {
           error: "DuplicateCognitoServiceError",
           existingOrganization: {
             id: existingOrgId,
-            loginUrl: `/o/${existingOrgId}/admin/login`
+            loginUrl: `/o/${existingOrgId}/login`
           }
         }, { status: 409 });
       }
@@ -114,7 +114,7 @@ export async function POST(req: Request) {
           error: "DuplicateClientIdError",
           existingOrganization: {
             id: existingOrgId,
-            loginUrl: `/o/${existingOrgId}/admin/login`
+            loginUrl: `/o/${existingOrgId}/login`
           }
         }, { status: 409 });
       }
