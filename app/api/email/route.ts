@@ -174,9 +174,8 @@ export async function GET(request: Request) {
           ':orgId': { S: orgId }
         }
       }));
-        monitoredEmployees = (empResp.Items || []).map(item => item.email?.S).filter(Boolean) as string[];
-        console.log(`👥 Found ${monitoredEmployees.length} monitored employees (for stats only):`, monitoredEmployees);
-      }
+      monitoredEmployees = (empResp.Items || []).map(item => item.email?.S).filter(Boolean) as string[];
+      console.log(`👥 Found ${monitoredEmployees.length} monitored employees (for stats only):`, monitoredEmployees);
     } catch (empError) {
       console.warn('⚠️ Could not fetch monitored employees (continuing anyway):', empError);
     }
