@@ -2,7 +2,8 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useParams } from "next/navigation"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
@@ -17,12 +18,56 @@ interface FlagDialogProps {
   onConfirm: (assignedTo: string[]) => void
 }
 
-// Example team members - in a real app this would come from your backend
-const teamMembers = ["Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince"]
+interface TeamMember {
+  id: string
+  name: string
+  email: string
+  preferredUsername: string
+}
 
 export function FlagDialog({ open, onOpenChange, onConfirm }: FlagDialogProps) {
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([])
   const [openCombobox, setOpenCombobox] = useState(false)
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [loadingTeamMembers, setLoadingTeamMembers] = useState(false)
+  const params = useParams()
+
+  // Load Security Team Users from API
+  useEffect(() => {
+    const loadTeamMembers = async () => {
+      if (!params.orgId) return
+      
+      setLoadingTeamMembers(true)
+      try {
+        const response = await fetch('/api/company-settings/users', {
+          headers: {
+            'x-org-id': params.orgId as string
+          }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          const users = (data.users || []).map((user: any) => ({
+            id: user.email,
+            name: user.name || user.email,
+            email: user.email,
+            preferredUsername: user.name || user.email.split('@')[0]
+          }))
+          setTeamMembers(users)
+        } else {
+          console.warn('Failed to load team members for flag dialog:', response.statusText)
+        }
+      } catch (error) {
+        console.error('Failed to load team members for flag dialog:', error)
+      } finally {
+        setLoadingTeamMembers(false)
+      }
+    }
+
+    if (open) {
+      loadTeamMembers()
+    }
+  }, [open, params.orgId])
 
   const handleConfirm = () => {
     onConfirm(selectedAssignees)
@@ -73,21 +118,26 @@ export function FlagDialog({ open, onOpenChange, onConfirm }: FlagDialogProps) {
                 <Command>
                   <CommandInput placeholder="Search team members..." />
                   <CommandList>
-                    <CommandEmpty>No team member found.</CommandEmpty>
+                    <CommandEmpty>
+                      {loadingTeamMembers ? "Loading team members..." : "No team member found."}
+                    </CommandEmpty>
                     <CommandGroup>
                       {teamMembers.map((member) => (
                         <CommandItem
-                          key={member}
-                          onSelect={() => toggleAssignee(member)}
+                          key={member.id}
+                          onSelect={() => toggleAssignee(member.preferredUsername)}
                           onClick={(e) => e.stopPropagation()}
                         >
                           <Check
                             className={cn(
                               "mr-2 h-4 w-4",
-                              selectedAssignees.includes(member) ? "opacity-100" : "opacity-0",
+                              selectedAssignees.includes(member.preferredUsername) ? "opacity-100" : "opacity-0",
                             )}
                           />
-                          {member}
+                          <div>
+                            <div className="font-medium">{member.preferredUsername}</div>
+                            <div className="text-xs text-muted-foreground">{member.email}</div>
+                          </div>
                         </CommandItem>
                       ))}
                     </CommandGroup>

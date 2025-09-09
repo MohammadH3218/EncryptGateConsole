@@ -66,11 +66,15 @@ async function getUserDisplayName(orgId: string, userEmail: string, fallbackName
 // Role aliases for normalization (handles case sensitivity and variations)
 const ROLE_ALIASES: Record<string, string> = {
   owner: "Owner",
+  "sr. admin": "Sr. Admin",
+  "sr admin": "Sr. Admin", 
+  "sradmin": "Sr. Admin",
   admin: "Admin",
-  securityanalyst: "SecurityAnalyst",
-  securityviewer: "SecurityViewer",
   analyst: "Analyst",
   viewer: "Viewer",
+  // Legacy mappings
+  securityanalyst: "Analyst",
+  securityviewer: "Viewer",
 }
 
 function normalizeRole(role: string): string {
@@ -79,36 +83,35 @@ function normalizeRole(role: string): string {
   return ROLE_ALIASES[key] ?? role // fall back to original if unknown
 }
 
-// Default permissions for each role
+// Default permissions for each role according to hierarchy:
+// Owner & Sr. Admin: Full access + can edit specific permissions for users
+// Admin: See everything + Pushed Requests
+// Analyst: Main pages (Dashboard to Manage Employees)
+// Viewer: Profile, Notifications, Security only
 const DEFAULT_ROLE_PERMS = {
   "Owner": ["*"],
-  "Admin": ["*"],
-  "SecurityAnalyst": [
+  "Sr. Admin": ["*"],
+  "Admin": [
+    "dashboard.read",
+    "detections.read", "detections.update", "detections.create",
+    "assignments.read", "assignments.update", "assignments.create", 
+    "team.read", "investigations.read", "investigations.update",
+    "blocked_emails.read", "blocked_emails.create",
+    "pushed_requests.read",
+    "manage_employees.read"
+  ],
+  "Analyst": [
     "dashboard.read",
     "detections.read", "detections.update", "detections.create",
     "assignments.read", "assignments.update", "assignments.create",
     "team.read", "investigations.read", "investigations.update",
     "blocked_emails.read", "blocked_emails.create",
-    "pushed_requests.read"
-  ],
-  "SecurityViewer": [
-    "dashboard.read",
-    "detections.read", "assignments.read", "team.read",
-    "investigations.read",
-    "pushed_requests.read"
-  ],
-  "Analyst": [
-    "dashboard.read",
-    "detections.read", "detections.update",
-    "assignments.read", "assignments.update",
-    "team.read", "investigations.read", "investigations.update",
-    "pushed_requests.read"
+    "manage_employees.read"
   ],
   "Viewer": [
-    "dashboard.read",
-    "detections.read", "assignments.read", "team.read",
-    "investigations.read",
-    "pushed_requests.read"
+    "profile.read", "profile.update",
+    "notifications.read", "notifications.update",
+    "security.read", "security.update"
   ]
 }
 

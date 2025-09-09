@@ -139,41 +139,67 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
 
   const allMainNavItems = [
     { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["dashboard.read"] },
-    { icon: Mail, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["detections.read"] },
+    { icon: Mail, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["dashboard.read"] },
     { icon: AlertTriangle, label: "Detections", href: getOrgPath("/admin/detections"), permissions: ["detections.read"] },
     { icon: FileText, label: "Allow/Block List", href: getOrgPath("/admin/allow-block-list"), permissions: ["blocked_emails.read"] },
     { icon: UserCheck, label: "Assignments", href: getOrgPath("/admin/assignments"), permissions: ["assignments.read"] },
+    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["manage_employees.read"] },
+  ]
+
+  const allPushedRequestsItems = [
     { icon: FileText, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests"), permissions: ["pushed_requests.read"] },
-    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["team.read"] },
   ]
 
   const allCompanySettingsItems = [
-    { icon: Lock, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["*"] }, // Admin/Owner only
-    { icon: User, label: "User Management", href: getOrgPath("/admin/company-settings/user-management"), permissions: ["team.read"] },
-    { icon: Shield, label: "Roles & Permissions", href: getOrgPath("/admin/company-settings/roles"), permissions: ["*"] }, // Admin/Owner only
+    { icon: Lock, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["company_settings.read"] },
+    { icon: User, label: "User Management", href: getOrgPath("/admin/company-settings/user-management"), permissions: ["company_settings.read"] },
+    { icon: Shield, label: "Roles & Permissions", href: getOrgPath("/admin/company-settings/roles"), permissions: ["company_settings.read"] },
   ]
 
   const allUserSettingsItems = [
-    { icon: User, label: "Profile", href: getOrgPath("/admin/user-settings/profile"), permissions: [] }, // Always accessible
-    { icon: Bell, label: "Notifications", href: getOrgPath("/admin/user-settings/notifications"), permissions: [] }, // Always accessible
-    { icon: Lock, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: [] }, // Always accessible
+    { icon: User, label: "Profile", href: getOrgPath("/admin/user-settings/profile"), permissions: ["profile.read"] },
+    { icon: Bell, label: "Notifications", href: getOrgPath("/admin/user-settings/notifications"), permissions: ["notifications.read"] },
+    { icon: Lock, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: ["security.read"] },
   ]
 
-  // Check if user is Owner/Admin (has wildcard permissions)
-  const isSuper = !!(session?.user?.isOwner || session?.user?.isAdmin)
+  // Check user roles for hierarchy-based permissions
+  const userRoles = session?.user?.roles || []
+  const isOwner = userRoles.includes('Owner') || session?.user?.isOwner
+  const isSrAdmin = userRoles.includes('Sr. Admin')
+  const isAdmin = userRoles.includes('Admin') || session?.user?.isAdmin
+  const isAnalyst = userRoles.includes('Analyst')
+  const isViewer = userRoles.includes('Viewer')
   
-  // Helper function for permission checking
+  // Check if user has Super permissions (Owner/Sr. Admin)
+  const isSuper = !!(isOwner || isSrAdmin)
+  
+  // Helper function for permission checking based on role hierarchy
   const hasPermission = (requiredPermissions: string[]) => {
-    if (isSuper) return true // Owner/Admin bypass all checks
-    if (requiredPermissions.length === 0) return true // No permissions required
-    return requiredPermissions.some(permission => can(session?.user?.permissions, permission))
+    // Super users bypass all permission checks
+    if (isSuper) return true
+    
+    // No permissions required means accessible to all
+    if (requiredPermissions.length === 0) return true
+    
+    // Check if user has any of the required permissions
+    return requiredPermissions.some(permission => {
+      // Handle special permissions based on role hierarchy
+      if (permission === "pushed_requests.read") {
+        return isAdmin || isOwner || isSrAdmin
+      }
+      if (permission === "company_settings.read") {
+        return isSrAdmin || isOwner
+      }
+      // Check against actual user permissions
+      return can(session?.user?.permissions, permission)
+    })
   }
   
-  // Filter navigation items based on user permissions
+  // Filter navigation items based on user permissions and role hierarchy
   const mainNavItems = allMainNavItems.filter(item => hasPermission(item.permissions))
+  const pushedRequestsItems = allPushedRequestsItems.filter(item => hasPermission(item.permissions))
   const companySettingsItems = allCompanySettingsItems.filter(item => hasPermission(item.permissions))
-
-  const userSettingsItems = allUserSettingsItems // User settings always accessible
+  const userSettingsItems = allUserSettingsItems.filter(item => hasPermission(item.permissions))
 
   const handleNavigation = (href: string) => {
     router.push(href)
@@ -329,11 +355,40 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
               )
             })}
 
-            <div className="pt-4">
-              <div className="px-3 py-2">
-                <div className="h-px bg-[#1f1f1f] mb-2"></div>
-                <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Company Settings</span>
+            {/* Pushed Requests section (Admins and above only) */}
+            {pushedRequestsItems.length > 0 && (
+              <div className="pt-4">
+                <div className="px-3 py-2">
+                  <div className="h-px bg-[#1f1f1f] mb-2"></div>
+                  <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Admin Tools</span>
+                </div>
+                {pushedRequestsItems.map((item, index) => {
+                  const isActive = pathname === item.href
+                  return (
+                    <button
+                      key={`pushed-${index}`}
+                      onClick={() => handleNavigation(item.href)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                        isActive
+                          ? "bg-[#1f1f1f] text-white"
+                          : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
+                      }`}
+                    >
+                      <item.icon className="w-4 h-4" />
+                      {item.label}
+                    </button>
+                  )
+                })}
               </div>
+            )}
+
+            {/* Company Settings section (Sr. Admin and above only) */}
+            {companySettingsItems.length > 0 && (
+              <div className="pt-4">
+                <div className="px-3 py-2">
+                  <div className="h-px bg-[#1f1f1f] mb-2"></div>
+                  <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Company Settings</span>
+                </div>
               {companySettingsItems.map((item, index) => {
                 const isActive = pathname === item.href
                 return (
@@ -351,13 +406,16 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                   </button>
                 )
               })}
-            </div>
-
-            <div className="pt-4">
-              <div className="px-3 py-2">
-                <div className="h-px bg-[#1f1f1f] mb-2"></div>
-                <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">User Settings</span>
               </div>
+            )}
+
+            {/* User Settings section (Always visible but filtered by permissions) */}
+            {userSettingsItems.length > 0 && (
+              <div className="pt-4">
+                <div className="px-3 py-2">
+                  <div className="h-px bg-[#1f1f1f] mb-2"></div>
+                  <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">User Settings</span>
+                </div>
               {userSettingsItems.map((item, index) => {
                 const isActive = pathname === item.href
                 return (
@@ -375,7 +433,8 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                   </button>
                 )
               })}
-            </div>
+              </div>
+            )}
           </nav>
 
           {/* User Profile */}

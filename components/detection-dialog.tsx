@@ -8,8 +8,8 @@ import { Badge } from "@/components/ui/badge"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Check, ChevronsUpDown, X } from "lucide-react"
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect } from "react"
+import { useRouter, useParams } from "next/navigation"
 import { cn } from "@/lib/utils"
 
 interface Detection {
@@ -33,13 +33,58 @@ interface DetectionDialogProps {
   onAssign: (id: number, assignedTo: string[], action: "assign" | "unassign") => void
 }
 
-// Mock team members for the dropdown
-const teamMembers = ["Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince"]
+interface TeamMember {
+  id: string
+  name: string
+  email: string
+  preferredUsername: string
+}
 
 export function DetectionDialog({ detection, open, onOpenChange, onAssign }: DetectionDialogProps) {
   const [selectedAssignees, setSelectedAssignees] = useState<string[]>([])
   const [openCombobox, setOpenCombobox] = useState(false)
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+  const [loadingTeamMembers, setLoadingTeamMembers] = useState(false)
   const router = useRouter()
+  const params = useParams()
+
+  // Load Security Team Users from API
+  useEffect(() => {
+    const loadTeamMembers = async () => {
+      if (!params.orgId) return
+      
+      setLoadingTeamMembers(true)
+      try {
+        const response = await fetch('/api/company-settings/users', {
+          headers: {
+            'x-org-id': params.orgId as string
+          }
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          const users = (data.users || []).map((user: any) => ({
+            id: user.email,
+            name: user.name || user.email,
+            email: user.email,
+            preferredUsername: user.name || user.email.split('@')[0]
+          }))
+          setTeamMembers(users)
+          console.log('✅ Loaded team members for assignment dialog:', users.length)
+        } else {
+          console.warn('Failed to load team members:', response.statusText)
+        }
+      } catch (error) {
+        console.error('Failed to load team members:', error)
+      } finally {
+        setLoadingTeamMembers(false)
+      }
+    }
+
+    if (open) {
+      loadTeamMembers()
+    }
+  }, [open, params.orgId])
 
   if (!detection) return null
 
@@ -149,13 +194,19 @@ export function DetectionDialog({ detection, open, onOpenChange, onAssign }: Det
                     role="combobox"
                     aria-expanded={openCombobox}
                     className="w-full justify-between h-9"
+                    disabled={loadingTeamMembers || teamMembers.length === 0}
                     onClick={(e) => {
                       e.preventDefault()
                       e.stopPropagation()
                       setOpenCombobox(!openCombobox)
                     }}
                   >
-                    Select
+                    {loadingTeamMembers 
+                      ? "Loading..." 
+                      : teamMembers.length === 0 
+                        ? "No team members found"
+                        : "Select team member"
+                    }
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
@@ -166,13 +217,15 @@ export function DetectionDialog({ detection, open, onOpenChange, onAssign }: Det
                   <Command onClick={(e) => e.stopPropagation()}>
                     <CommandInput placeholder="Search team members..." onClick={(e) => e.stopPropagation()} />
                     <CommandList>
-                      <CommandEmpty>No team member found.</CommandEmpty>
+                      <CommandEmpty>
+                        {loadingTeamMembers ? "Loading team members..." : "No team member found."}
+                      </CommandEmpty>
                       <CommandGroup>
                         {teamMembers.map((member) => (
                           <CommandItem
-                            key={member}
+                            key={member.id}
                             onSelect={(e) => {
-                              toggleAssignee(member)
+                              toggleAssignee(member.preferredUsername)
                               e.stopPropagation()
                             }}
                             onClick={(e) => e.stopPropagation()}
@@ -180,10 +233,13 @@ export function DetectionDialog({ detection, open, onOpenChange, onAssign }: Det
                             <Check
                               className={cn(
                                 "mr-2 h-4 w-4",
-                                selectedAssignees.includes(member) ? "opacity-100" : "opacity-0",
+                                selectedAssignees.includes(member.preferredUsername) ? "opacity-100" : "opacity-0",
                               )}
                             />
-                            {member}
+                            <div>
+                              <div className="font-medium">{member.preferredUsername}</div>
+                              <div className="text-xs text-muted-foreground">{member.email}</div>
+                            </div>
                           </CommandItem>
                         ))}
                       </CommandGroup>
