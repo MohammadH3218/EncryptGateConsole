@@ -13,6 +13,8 @@ export default async function OrgLayout({ children, params }: OrgLayoutProps) {
   const cookieStore = await cookies()
   const accessToken = cookieStore.get('access_token')?.value || ""
   
+  console.log(`🏢 OrgLayout: Loading for orgId=${orgId}, accessToken=${accessToken ? 'present' : 'missing'}`)
+  
   // Don't redirect here - let middleware handle auth checks
   // This layout just provides the SessionProvider context
 

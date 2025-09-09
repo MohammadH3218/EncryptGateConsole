@@ -209,9 +209,26 @@ export async function GET(request: NextRequest) {
       'User'
     )
     
+    console.log('👤 Profile API: Token claims analysis:', {
+      preferred_username: claims.preferred_username,
+      name: claims.name,
+      given_name: claims.given_name,
+      custom_displayName: claims['custom:displayName'],
+      email: claims.email,
+      cognito_username: claims['cognito:username'],
+      calculated_tokenDisplayName: tokenDisplayName
+    })
+    
     // Try to get stored display name from Users table, fallback to token name
     const userEmail = claims.email || claims['cognito:username']
     const displayName = await getUserDisplayName(orgId, userEmail, tokenDisplayName)
+    
+    console.log('👤 Profile API: Final display name:', { 
+      userEmail, 
+      tokenDisplayName, 
+      finalDisplayName: displayName,
+      dbLookupPerformed: true 
+    })
 
     const profile = {
       ok: true,

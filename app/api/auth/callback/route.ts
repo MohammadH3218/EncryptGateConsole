@@ -92,13 +92,22 @@ export async function GET(req: Request) {
       return NextResponse.redirect(`/o/${st.orgId}/login?error=missing_tokens`)
     }
 
-    // Set cookies hardened
-    const opts = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/' }
+    // Set cookies - both httpOnly for security and client-readable for session management
+    const secureOpts = { httpOnly: true, secure: true, sameSite: 'lax' as const, path: '/' }
+    const clientOpts = { httpOnly: false, secure: true, sameSite: 'lax' as const, path: '/' }
+    
     const res = NextResponse.redirect(st.next || `/o/${st.orgId}/admin/dashboard`)
-    res.cookies.set('id_token', id_token, opts)
-    res.cookies.set('access_token', access_token, opts)
-    if (refresh_token) res.cookies.set('refresh_token', refresh_token, { ...opts, maxAge: 30*24*3600 })
-    res.cookies.set('org_id', st.orgId, { secure: true, sameSite: 'lax', path: '/' }) // readable by JS
+    
+    // Secure httpOnly cookies (primary)
+    res.cookies.set('id_token', id_token, secureOpts)
+    res.cookies.set('access_token', access_token, secureOpts)
+    if (refresh_token) res.cookies.set('refresh_token', refresh_token, { ...secureOpts, maxAge: 30*24*3600 })
+    
+    // Client-readable copies for session management (with shorter expiry for security)
+    res.cookies.set('client_access_token', access_token, { ...clientOpts, maxAge: 3600 }) // 1 hour
+    res.cookies.set('client_id_token', id_token, { ...clientOpts, maxAge: 3600 }) // 1 hour
+    
+    res.cookies.set('org_id', st.orgId, { secure: true, sameSite: 'lax', path: '/' })
     res.cookies.delete('pkce_verifier')
     return res
   } catch (err: any) {

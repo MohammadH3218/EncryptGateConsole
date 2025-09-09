@@ -31,23 +31,51 @@ export function SessionProvider({ children, token, orgId }: SessionProviderProps
     let cancelled = false
     
     const loadSessionData = async () => {
+      console.log('🔄 SessionProvider: Loading session data...', { token: token ? 'present' : 'missing', orgId })
+      
+      // Try to get token from client-side sources as fallback
+      let finalToken = token
+      if (!finalToken && typeof window !== 'undefined') {
+        // Try localStorage first
+        finalToken = localStorage.getItem('access_token') || ''
+        
+        // If not in localStorage, try client-readable cookies
+        if (!finalToken) {
+          const cookies = document.cookie.split(';').reduce((acc, cookie) => {
+            const [key, value] = cookie.trim().split('=')
+            acc[key] = value
+            return acc
+          }, {} as Record<string, string>)
+          
+          finalToken = cookies['client_access_token'] || ''
+          
+          // If we found it in cookies, also set localStorage for future use
+          if (finalToken) {
+            localStorage.setItem('access_token', finalToken)
+            if (cookies['client_id_token']) {
+              localStorage.setItem('id_token', cookies['client_id_token'])
+            }
+          }
+        }
+        
+        console.log('🔄 SessionProvider: No server token, trying client-side sources:', { foundToken: finalToken ? 'present' : 'missing' })
+      }
+      
       // If no token, this is pre-login scenario
-      if (!token || !orgId) {
+      if (!finalToken || !orgId) {
+        console.log('⚠️ SessionProvider: No token or orgId, setting no_session state')
         if (!cancelled) setState({ status: "no_session", session: null })
         return
       }
 
       try {
-        // For now, require a valid token (refresh endpoint to be implemented later)
-        if (!token) {
-          throw new Error('No access token available - please sign in')
-        }
-
-        const sessionData = await loadSession(token, orgId)
+        console.log('🔄 SessionProvider: Calling loadSession with token and orgId')
+        const sessionData = await loadSession(finalToken, orgId)
+        console.log('✅ SessionProvider: Session loaded successfully', { user: sessionData.user.name, org: sessionData.org.name })
         if (!cancelled) setState({ status: "ready", session: sessionData })
         
       } catch (err: any) {
-        console.error('❌ Session load error:', err)
+        console.error('❌ SessionProvider: Session load error:', err)
         if (!cancelled) {
           setState({ 
             status: "error", 

@@ -63,6 +63,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
 
   // Only render AppLayout if session is ready
   if (sessionState.status !== "ready") {
+    console.log(`🔄 AppLayout: Session not ready, status=${sessionState.status}, blocking render`)
     // The SessionProvider will handle loading/error states
     return null
   }
@@ -81,6 +82,11 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   // Since we're guaranteed to have session data (status === "ready"), use it directly
   useEffect(() => {
     if (session?.user) {
+      console.log('👤 AppLayout: Setting userInfo from session data:', { 
+        sessionUserName: session.user.name, 
+        sessionUserEmail: session.user.email,
+        finalName: session.user.name || session.user.email || ''
+      })
       setUserInfo({ 
         email: session.user.email || '', 
         name: session.user.name || session.user.email || ''
