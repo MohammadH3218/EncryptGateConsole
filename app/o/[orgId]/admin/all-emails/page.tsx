@@ -664,7 +664,6 @@ export default function AdminAllEmailsPage() {
   if (error) {
     return (
       <AppLayout
-        username="John Doe"
         notificationsCount={2}
       >
         <FadeInSection>
@@ -725,7 +724,6 @@ export default function AdminAllEmailsPage() {
   // Main UI continues...
   return (
     <AppLayout
-      username="John Doe"
       notificationsCount={2}
     >
       <FadeInSection>

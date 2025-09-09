@@ -23,8 +23,11 @@ function isPublic(path: string) {
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl
   
+  console.log('🔍 MIDDLEWARE: Request to:', pathname)
+  
   // Redirect old /login to setup-organization
   if (pathname === '/login') {
+    console.log('🔄 MIDDLEWARE: Redirecting /login → /setup-organization')
     return NextResponse.redirect(new URL('/setup-organization', req.url))
   }
   
@@ -44,7 +47,7 @@ export function middleware(req: NextRequest) {
     const pathOrg = segs[2] || ''
     
     // Allow login pages without authentication
-    if (pathname === `/o/${pathOrg}/login`) {
+    if (pathname === `/o/${pathOrg}/admin/login`) {
       return NextResponse.next()
     }
     
@@ -53,14 +56,14 @@ export function middleware(req: NextRequest) {
 
     if (!access) {
       const login = req.nextUrl.clone()
-      login.pathname = `/o/${pathOrg}/login`
+      login.pathname = `/o/${pathOrg}/admin/login`
       login.searchParams.set('next', pathname + (search || ''))
       return NextResponse.redirect(login)
     }
     if (!cookieOrg || cookieOrg !== pathOrg) {
       // force the browser to pick up the right org
       const login = req.nextUrl.clone()
-      login.pathname = `/o/${pathOrg}/login`
+      login.pathname = `/o/${pathOrg}/admin/login`
       login.searchParams.set('next', pathname + (search || ''))
       return NextResponse.redirect(login)
     }

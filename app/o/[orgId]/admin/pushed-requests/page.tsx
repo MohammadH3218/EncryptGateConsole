@@ -25,7 +25,7 @@ export default function PushedRequestsPage() {
   const [pushedDetections] = useState<PushedDetection[]>([])
 
   return (
-    <AppLayout username="John Doe" notificationsCount={0}>
+    <AppLayout notificationsCount={0}>
       <FadeInSection>
         <h2 className="text-2xl font-bold mb-4 text-white">Pushed Requests</h2>
         <PushedDetectionsList searchQuery={searchQuery} pushedDetections={pushedDetections} />

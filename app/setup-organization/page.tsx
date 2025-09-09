@@ -212,10 +212,16 @@ export default function SetupOrganizationPage() {
       const result = await response.json()
 
       if (response.ok) {
+        console.log('✅ SETUP: Organization created successfully!')
+        console.log('🏷️ SETUP: Organization ID:', result.organizationId)
+        console.log('🏷️ SETUP: Organization Name:', orgData.name)
+        
         setCurrentStep('complete')
         // Store organization context for login
         localStorage.setItem('organization_id', result.organizationId)
         localStorage.setItem('organization_name', orgData.name)
+        
+        console.log('💾 SETUP: Stored in localStorage - orgId:', result.organizationId, 'orgName:', orgData.name)
       } else {
         // Check if it's a duplicate configuration error
         if (response.status === 409 && result.existingOrganization) {
@@ -230,9 +236,14 @@ export default function SetupOrganizationPage() {
 
   const handleBackToLogin = () => {
     const orgId = localStorage.getItem('organization_id')
+    console.log('🚀 SETUP: handleBackToLogin called')
+    console.log('📊 SETUP: orgId from localStorage:', orgId)
+    
     if (orgId) {
-      router.push(`/o/${orgId}/login`)
+      console.log(`➡️ SETUP: Redirecting to /o/${orgId}/admin/login`)
+      router.push(`/o/${orgId}/admin/login`)
     } else {
+      console.log('⚠️ SETUP: No orgId found, redirecting to /login (will be redirected by middleware)')
       router.push('/login')
     }
   }

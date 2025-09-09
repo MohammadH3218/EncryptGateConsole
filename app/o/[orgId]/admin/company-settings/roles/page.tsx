@@ -300,7 +300,7 @@ export default function RolesPage() {
   }
 
   return (
-    <AppLayout username="John Doe" notificationsCount={0}>
+    <AppLayout notificationsCount={0}>
       <FadeInSection>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-white">Roles & Permissions</h2>

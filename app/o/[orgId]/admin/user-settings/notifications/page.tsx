@@ -47,7 +47,7 @@ export default function NotificationsPage() {
   }
 
   return (
-    <AppLayout username="John Doe" notificationsCount={3}>
+    <AppLayout notificationsCount={3}>
       <FadeInSection>
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold mb-6 text-white">Notification Settings</h2>

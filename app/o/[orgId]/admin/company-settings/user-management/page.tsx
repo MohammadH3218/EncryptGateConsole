@@ -362,7 +362,7 @@ export default function UserManagementPage() {
 
   if (!services.length) {
     return (
-      <AppLayout username="John Doe" notificationsCount={0}>
+      <AppLayout notificationsCount={0}>
         <FadeInSection>
           <Alert>
             <Cloud className="mr-2 h-4 w-4" />
@@ -386,7 +386,7 @@ export default function UserManagementPage() {
   }
 
   return (
-    <AppLayout username="John Doe" notificationsCount={0}>
+    <AppLayout notificationsCount={0}>
       <FadeInSection>
         <div className="space-y-8">
           <Alert className="bg-blue-900/20 border-blue-500/20 text-white">

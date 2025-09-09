@@ -457,7 +457,7 @@ export default function CloudServicesPage() {
   )
 
   return (
-    <AppLayout username="John Doe" notificationsCount={0}>
+    <AppLayout notificationsCount={0}>
       <FadeInSection>
         <div className="space-y-8">
           <Alert className="bg-blue-900/20 border-blue-500/20 text-white">
