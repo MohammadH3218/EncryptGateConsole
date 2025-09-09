@@ -12,6 +12,14 @@ import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { 
   AlertTriangle, 
   Shield, 
@@ -149,6 +157,17 @@ export default function AdminDetectionsPage() {
     detection: null
   })
 
+  // Assignment dialog state
+  const [assignmentUsers, setAssignmentUsers] = useState<Array<{
+    id: string
+    name: string
+    email: string
+    preferredUsername: string
+  }>>([])
+  const [assignmentDialogOpen, setAssignmentDialogOpen] = useState(false)
+  const [detectionToAssign, setDetectionToAssign] = useState<Detection | null>(null)
+  const [selectedAssignee, setSelectedAssignee] = useState<string>("")
+
   // User profile state
   const [currentUser, setCurrentUser] = useState<{
     id: string
@@ -158,6 +177,33 @@ export default function AdminDetectionsPage() {
     permissions: string[]
   } | null>(null)
   const [isUserLoading, setIsUserLoading] = useState(true)
+
+  // Load Security Team Users for assignment
+  const loadSecurityTeamUsers = async () => {
+    try {
+      const response = await fetch('/api/company-settings/users', {
+        headers: {
+          'x-org-id': params.orgId as string
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        const users = (data.users || []).map((user: any) => ({
+          id: user.email, // Use email as ID for consistency
+          name: user.name || user.email,
+          email: user.email,
+          preferredUsername: user.name || user.email.split('@')[0] // Fallback to email prefix if no name
+        }))
+        setAssignmentUsers(users)
+        console.log('✅ Loaded security team users for assignment:', users.length)
+      } else {
+        console.warn('Failed to load security team users:', response.statusText)
+      }
+    } catch (error) {
+      console.error('Failed to load security team users:', error)
+    }
+  }
 
   // Load current user profile - fallback to JWT tokens if API fails
   useEffect(() => {
@@ -176,7 +222,7 @@ export default function AdminDetectionsPage() {
           const profile = await response.json()
           setCurrentUser({
             id: profile.id,
-            name: profile.name || profile.preferred_username || profile.email,
+            name: profile.preferred_username || profile.name || profile.email,
             email: profile.email,
             role: profile.role || 'user',
             permissions: profile.permissions || []
@@ -215,6 +261,7 @@ export default function AdminDetectionsPage() {
       }
     }
     loadUserProfile()
+    loadSecurityTeamUsers()
   }, [])
 
   // Clear messages after some time
@@ -433,7 +480,7 @@ export default function AdminDetectionsPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             investigationId: detection.id,
-            assignToUserId: currentUser.id
+            assignToUserId: currentUser?.id || ''
           })
         })
 
@@ -496,8 +543,8 @@ export default function AdminDetectionsPage() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                investigatorId: currentUser.id,
-                investigatorName: currentUser.name
+                investigatorId: currentUser?.id || '',
+                investigatorName: currentUser?.name || ''
               })
             })
           } catch (assignError) {
@@ -520,8 +567,8 @@ export default function AdminDetectionsPage() {
             body: JSON.stringify({
               emailMessageId: detection.emailMessageId,
               detectionId: detection.detectionId,
-              investigatorName: currentUser.name,
-              investigatorId: currentUser.id,
+              investigatorName: currentUser?.name || '',
+              investigatorId: currentUser?.id || '',
               priority: detection.severity === 'critical' ? 'critical' : 
                        detection.severity === 'high' ? 'high' : 'medium',
               emailSubject: detection.name,
@@ -713,24 +760,49 @@ export default function AdminDetectionsPage() {
   }
 
 
-  // NEW: Assign detection
-  const assignDetection = async (detectionId: string, assignTo: string) => {
-    setAssigningDetection(detectionId)
+  // Show assignment dialog
+  const showAssignmentDialog = (detection: Detection) => {
+    setDetectionToAssign(detection)
+    setSelectedAssignee("")
+    setAssignmentDialogOpen(true)
+  }
+
+  // Assign detection to selected user
+  const assignDetection = async () => {
+    if (!detectionToAssign || !selectedAssignee) return
+    
+    setAssigningDetection(detectionToAssign.id)
     setError(null)
     
     try {
-      // For now, we'll update locally and show success
+      // Find the selected user details
+      const assignedUser = assignmentUsers.find(u => u.preferredUsername === selectedAssignee)
+      if (!assignedUser) {
+        throw new Error('Selected user not found')
+      }
+      
+      // Update detection with assignment
       setDetections(prev => 
         prev.map(d => 
-          d.id === detectionId 
-            ? { ...d, assignedTo: [assignTo], status: 'in_progress' as any }
+          d.id === detectionToAssign.id 
+            ? { ...d, assignedTo: [assignedUser.preferredUsername], status: 'in_progress' as any }
             : d
         )
       )
       
-      setSuccessMessage(`Detection assigned to ${assignTo} and marked as in progress.`)
+      setSuccessMessage(`Detection assigned to ${assignedUser.preferredUsername} and marked as in progress.`)
       
-      // TODO: Implement actual API call
+      // Close dialog
+      setAssignmentDialogOpen(false)
+      setDetectionToAssign(null)
+      setSelectedAssignee("")
+      
+      // TODO: Implement actual API call to save assignment
+      console.log('🎯 Detection assigned:', { 
+        detectionId: detectionToAssign.id,
+        assignedTo: assignedUser.preferredUsername,
+        assignedUser: assignedUser
+      })
       
     } catch (err: any) {
       console.error('❌ Failed to assign detection:', err)
@@ -738,6 +810,13 @@ export default function AdminDetectionsPage() {
     } finally {
       setAssigningDetection(null)
     }
+  }
+
+  // Cancel assignment dialog
+  const cancelAssignment = () => {
+    setAssignmentDialogOpen(false)
+    setDetectionToAssign(null)
+    setSelectedAssignee("")
   }
 
   // Infinite scroll handler
@@ -1174,9 +1253,9 @@ export default function AdminDetectionsPage() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => assignDetection(detection.id, currentUser?.name || '')}
-                                  disabled={!currentUser || assigningDetection === detection.id}
-                                  title="Assign to Me"
+                                  onClick={() => showAssignmentDialog(detection)}
+                                  disabled={assignmentUsers.length === 0 || assigningDetection === detection.id}
+                                  title={assignmentUsers.length === 0 ? "Loading users..." : "Assign Detection"}
                                   className="text-blue-400 hover:bg-blue-900/30 hover:text-blue-300 p-2"
                                 >
                                   {assigningDetection === detection.id ? (
@@ -1323,6 +1402,81 @@ export default function AdminDetectionsPage() {
             email: currentUser?.email || ''
           }}
         />
+
+        {/* Assignment Dialog */}
+        <Dialog open={assignmentDialogOpen} onOpenChange={setAssignmentDialogOpen}>
+          <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white max-w-md">
+            <DialogHeader>
+              <DialogTitle className="text-white">Assign Detection</DialogTitle>
+              <DialogDescription className="text-gray-400">
+                Select a security team member to assign this detection to
+              </DialogDescription>
+            </DialogHeader>
+            
+            {detectionToAssign && (
+              <div className="space-y-4">
+                <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-4">
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-sm font-medium text-gray-400">Detection</label>
+                      <p className="text-white">{detectionToAssign.name}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-400">From</label>
+                      <p className="text-white">{detectionToAssign.sentBy}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-400">Severity</label>
+                      <div className="mt-1">{getSeverityBadge(detectionToAssign.severity)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-white">Assign to</label>
+                  <Select value={selectedAssignee} onValueChange={setSelectedAssignee}>
+                    <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white">
+                      <SelectValue placeholder="Select a team member" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-[#0f0f0f] border-[#1f1f1f]">
+                      {assignmentUsers.map(user => (
+                        <SelectItem 
+                          key={user.id} 
+                          value={user.preferredUsername}
+                          className="text-white hover:bg-[#1f1f1f]"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div>
+                              <div className="font-medium">{user.preferredUsername}</div>
+                              <div className="text-xs text-gray-400">{user.email}</div>
+                            </div>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter>
+              <Button 
+                variant="outline" 
+                onClick={cancelAssignment}
+                className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a]"
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={assignDetection}
+                disabled={!selectedAssignee}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                Assign Detection
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </FadeInSection>
     </AppLayout>
   )

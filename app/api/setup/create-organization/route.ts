@@ -144,12 +144,10 @@ export async function POST(req: Request) {
     console.log(`👥 Creating role groups in Cognito...`);
     const roleGroups = [
       { name: "Owner", description: "Organization owners with full access" },
+      { name: "Sr. Admin", description: "Senior administrators with full access" },
       { name: "Admin", description: "Administrators with management access" },
-      { name: "Security Lead", description: "Senior security analysts" },
-      { name: "Senior Analyst", description: "Experienced security analysts" },
-      { name: "Security Analyst", description: "Security analysts" },
-      { name: "Junior Analyst", description: "Entry-level analysts" },
-      { name: "Viewer", description: "Read-only access" },
+      { name: "Analyst", description: "Security analysts with main feature access" },
+      { name: "Viewer", description: "Limited access to personal settings only" },
     ];
 
     for (const roleGroup of roleGroups) {
