@@ -160,8 +160,22 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
     { icon: Lock, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: ["security.read"] },
   ]
 
+  // Debug: Log session data to help diagnose the role issue
+  useEffect(() => {
+    if (session?.user) {
+      console.log('🔍 Session data for profile display:', {
+        name: session.user.name,
+        email: session.user.email,
+        rawRoles: session.user.rawRoles,
+        isOwner: session.user.isOwner,
+        isAdmin: session.user.isAdmin,
+        permissions: session.user.permissions
+      })
+    }
+  }, [session?.user])
+
   // Check user roles for hierarchy-based permissions
-  const userRoles = session?.user?.roles || []
+  const userRoles = session?.user?.rawRoles || []
   const isOwner = userRoles.includes('Owner') || session?.user?.isOwner
   const isSrAdmin = userRoles.includes('Sr. Admin')
   const isAdmin = userRoles.includes('Admin') || session?.user?.isAdmin
@@ -238,8 +252,9 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
     document.cookie = "id_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
     document.cookie = "refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
     
-    // Redirect to logout page
-    router.push("/logout")
+    // Redirect to logout page with orgId
+    const logoutUrl = orgId ? `/logout?orgId=${orgId}` : "/logout"
+    router.push(logoutUrl)
   }
 
   const notifications = [
@@ -442,7 +457,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                 <div className="flex items-center gap-3 cursor-pointer hover:bg-[#1f1f1f] p-2 rounded-lg transition-colors">
                   <Avatar className="w-8 h-8">
                     <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">
-                      {(userInfo.name || userInfo.email)
+                      {(session.user.name || session.user.email)
                         .split(" ")
                         .map((n) => n[0])
                         .join("")
@@ -452,9 +467,18 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{session.user.name || session.user.email}</p>
                     <p className="text-gray-400 text-xs">
-                      {session.user.isOwner ? 'Owner' : 
-                       session.user.isAdmin ? 'Admin' : 
-                       session.user.rawRoles?.[0] || 'Member'}
+                      {(() => {
+                        const displayRole = session.user.isOwner ? 'Owner' : 
+                                          session.user.isAdmin ? 'Admin' : 
+                                          session.user.rawRoles?.[0] || 'Member'
+                        console.log('🏷️ Profile role display:', { 
+                          isOwner: session.user.isOwner, 
+                          isAdmin: session.user.isAdmin, 
+                          rawRoles: session.user.rawRoles, 
+                          displayRole 
+                        })
+                        return displayRole
+                      })()}
                     </p>
                   </div>
                 </div>

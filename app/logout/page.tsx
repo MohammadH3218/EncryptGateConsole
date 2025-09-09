@@ -1,12 +1,25 @@
 "use client"
 
 import { useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 
 export default function LogoutPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
+    // Capture orgId from URL params before clearing storage
+    let orgId = searchParams.get('orgId')
+    
+    // If no orgId in URL params, try to get it from current path or referrer
+    if (!orgId) {
+      const referrer = document.referrer || ''
+      const orgMatch = referrer.match(/\/o\/([^\/]+)/)
+      if (orgMatch) {
+        orgId = orgMatch[1]
+      }
+    }
+
     // Clear all tokens and storage
     localStorage.clear()
     sessionStorage.clear()
@@ -16,11 +29,17 @@ export default function LogoutPage() {
     document.cookie = "id_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
     document.cookie = "refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
 
-    // Redirect to login page after a short delay
+    // Redirect to organization-specific login page after a short delay
     setTimeout(() => {
-      router.push("/login")
+      if (orgId) {
+        console.log(`🔄 Redirecting to org login: /o/${orgId}/login`)
+        router.push(`/o/${orgId}/login`)
+      } else {
+        console.log('🔄 No orgId found, redirecting to setup')
+        router.push("/setup-organization")
+      }
     }, 1500)
-  }, [router])
+  }, [router, searchParams])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4 relative overflow-hidden">
@@ -35,7 +54,12 @@ export default function LogoutPage() {
           <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
         </div>
         <div className="text-white text-lg font-medium">Logging you out...</div>
-        <div className="text-gray-400 text-sm">Clearing your session securely</div>
+        <div className="text-gray-400 text-sm">
+          {searchParams.get('orgId') ? 
+            `Redirecting to ${searchParams.get('orgId')} login...` : 
+            'Clearing your session securely'
+          }
+        </div>
       </div>
     </div>
   )
