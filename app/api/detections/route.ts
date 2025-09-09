@@ -1,38 +1,37 @@
-// app/api/detections/route.ts - CORRECTED FOR YOUR TABLE STRUCTURE  
+// app/api/detections/route.ts - UPDATED with proper AWS setup and orgId extraction
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import {
-  DynamoDBClient,
   ScanCommand,
   ScanCommandInput,
+  PutItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import { ddb, extractOrgId, handleAwsError, TABLES } from '@/lib/aws';
 
-const REGION = process.env.AWS_REGION || 'us-east-1';
-const ORG_ID = process.env.ORGANIZATION_ID!;
-const DETECTIONS_TABLE = process.env.DETECTIONS_TABLE_NAME || 'Detections';
+const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees';
 
-if (!ORG_ID) {
-  console.error('❌ Missing ORGANIZATION_ID environment variable');
-}
-
-console.log('🚨 Detections API initialized with:', { REGION, ORG_ID, DETECTIONS_TABLE });
-
-const ddb = new DynamoDBClient({ region: REGION });
-
-// GET: list of detections - CORRECTED
+// GET: list of detections
 export async function GET(request: Request) {
   try {
-    console.log('🚨 GET /api/detections - Loading detections...');
+    // Extract organization ID from request
+    const orgId = extractOrgId(request);
+    if (!orgId) {
+      return NextResponse.json({ 
+        ok: false, 
+        error: 'MISSING_ORG_ID',
+        message: 'Organization ID is required' 
+      }, { status: 400 });
+    }
+    
+    console.log(`🚨 GET /api/detections - Loading detections for org: ${orgId}`);
     
     const url = new URL(request.url);
     const limit = Math.min(1000, Math.max(1, parseInt(url.searchParams.get('limit') || '50')));
     const lastKey = url.searchParams.get('lastKey');
 
     const params: ScanCommandInput = {
-      TableName: DETECTIONS_TABLE,
-      // No filter needed since we want all detections for this org
-      // Your table doesn't seem to filter by orgId based on the structure
+      TableName: TABLES.DETECTIONS,
       Limit: limit,
     };
 
@@ -75,36 +74,37 @@ export async function GET(request: Request) {
 
     return NextResponse.json(detections);
   } catch (err: any) {
-    console.error('❌ [GET /api/detections] error:', {
-      message: err.message,
-      code: err.code,
-      name: err.name,
-      stack: err.stack
-    });
+    const awsError = handleAwsError(err, 'GET /api/detections');
     
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch detections', 
-        details: err.message,
-        code: err.code || err.name,
-        troubleshooting: 'Check your AWS credentials, table name, and organization ID'
+      {
+        error: awsError.error || 'Failed to fetch detections',
+        message: awsError.message,
+        troubleshooting: [
+          'Check AWS credentials are valid and not expired',
+          'Verify IAM permissions for DynamoDB access',
+          'Ensure organization ID is passed correctly',
+          'Check if Detections table exists and is configured'
+        ]
       },
-      { status: 500 }
+      { status: awsError.statusCode }
     );
   }
 }
 
-// POST: create a new detection - CORRECTED FOR YOUR TABLE STRUCTURE
+// POST: create a new detection
 export async function POST(request: Request) {
   try {
-    console.log('🚩 POST /api/detections - Creating manual detection...');
-    
-    if (!ORG_ID) {
+    // Extract organization ID from request
+    const orgId = extractOrgId(request);
+    if (!orgId) {
       return NextResponse.json(
         { error: 'Organization ID is required' },
         { status: 400 }
       );
     }
+
+    console.log(`🚩 POST /api/detections - Creating manual detection for org: ${orgId}`);
 
     const body = await request.json();
     console.log('📨 Manual flagging request:', body);
@@ -113,14 +113,14 @@ export async function POST(request: Request) {
     const detectionId = `manual-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     const timestamp = new Date().toISOString();
 
-    // Prepare detection item for DynamoDB - CORRECTED structure
+    // Prepare detection item for DynamoDB
     const detectionItem = {
-      // Your table structure: detectionId (partition key) + receivedAt (sort key)
+      // Table structure: detectionId (partition key) + receivedAt (sort key)
       detectionId: { S: detectionId },           // Partition key
       receivedAt: { S: timestamp },              // Sort key
       
       // Additional fields
-      orgId: { S: ORG_ID },                      // Keep for filtering/organization
+      orgId: { S: orgId },                       // Organization context
       emailMessageId: { S: body.emailMessageId || body.emailId },
       severity: { S: body.severity || 'medium' },
       name: { S: body.name || 'Manually Flagged Email' },
@@ -139,7 +139,7 @@ export async function POST(request: Request) {
 
     // Insert into DynamoDB
     const putCommand = {
-      TableName: DETECTIONS_TABLE,
+      TableName: TABLES.DETECTIONS,
       Item: detectionItem
     };
 
@@ -150,7 +150,6 @@ export async function POST(request: Request) {
       emailMessageId: body.emailMessageId 
     });
     
-    const { PutItemCommand } = await import('@aws-sdk/client-dynamodb');
     await ddb.send(new PutItemCommand(putCommand));
 
     console.log('✅ Manual detection created successfully:', detectionId);
@@ -202,21 +201,20 @@ export async function POST(request: Request) {
     return NextResponse.json(responseData);
 
   } catch (err: any) {
-    console.error('❌ [POST /api/detections] error:', {
-      message: err.message,
-      code: err.code,
-      name: err.name,
-      stack: err.stack
-    });
+    const awsError = handleAwsError(err, 'POST /api/detections');
     
     return NextResponse.json(
-      { 
-        error: 'Failed to create detection', 
-        details: err.message,
-        code: err.code || err.name,
-        troubleshooting: 'Check your AWS credentials, table name, and organization ID'
+      {
+        error: awsError.error || 'Failed to create detection',
+        message: awsError.message,
+        troubleshooting: [
+          'Check AWS credentials are valid and not expired',
+          'Verify IAM permissions for DynamoDB access',
+          'Ensure organization ID is passed correctly',
+          'Check if Detections table exists and is configured'
+        ]
       },
-      { status: 500 }
+      { status: awsError.statusCode }
     );
   }
 }
