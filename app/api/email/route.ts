@@ -3,25 +3,28 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import {
-  DynamoDBClient,
   ScanCommand,
   QueryCommand,
   ScanCommandInput,
 } from '@aws-sdk/client-dynamodb';
+import { ddb, extractOrgId, handleAwsError, TABLES } from '@/lib/aws';
 
-const REGION       = process.env.AWS_REGION           || 'us-east-1';
-const ORG_ID       = process.env.ORGANIZATION_ID      || 'default-org';
-const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME    || 'Emails';
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees';
-
-console.log('📧 Email API initialized:', { REGION, ORG_ID, EMAILS_TABLE, EMPLOYEES_TABLE });
-
-const ddb = new DynamoDBClient({ region: REGION });
 
 // GET /api/email?limit=20&page=1&search=<query>
 export async function GET(request: Request) {
   try {
-    console.log('📧 GET /api/email - Loading emails from database');
+    // Extract organization ID from request
+    const orgId = extractOrgId(request);
+    if (!orgId) {
+      return NextResponse.json({ 
+        ok: false, 
+        error: 'MISSING_ORG_ID',
+        message: 'Organization ID is required' 
+      }, { status: 400 });
+    }
+    
+    console.log(`📧 GET /api/email - Loading emails for org: ${orgId}`);
     const url = new URL(request.url);
     const rawLim = url.searchParams.get('limit') || '20';
     const rawPage = url.searchParams.get('page') || '1';
@@ -45,7 +48,7 @@ export async function GET(request: Request) {
       
       do {
         const searchScanParams: ScanCommandInput = { 
-          TableName: EMAILS_TABLE,
+          TableName: TABLES.EMAILS,
           Limit: 1000 // Higher limit for search to be more efficient
         };
 
@@ -120,7 +123,7 @@ export async function GET(request: Request) {
       
       do {
         const scanParams: ScanCommandInput = { 
-          TableName: EMAILS_TABLE,
+          TableName: TABLES.EMAILS,
           Limit: Math.min(1000, neededItems - allScanResults.length + limit) // Get a bit extra to check for more pages
         };
 
@@ -164,14 +167,13 @@ export async function GET(request: Request) {
     // Get list of monitored employees for debugging/stats (but don't filter by them)
     let monitoredEmployees: string[] = [];
     try {
-      if (ORG_ID !== 'default-org') {
-        const empResp = await ddb.send(new QueryCommand({
-          TableName: EMPLOYEES_TABLE,
-          KeyConditionExpression: 'orgId = :orgId',
-          ExpressionAttributeValues: {
-            ':orgId': { S: ORG_ID }
-          }
-        }));
+      const empResp = await ddb.send(new QueryCommand({
+        TableName: EMPLOYEES_TABLE,
+        KeyConditionExpression: 'orgId = :orgId',
+        ExpressionAttributeValues: {
+          ':orgId': { S: orgId }
+        }
+      }));
         monitoredEmployees = (empResp.Items || []).map(item => item.email?.S).filter(Boolean) as string[];
         console.log(`👥 Found ${monitoredEmployees.length} monitored employees (for stats only):`, monitoredEmployees);
       }
@@ -190,8 +192,8 @@ export async function GET(request: Request) {
         hasMore: false,
         message: 'No emails found in the Emails table. This could mean the table is empty or there may be a connection issue.',
         debug: {
-          orgId: ORG_ID,
-          tableName: EMAILS_TABLE,
+          orgId,
+          tableName: TABLES.EMAILS,
           monitoredEmployees: monitoredEmployees.length,
           employeeList: monitoredEmployees
         }
@@ -310,8 +312,8 @@ export async function GET(request: Request) {
       currentPage: page,
       hasMore: hasMorePages,
       debug: {
-        orgId: ORG_ID,
-        tableName: EMAILS_TABLE,
+        orgId,
+        tableName: TABLES.EMAILS,
         totalItems: emails.length,
         currentPage: page,
         hasMore: hasMorePages,
@@ -330,32 +332,25 @@ export async function GET(request: Request) {
     return NextResponse.json(response);
 
   } catch (err: any) {
-    console.error('❌ [GET /api/email] error details:', {
-      message: err.message,
-      name: err.name,
-      code: err.code,
-      stack: err.stack?.split('\n').slice(0, 3)
-    });
-
+    const awsError = handleAwsError(err, 'GET /api/email');
+    
     return NextResponse.json(
       {
-        error: 'Failed to fetch emails',
-        details: err.message,
-        code: err.code || err.name,
+        error: awsError.error || 'Failed to fetch emails',
+        message: awsError.message,
         troubleshooting: [
-          'Check AWS credentials and permissions',
-          'Verify table name exists in DynamoDB',
-          'Ensure organization ID is correct (if set)',
+          'Check AWS credentials are valid and not expired',
+          'Verify IAM permissions for DynamoDB access',
+          'Ensure organization ID is passed correctly',
           'Check if WorkMail webhook is configured and working',
           'Verify monitored employees are configured'
         ],
         debug: {
-          orgId: ORG_ID,
-          tableName: EMAILS_TABLE,
-          region: REGION
+          orgId,
+          tableName: TABLES.EMAILS
         }
       },
-      { status: 500 }
+      { status: awsError.statusCode }
     );
   }
 }
