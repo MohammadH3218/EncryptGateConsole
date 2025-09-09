@@ -52,6 +52,7 @@ export default function LandingPage() {
   }
 
   const handleExistingLogin = () => {
+    console.log('🔑 LANDING: handleExistingLogin called - redirecting to /login')
     router.push("/login")
   }
 

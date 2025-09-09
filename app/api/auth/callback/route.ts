@@ -51,21 +51,21 @@ export async function GET(req: Request) {
   }
 
   const codeVerifier = getCookie(req, 'pkce_verifier') || '';
-  if (!codeVerifier) return NextResponse.redirect(`/o/${st.orgId}/login?error=missing_pkce`)
+  if (!codeVerifier) return NextResponse.redirect(`/o/${st.orgId}/admin/login?error=missing_pkce`)
 
   // fetch config
   const r = await ddb.send(new GetItemCommand({
     TableName: CLOUD_TABLE,
     Key: { orgId: { S: st.orgId }, serviceType: { S: 'aws-cognito' } }
   }))
-  if (!r.Item) return NextResponse.redirect(`/o/${st.orgId}/login?error=no_cognito_config`)
+  if (!r.Item) return NextResponse.redirect(`/o/${st.orgId}/admin/login?error=no_cognito_config`)
 
   const domain = r.Item.domain?.S
   const clientId = r.Item.clientId?.S
   const redirectUri = r.Item.redirectUri?.S || `${url.origin}/api/auth/callback`
 
   if (!domain || !clientId || !redirectUri) {
-    return NextResponse.redirect(`/o/${st.orgId}/login?error=missing_config`)
+    return NextResponse.redirect(`/o/${st.orgId}/admin/login?error=missing_config`)
   }
 
   const tokenUrl = `https://${domain}/oauth2/token`
@@ -84,12 +84,12 @@ export async function GET(req: Request) {
     })
 
     const tokens = await tokenRes.json()
-    if (!tokenRes.ok) return NextResponse.redirect(`/o/${st.orgId}/login?error=token&details=${encodeURIComponent(tokens.error_description||'')}`)
+    if (!tokenRes.ok) return NextResponse.redirect(`/o/${st.orgId}/admin/login?error=token&details=${encodeURIComponent(tokens.error_description||'')}`)
 
     const { id_token, access_token, refresh_token, expires_in } = tokens
 
     if (!id_token || !access_token) {
-      return NextResponse.redirect(`/o/${st.orgId}/login?error=missing_tokens`)
+      return NextResponse.redirect(`/o/${st.orgId}/admin/login?error=missing_tokens`)
     }
 
     // Set cookies hardened
@@ -102,6 +102,6 @@ export async function GET(req: Request) {
     res.cookies.delete('pkce_verifier')
     return res
   } catch (err: any) {
-    return NextResponse.redirect(`/o/${st.orgId}/login?error=unhandled_error&details=${encodeURIComponent(err.message || 'Unknown error')}`)
+    return NextResponse.redirect(`/o/${st.orgId}/admin/login?error=unhandled_error&details=${encodeURIComponent(err.message || 'Unknown error')}`)
   }
 }

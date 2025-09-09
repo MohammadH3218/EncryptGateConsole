@@ -84,7 +84,7 @@ export default function AssignmentsPage() {
   }
 
   return (
-    <AppLayout username="John Doe" notificationsCount={1}>
+    <AppLayout notificationsCount={1}>
       <FadeInSection>
         <h2 className="text-2xl font-bold mb-4 text-white">Assignments</h2>
 

@@ -14,7 +14,7 @@ export default function ManageEmployeesPage() {
 
 
   return (
-    <AppLayout username="John Doe" notificationsCount={0}>
+    <AppLayout notificationsCount={0}>
       <FadeInSection>
         <h2 className="text-2xl font-bold mb-4 text-white">Manage Employees</h2>
         <Tabs defaultValue="all-employees" className="w-full">

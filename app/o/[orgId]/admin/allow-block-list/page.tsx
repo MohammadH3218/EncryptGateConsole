@@ -138,7 +138,7 @@ export default function BlockedEmailsPage() {
   }
 
   return (
-    <AppLayout username="John Doe" notificationsCount={0}>
+    <AppLayout notificationsCount={0}>
       <FadeInSection>
         <div className="space-y-6">
           <div className="flex justify-between items-center">

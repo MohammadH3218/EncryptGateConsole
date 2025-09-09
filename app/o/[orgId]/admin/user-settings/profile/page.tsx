@@ -12,6 +12,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { KeyRound } from "lucide-react"
+import { getUserFromLocalStorage } from "@/lib/cognito-user"
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -19,14 +20,28 @@ export default function ProfilePage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isPasswordLoading, setIsPasswordLoading] = useState(false)
   const [activeTab, setActiveTab] = useState("profile")
+
+  // Load user data from Cognito token on component mount
+  useEffect(() => {
+    const userData = getUserFromLocalStorage()
+    if (userData) {
+      setProfile(prev => ({
+        ...prev,
+        name: userData.preferred_username || userData.name || userData.given_name || userData.email?.split('@')[0] || '',
+        email: userData.email || ''
+      }))
+    }
+    setUserLoaded(true)
+  }, [])
   const [profile, setProfile] = useState({
-    name: "John Doe",
-    email: "john.doe@company.com",
-    jobTitle: "Security Admin",
-    department: "IT Security",
-    phone: "+1 (555) 123-4567",
-    bio: "Experienced security professional with a focus on email security and threat detection.",
+    name: "",
+    email: "",
+    jobTitle: "",
+    department: "",
+    phone: "",
+    bio: "",
   })
+  const [userLoaded, setUserLoaded] = useState(false)
   const [passwords, setPasswords] = useState({
     current: "",
     new: "",
@@ -108,7 +123,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <AppLayout username={profile.name} notificationsCount={3}>
+    <AppLayout notificationsCount={3}>
       <FadeInSection>
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold mb-6 text-white">Your Profile</h2>

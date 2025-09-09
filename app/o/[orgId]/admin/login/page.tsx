@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog"
 import { Loader2, ArrowRight, Lock, AlertTriangle, Eye, EyeOff, X, Mail, CheckCircle, Copy, Check } from "lucide-react"
 import { fetchWithRetry } from "@/utils/auth"
+import { extractUserFromIdToken, getDisplayName } from "@/lib/cognito-user"
 
 export default function OrgAwareLoginPage() {
   const router = useRouter()
@@ -33,6 +34,12 @@ export default function OrgAwareLoginPage() {
   const next = searchParams.get('next') || `/o/${orgId}/admin/dashboard`
   const error = searchParams.get('error')
   const details = searchParams.get('details')
+  
+  console.log('🔑 LOGIN: OrgAwareLoginPage loaded')
+  console.log('🏷️ LOGIN: orgId:', orgId)
+  console.log('➡️ LOGIN: next URL:', next)
+  console.log('⚠️ LOGIN: error from URL:', error)
+  console.log('⚠️ LOGIN: details from URL:', details)
   
   const [isLoading, setIsLoading] = useState(false)
   const [orgName, setOrgName] = useState<string>("")
@@ -69,8 +76,15 @@ export default function OrgAwareLoginPage() {
   const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false)
 
   useEffect(() => {
+    console.log('🔄 LOGIN: useEffect running - checking localStorage')
+    
     // Get org name from localStorage if available
     const storedOrgName = localStorage.getItem('organization_name')
+    const storedOrgId = localStorage.getItem('organization_id')
+    
+    console.log('💾 LOGIN: storedOrgName:', storedOrgName)
+    console.log('💾 LOGIN: storedOrgId:', storedOrgId)
+    
     if (storedOrgName) {
       setOrgName(storedOrgName)
     }
@@ -80,6 +94,8 @@ export default function OrgAwareLoginPage() {
     const fallback = "https://api.console-encryptgate.net"
     const base = configured || fallback
     setApiBaseUrl(base)
+    
+    console.log('🌎 LOGIN: API base URL set to:', base)
   }, [])
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -123,6 +139,10 @@ export default function OrgAwareLoginPage() {
           refreshToken: result.refresh_token
         };
         
+        // Extract user data from ID token
+        const userData = result.id_token ? extractUserFromIdToken(result.id_token) : null
+        const displayName = userData ? getDisplayName(userData) : email.split('@')[0]
+        
         // Store tokens in secure cookies
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
@@ -130,7 +150,7 @@ export default function OrgAwareLoginPage() {
           body: JSON.stringify({
             orgId,
             tokens,
-            user: result.user || { email, name: email.split('@')[0] }
+            user: userData || { email, name: displayName, preferred_username: displayName }
           })
         })
 
@@ -225,13 +245,17 @@ export default function OrgAwareLoginPage() {
           refreshToken: result.refresh_token
         };
         
+        // Extract user data from ID token
+        const userData = result.id_token ? extractUserFromIdToken(result.id_token) : null
+        const displayNameForSession = userData ? getDisplayName(userData) : displayName || email.split('@')[0]
+        
         const cookieResponse = await fetch('/api/auth/set-session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             orgId,
             tokens,
-            user: { email, name: email.split('@')[0] }
+            user: userData || { email, name: displayNameForSession, preferred_username: displayNameForSession }
           })
         })
 
@@ -686,7 +710,10 @@ export default function OrgAwareLoginPage() {
               Secure access to your organization dashboard
             </p>
             <button
-              onClick={() => router.push('/setup-organization')}
+              onClick={() => {
+                console.log('🔗 LOGIN: "Need to set up" clicked - redirecting to /setup-organization')
+                router.push('/setup-organization')
+              }}
               className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
             >
               Need to set up a new organization?

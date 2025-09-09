@@ -755,7 +755,7 @@ export default function AdminDetectionsPage() {
 
   if (error && detections.length === 0) {
     return (
-      <AppLayout username="John Doe" notificationsCount={3}>
+      <AppLayout notificationsCount={3}>
         <FadeInSection>
           <Alert variant="destructive" className="mb-6 bg-red-900/20 border-red-500/20 text-white">
             <AlertTriangle className="h-4 w-4 text-red-400" />
@@ -785,7 +785,7 @@ export default function AdminDetectionsPage() {
   }
 
   return (
-    <AppLayout username="John Doe" notificationsCount={stats.new}>
+    <AppLayout notificationsCount={stats.new}>
       <FadeInSection>
         <div className="space-y-6">
           {/* Success Message */}
@@ -1174,8 +1174,8 @@ export default function AdminDetectionsPage() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => assignDetection(detection.id, 'John Doe')}
-                                  disabled={assigningDetection === detection.id}
+                                  onClick={() => assignDetection(detection.id, currentUser?.name || '')}
+                                  disabled={!currentUser || assigningDetection === detection.id}
                                   title="Assign to Me"
                                   className="text-blue-400 hover:bg-blue-900/30 hover:text-blue-300 p-2"
                                 >
