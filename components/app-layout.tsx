@@ -159,14 +159,19 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
     { icon: Lock, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: [] }, // Always accessible
   ]
 
+  // Check if user is Owner/Admin (has wildcard permissions)
+  const isSuper = !!(session?.user?.isOwner || session?.user?.isAdmin)
+  
+  // Helper function for permission checking
+  const hasPermission = (requiredPermissions: string[]) => {
+    if (isSuper) return true // Owner/Admin bypass all checks
+    if (requiredPermissions.length === 0) return true // No permissions required
+    return requiredPermissions.some(permission => can(session?.user?.permissions, permission))
+  }
+  
   // Filter navigation items based on user permissions
-  const mainNavItems = allMainNavItems.filter(item => 
-    item.permissions.length === 0 || item.permissions.some(permission => can(session?.user?.permissions, permission))
-  )
-
-  const companySettingsItems = allCompanySettingsItems.filter(item => 
-    item.permissions.length === 0 || item.permissions.some(permission => can(session?.user?.permissions, permission))
-  )
+  const mainNavItems = allMainNavItems.filter(item => hasPermission(item.permissions))
+  const companySettingsItems = allCompanySettingsItems.filter(item => hasPermission(item.permissions))
 
   const userSettingsItems = allUserSettingsItems // User settings always accessible
 

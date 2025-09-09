@@ -21,7 +21,8 @@ import {
   AlertTriangle,
   Cloud,
   Key,
-  UserPlus
+  UserPlus,
+  RefreshCw
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
@@ -99,6 +100,7 @@ export default function SetupOrganizationPage() {
   const [cognitoUsers, setCognitoUsers] = useState<CognitoUser[]>([])
   const [selectedAdminUser, setSelectedAdminUser] = useState<string>("")
   const [validationStatus, setValidationStatus] = useState<'idle' | 'validating' | 'valid' | 'invalid'>('idle')
+  const [isRefreshingUsers, setIsRefreshingUsers] = useState(false)
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null)
 
   useEffect(() => {
@@ -161,6 +163,40 @@ export default function SetupOrganizationPage() {
     }
   }
 
+  const refreshCognitoUsers = async () => {
+    if (!cognitoConfig.userPoolId || !cognitoConfig.clientId || !cognitoConfig.region || !cognitoConfig.accessKey || !cognitoConfig.secretKey) {
+      setError("Please ensure all AWS configuration fields are filled before refreshing")
+      return
+    }
+
+    setIsRefreshingUsers(true)
+    setError("")
+
+    try {
+      const response = await fetch('/api/setup/validate-cognito', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cognitoConfig)
+      })
+
+      const result = await response.json()
+
+      if (response.ok && result.valid) {
+        setCognitoUsers(result.users || [])
+        // Reset selected user if they no longer exist
+        if (selectedAdminUser && !result.users?.find((u: CognitoUser) => u.username === selectedAdminUser)) {
+          setSelectedAdminUser("")
+        }
+      } else {
+        setError(result.message || 'Failed to refresh user list')
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to refresh user list')
+    } finally {
+      setIsRefreshingUsers(false)
+    }
+  }
+
   const handleStepForward = async () => {
     setLoading(true)
     setError("")
@@ -212,16 +248,10 @@ export default function SetupOrganizationPage() {
       const result = await response.json()
 
       if (response.ok) {
-        console.log('✅ SETUP: Organization created successfully!')
-        console.log('🏷️ SETUP: Organization ID:', result.organizationId)
-        console.log('🏷️ SETUP: Organization Name:', orgData.name)
-        
         setCurrentStep('complete')
         // Store organization context for login
         localStorage.setItem('organization_id', result.organizationId)
         localStorage.setItem('organization_name', orgData.name)
-        
-        console.log('💾 SETUP: Stored in localStorage - orgId:', result.organizationId, 'orgName:', orgData.name)
       } else {
         // Check if it's a duplicate configuration error
         if (response.status === 409 && result.existingOrganization) {
@@ -236,14 +266,9 @@ export default function SetupOrganizationPage() {
 
   const handleBackToLogin = () => {
     const orgId = localStorage.getItem('organization_id')
-    console.log('🚀 SETUP: handleBackToLogin called')
-    console.log('📊 SETUP: orgId from localStorage:', orgId)
-    
     if (orgId) {
-      console.log(`➡️ SETUP: Redirecting to /o/${orgId}/login`)
       router.push(`/o/${orgId}/login`)
     } else {
-      console.log('⚠️ SETUP: No orgId found, redirecting to /login (will be redirected by middleware)')
       router.push('/login')
     }
   }
@@ -339,6 +364,8 @@ export default function SetupOrganizationPage() {
                 selectedUser={selectedAdminUser}
                 setSelectedUser={setSelectedAdminUser}
                 orgData={orgData}
+                onRefresh={refreshCognitoUsers}
+                isRefreshing={isRefreshingUsers}
               />
             )}
             {currentStep === 'complete' && <CompleteStep orgData={orgData} />}
@@ -600,12 +627,16 @@ function CognitoUsersStep({
   users, 
   selectedUser, 
   setSelectedUser, 
-  orgData 
+  orgData,
+  onRefresh,
+  isRefreshing
 }: { 
   users: CognitoUser[]
   selectedUser: string
   setSelectedUser: (user: string) => void
   orgData: OrganizationData
+  onRefresh: () => void
+  isRefreshing: boolean
 }) {
   return (
     <div className="space-y-4">
@@ -613,6 +644,20 @@ function CognitoUsersStep({
         <UserPlus className="w-12 h-12 text-purple-500 mx-auto mb-3" />
         <h3 className="text-xl font-semibold text-white">Select Admin User</h3>
         <p className="text-gray-400">Choose who will be the admin for {orgData.name}</p>
+      </div>
+      
+      <div className="flex justify-between items-center mb-4">
+        <p className="text-sm text-gray-500">Found {users.length} user(s) in your Cognito pool</p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          className="flex items-center gap-2 text-blue-400 border-blue-400/20 hover:bg-blue-400/10"
+        >
+          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Refreshing...' : 'Refresh Users'}
+        </Button>
       </div>
       
       <div className="max-h-60 overflow-y-auto space-y-2">
@@ -646,7 +691,8 @@ function CognitoUsersStep({
       {users.length === 0 && (
         <div className="text-center py-8">
           <Users className="w-12 h-12 text-gray-500 mx-auto mb-3" />
-          <p className="text-gray-400">No users found in your Cognito user pool</p>
+          <p className="text-gray-400 mb-2">No users found in your Cognito user pool</p>
+          <p className="text-sm text-gray-500">Create users in your AWS Cognito console, then click "Refresh Users" above</p>
         </div>
       )}
     </div>

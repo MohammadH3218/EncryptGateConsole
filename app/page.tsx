@@ -1,58 +1,18 @@
 "use client"
 
-import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Loader2, ArrowRight, Lock, Building, Shield, Users, Mail } from "lucide-react"
+import { ArrowRight, Lock, Building, Shield, Users, Mail } from "lucide-react"
 
 export default function LandingPage() {
   const router = useRouter()
-  const [organizationName, setOrganizationName] = useState("")
-  const [adminEmail, setAdminEmail] = useState("")
-  const [adminName, setAdminName] = useState("")
-  const [error, setError] = useState("")
-  const [isCreating, setIsCreating] = useState(false)
-  // Removed automatic redirect logic - landing page always shows
-  
-  console.log("LandingPage component is rendering...")
-  
-  useEffect(() => {
-    console.log("LandingPage mounted - no redirects should happen from here")
-  }, [])
 
-  const handleCreateOrganization = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!organizationName.trim() || !adminEmail.trim() || !adminName.trim()) {
-      setError("All fields are required")
-      return
-    }
-
-    setIsCreating(true)
-    setError("")
-
-    try {
-      // Store pending org data and redirect to setup flow
-      localStorage.setItem("pending_org_creation", JSON.stringify({
-        organizationName: organizationName.trim(),
-        adminEmail: adminEmail.trim(),
-        adminName: adminName.trim()
-      }))
-      
-      router.push("/setup-organization")
-    } catch (err: any) {
-      setError(err.message || "Failed to create organization")
-    } finally {
-      setIsCreating(false)
-    }
+  const handleGetStarted = () => {
+    router.push("/setup-organization")
   }
 
   const handleExistingLogin = () => {
-    console.log('🔑 LANDING: handleExistingLogin called - redirecting to /login')
     router.push("/login")
   }
 
@@ -120,128 +80,69 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Right side - Sign up form */}
+          {/* Right side - Get Started */}
           <Card className="w-full bg-[#0f0f0f] border-[#1f1f1f] shadow-2xl backdrop-blur-sm transition-all duration-300 hover:shadow-3xl hover:border-[#2f2f2f]">
             <CardHeader className="space-y-4 pb-6">
               <div className="text-center">
-                <CardTitle className="text-2xl font-bold text-white">Create Your Organization</CardTitle>
+                <CardTitle className="text-2xl font-bold text-white">Ready to Get Started?</CardTitle>
                 <CardDescription className="text-gray-400">
-                  Get started with EncryptGate for your team
+                  Set up EncryptGate for your organization in just a few steps
                 </CardDescription>
               </div>
             </CardHeader>
 
-            <form onSubmit={handleCreateOrganization}>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="organization-name" className="text-white text-sm font-medium">
-                      Organization Name
-                    </Label>
-                    <div className="relative">
-                      <Building className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        id="organization-name"
-                        type="text"
-                        placeholder="Acme Corporation"
-                        value={organizationName}
-                        onChange={(e) => setOrganizationName(e.target.value)}
-                        className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="admin-name" className="text-white text-sm font-medium">
-                      Your Name
-                    </Label>
-                    <div className="relative">
-                      <Users className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        id="admin-name"
-                        type="text"
-                        placeholder="John Doe"
-                        value={adminName}
-                        onChange={(e) => setAdminName(e.target.value)}
-                        className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="admin-email" className="text-white text-sm font-medium">
-                      Admin Email Address
-                    </Label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        id="admin-email"
-                        type="email"
-                        placeholder="admin@company.com"
-                        value={adminEmail}
-                        onChange={(e) => setAdminEmail(e.target.value)}
-                        className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
-                      />
-                    </div>
-                  </div>
+            <CardContent className="space-y-6">
+              <div className="text-center space-y-4">
+                <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto">
+                  <Building className="w-10 h-10 text-white" />
                 </div>
-
-                {error && (
-                  <Alert
-                    variant="destructive"
-                    className="bg-red-500/10 border-red-500/20 animate-in slide-in-from-top-2 duration-300"
-                  >
-                    <AlertDescription className="text-sm text-red-200">{error}</AlertDescription>
-                  </Alert>
-                )}
-
-                <div className="text-center text-xs text-gray-500 bg-[#1a1a1a] p-3 rounded-lg">
-                  You'll be set up as the organization owner with full administrative access.
+                <div>
+                  <h3 className="text-lg font-semibold text-white mb-2">Quick Setup Process</h3>
+                  <ul className="text-sm text-gray-400 space-y-1">
+                    <li>• Enter your organization details</li>
+                    <li>• Connect your AWS services</li>
+                    <li>• Select your admin user</li>
+                    <li>• Start securing your emails</li>
+                  </ul>
                 </div>
-              </CardContent>
+              </div>
 
-              <CardFooter className="flex flex-col space-y-4 pt-6">
-                <Button
-                  type="submit"
-                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed group"
-                  disabled={isCreating}
-                >
-                  {isCreating ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Creating Organization...
-                    </>
-                  ) : (
-                    <>
-                      Create Organization
-                      <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
-                    </>
-                  )}
-                </Button>
+              <div className="text-center text-xs text-gray-500 bg-[#1a1a1a] p-3 rounded-lg">
+                Setup takes less than 5 minutes. You'll need your AWS credentials ready.
+              </div>
+            </CardContent>
 
-                <div className="relative w-full">
-                  <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-[#2f2f2f]"></div>
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="bg-[#0f0f0f] px-3 text-gray-400">or</span>
-                  </div>
+            <CardFooter className="flex flex-col space-y-4 pt-6">
+              <Button
+                onClick={handleGetStarted}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 transition-all duration-200 hover:shadow-lg hover:shadow-blue-500/25 group"
+              >
+                Get Started
+                <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+              </Button>
+
+              <div className="relative w-full">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-[#2f2f2f]"></div>
                 </div>
+                <div className="relative flex justify-center text-sm">
+                  <span className="bg-[#0f0f0f] px-3 text-gray-400">or</span>
+                </div>
+              </div>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleExistingLogin}
-                  className="w-full bg-transparent border-[#2f2f2f] text-white hover:bg-[#1f1f1f] hover:border-[#3f3f3f]"
-                >
-                  Sign In to Existing Organization
-                </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleExistingLogin}
+                className="w-full bg-transparent border-[#2f2f2f] text-white hover:bg-[#1f1f1f] hover:border-[#3f3f3f]"
+              >
+                Sign In to Existing Organization
+              </Button>
 
-                <p className="text-center text-xs text-gray-500">
-                  By creating an organization, you agree to our Terms of Service and Privacy Policy
-                </p>
-              </CardFooter>
-            </form>
+              <p className="text-center text-xs text-gray-500">
+                By continuing, you agree to our Terms of Service and Privacy Policy
+              </p>
+            </CardFooter>
           </Card>
         </div>
       </div>
