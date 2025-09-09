@@ -63,24 +63,53 @@ async function getUserDisplayName(orgId: string, userEmail: string, fallbackName
   return fallbackName
 }
 
+// Role aliases for normalization (handles case sensitivity and variations)
+const ROLE_ALIASES: Record<string, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  securityanalyst: "SecurityAnalyst",
+  securityviewer: "SecurityViewer",
+  analyst: "Analyst",
+  viewer: "Viewer",
+}
+
+function normalizeRole(role: string): string {
+  if (!role) return role
+  const key = role.replace(/[^a-z]/gi, "").toLowerCase()
+  return ROLE_ALIASES[key] ?? role // fall back to original if unknown
+}
+
 // Default permissions for each role
 const DEFAULT_ROLE_PERMS = {
   "Owner": ["*"],
   "Admin": ["*"],
   "SecurityAnalyst": [
+    "dashboard.read",
     "detections.read", "detections.update", "detections.create",
     "assignments.read", "assignments.update", "assignments.create",
     "team.read", "investigations.read", "investigations.update",
-    "blocked_emails.read", "blocked_emails.create"
+    "blocked_emails.read", "blocked_emails.create",
+    "pushed_requests.read"
   ],
   "SecurityViewer": [
-    "detections.read", "assignments.read", "team.read", "investigations.read"
+    "dashboard.read",
+    "detections.read", "assignments.read", "team.read",
+    "investigations.read",
+    "pushed_requests.read"
   ],
   "Analyst": [
-    "detections.read", "detections.update", "assignments.read", "assignments.update",
-    "team.read", "investigations.read", "investigations.update"
+    "dashboard.read",
+    "detections.read", "detections.update",
+    "assignments.read", "assignments.update",
+    "team.read", "investigations.read", "investigations.update",
+    "pushed_requests.read"
   ],
-  "Viewer": ["detections.read", "assignments.read", "team.read", "investigations.read"]
+  "Viewer": [
+    "dashboard.read",
+    "detections.read", "assignments.read", "team.read",
+    "investigations.read",
+    "pushed_requests.read"
+  ]
 }
 
 function expandRolePermissions(roles: string[]): string[] {
@@ -125,7 +154,8 @@ export async function GET(request: NextRequest) {
 
     // Extract user information from token claims
     const roles = claims['cognito:groups'] || claims.roles || []
-    const rolesArray = Array.isArray(roles) ? roles : [roles]
+    const rawRoles = Array.isArray(roles) ? roles : [roles]
+    const rolesArray = rawRoles.map(normalizeRole)
     const permissions = expandRolePermissions(rolesArray)
     // Try multiple ways to get orgId
     let orgId = claims['custom:orgId'] || claims.orgId || request.headers.get('x-org-id')

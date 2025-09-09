@@ -23,11 +23,8 @@ function isPublic(path: string) {
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl
   
-  console.log('🔍 MIDDLEWARE: Request to:', pathname)
-  
   // Redirect old /login to setup-organization
   if (pathname === '/login') {
-    console.log('🔄 MIDDLEWARE: Redirecting /login → /setup-organization')
     return NextResponse.redirect(new URL('/setup-organization', req.url))
   }
   

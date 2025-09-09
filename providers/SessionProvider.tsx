@@ -25,7 +25,6 @@ export function SessionProvider({ children, token, orgId }: SessionProviderProps
     const loadSessionData = async () => {
       // If no token, this is pre-login - just set loading to false and continue
       if (!token || !orgId) {
-        console.log('💪 SessionProvider: No token/orgId - continuing without session (pre-login)')
         setLoading(false)
         setSession(null)
         setError(null)
@@ -33,13 +32,10 @@ export function SessionProvider({ children, token, orgId }: SessionProviderProps
       }
 
       try {
-        console.log(`📋 Loading session for org: ${orgId}`)
         const sessionData = await loadSession(token, orgId)
-        console.log(`✅ Session loaded - User: ${sessionData.user.name}, Org: ${sessionData.org.name}`)
         setSession(sessionData)
         setError(null)
       } catch (err: any) {
-        console.error('❌ Failed to load session:', err)
         setError(err.message || 'Failed to load user session')
         setSession(null)
       } finally {

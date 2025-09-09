@@ -35,12 +35,6 @@ export default function OrgAwareLoginPage() {
   const error = searchParams.get('error')
   const details = searchParams.get('details')
   
-  console.log('🔑 LOGIN: OrgAwareLoginPage loaded')
-  console.log('🏷️ LOGIN: orgId:', orgId)
-  console.log('➡️ LOGIN: next URL:', next)
-  console.log('⚠️ LOGIN: error from URL:', error)
-  console.log('⚠️ LOGIN: details from URL:', details)
-  
   const [isLoading, setIsLoading] = useState(false)
   const [orgName, setOrgName] = useState<string>("")
   const [email, setEmail] = useState("")
@@ -76,15 +70,8 @@ export default function OrgAwareLoginPage() {
   const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false)
 
   useEffect(() => {
-    console.log('🔄 LOGIN: useEffect running - checking localStorage')
-    
     // Get org name from localStorage if available
     const storedOrgName = localStorage.getItem('organization_name')
-    const storedOrgId = localStorage.getItem('organization_id')
-    
-    console.log('💾 LOGIN: storedOrgName:', storedOrgName)
-    console.log('💾 LOGIN: storedOrgId:', storedOrgId)
-    
     if (storedOrgName) {
       setOrgName(storedOrgName)
     }
@@ -94,8 +81,6 @@ export default function OrgAwareLoginPage() {
     const fallback = "https://api.console-encryptgate.net"
     const base = configured || fallback
     setApiBaseUrl(base)
-    
-    console.log('🌎 LOGIN: API base URL set to:', base)
   }, [])
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -710,10 +695,7 @@ export default function OrgAwareLoginPage() {
               Secure access to your organization dashboard
             </p>
             <button
-              onClick={() => {
-                console.log('🔗 LOGIN: "Need to set up" clicked - redirecting to /setup-organization')
-                router.push('/setup-organization')
-              }}
+              onClick={() => router.push('/setup-organization')}
               className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
             >
               Need to set up a new organization?
