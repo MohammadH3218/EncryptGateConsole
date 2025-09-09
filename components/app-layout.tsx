@@ -23,7 +23,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { useSession } from "@/providers/SessionProvider"
+import { useSession, useSessionState } from "@/providers/SessionProvider"
 import { can } from "@/lib/session"
 import { apiGet, apiPost } from "@/lib/api"
 
@@ -52,6 +52,7 @@ const getUserInfoFromToken = () => {
 
 export function AppLayout({ children, username, notificationsCount = 0 }: AppLayoutProps) {
   const session = useSession()
+  const sessionState = useSessionState()
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
   const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
   const [userInfo, setUserInfo] = useState({ email: "", name: "" })
@@ -59,6 +60,12 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
+
+  // Only render AppLayout if session is ready
+  if (sessionState.status !== "ready") {
+    // The SessionProvider will handle loading/error states
+    return null
+  }
 
   // Extract orgId from current pathname
   const getOrgId = () => {
@@ -71,24 +78,15 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   
   const orgId = getOrgId()
 
-  // Get user info from JWT token on component mount
+  // Since we're guaranteed to have session data (status === "ready"), use it directly
   useEffect(() => {
-    // If we have session data, prefer that over JWT token parsing
-    if (session?.user?.name) {
+    if (session?.user) {
       setUserInfo({ 
         email: session.user.email || '', 
-        name: session.user.name 
+        name: session.user.name || session.user.email || ''
       })
-    } else {
-      // Fallback to JWT token parsing
-      const info = getUserInfoFromToken()
-      // Fallback to username prop only if JWT doesn't have name info
-      if (!info.name && username) {
-        info.name = username
-      }
-      setUserInfo(info)
     }
-  }, [username, session?.user?.name, session?.user?.email])
+  }, [session?.user?.name, session?.user?.email])
 
   // Initialize data and set up intervals on mount
   useEffect(() => {
@@ -452,8 +450,12 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{session?.user?.name || userInfo.name || userInfo.email}</p>
-                    <p className="text-gray-400 text-xs">{session?.user?.rawRoles?.[0] || 'User'}</p>
+                    <p className="text-white text-sm font-medium truncate">{session.user.name || session.user.email}</p>
+                    <p className="text-gray-400 text-xs">
+                      {session.user.isOwner ? 'Owner' : 
+                       session.user.isAdmin ? 'Admin' : 
+                       session.user.rawRoles?.[0] || 'Member'}
+                    </p>
                   </div>
                 </div>
               </DropdownMenuTrigger>
