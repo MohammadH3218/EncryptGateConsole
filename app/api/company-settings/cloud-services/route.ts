@@ -25,14 +25,12 @@ const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 // GET handler
 export async function GET(req: Request) {
   try {
-    // Extract orgId from URL path
-    const url = new URL(req.url);
-    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
-    const orgId = pathMatch?.[1];
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id');
 
     if (!orgId) {
       return NextResponse.json(
-        { error: "Organization ID not found in URL" },
+        { error: "Organization ID not found in headers" },
         { status: 400 }
       );
     }
@@ -103,14 +101,12 @@ export async function GET(req: Request) {
 // POST handler
 export async function POST(req: Request) {
   try {
-    // Extract orgId from URL path
-    const url = new URL(req.url);
-    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
-    const orgId = pathMatch?.[1];
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id');
 
     if (!orgId) {
       return NextResponse.json(
-        { error: "Organization ID not found in URL" },
+        { error: "Organization ID not found in headers" },
         { status: 400 }
       );
     }
