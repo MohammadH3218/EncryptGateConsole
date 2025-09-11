@@ -11,7 +11,9 @@ import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useToast } from "@/components/ui/use-toast"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { KeyRound } from "lucide-react"
+import { Switch } from "@/components/ui/switch"
+import { Badge } from "@/components/ui/badge"
+import { KeyRound, Bell, Settings } from "lucide-react"
 import { getUserFromLocalStorage } from "@/lib/cognito-user"
 
 export default function ProfilePage() {
@@ -51,6 +53,25 @@ export default function ProfilePage() {
     current: "",
     new: "",
     confirm: "",
+  })
+
+  // Notification preferences state
+  const [notificationPrefs, setNotificationPrefs] = useState({
+    emailNotifications: true,
+    criticalAlerts: true,
+    highAlerts: true,
+    mediumAlerts: true,
+    lowAlerts: false,
+    assignmentUpdates: true,
+    pushedRequests: true,
+    detectionAlerts: true,
+    systemUpdates: false,
+    dailyDigest: true,
+    weeklyReport: true,
+    browserNotifications: true,
+    soundAlerts: false,
+    desktopNotifications: true,
+    mobileNotifications: true,
   })
 
 
@@ -122,6 +143,26 @@ export default function ProfilePage() {
     }, 1500)
   }
 
+  const toggleNotificationPref = (key: keyof typeof notificationPrefs) => {
+    setNotificationPrefs({
+      ...notificationPrefs,
+      [key]: !notificationPrefs[key],
+    })
+  }
+
+  const handleSaveNotificationPrefs = () => {
+    setIsLoading(true)
+
+    // Simulate API call - in real app this would save to backend
+    setTimeout(() => {
+      setIsLoading(false)
+      toast({
+        title: "Notification Preferences Updated",
+        description: "Your notification preferences have been saved successfully.",
+      })
+    }, 1000)
+  }
+
   return (
     <AppLayout notificationsCount={3}>
       <FadeInSection>
@@ -129,9 +170,13 @@ export default function ProfilePage() {
           <h2 className="text-2xl font-bold mb-6 text-white">Your Profile</h2>
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="mb-6 bg-[#1f1f1f] border-[#1f1f1f]">
+            <TabsList className="mb-6 bg-[#1f1f1f] border-[#1f1f1f] grid w-full grid-cols-3">
               <TabsTrigger value="profile" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Profile Information</TabsTrigger>
               <TabsTrigger value="password" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">Change Password</TabsTrigger>
+              <TabsTrigger value="notifications" className="text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">
+                <Bell className="h-4 w-4 mr-2" />
+                Notifications
+              </TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile">
@@ -276,6 +321,218 @@ export default function ProfilePage() {
                   </Button>
                   <Button onClick={handleChangePassword} disabled={isPasswordLoading}>
                     {isPasswordLoading ? "Updating..." : "Change Password"}
+                  </Button>
+                </CardFooter>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="notifications">
+              <Card className="bg-[#0f0f0f] border-none text-white">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <Bell className="h-5 w-5 text-blue-400" />
+                    <CardTitle className="text-white">Notification Preferences</CardTitle>
+                  </div>
+                  <CardDescription className="text-gray-400">
+                    Customize how you receive notifications and alerts from the security platform
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-8">
+                  {/* Security Alerts Section */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <Settings className="h-4 w-4 text-orange-400" />
+                      <h3 className="font-semibold text-white">Security Alerts</h3>
+                      <Badge variant="outline" className="text-xs">Most Important</Badge>
+                    </div>
+                    <div className="space-y-4 ml-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Critical Email Threats</h4>
+                          <p className="text-sm text-gray-400">High-priority security threats detected in emails</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.criticalAlerts}
+                          onCheckedChange={() => toggleNotificationPref("criticalAlerts")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">High Priority Alerts</h4>
+                          <p className="text-sm text-gray-400">Important security events that need attention</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.highAlerts}
+                          onCheckedChange={() => toggleNotificationPref("highAlerts")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Medium Priority Alerts</h4>
+                          <p className="text-sm text-gray-400">Moderate security events</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.mediumAlerts}
+                          onCheckedChange={() => toggleNotificationPref("mediumAlerts")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Low Priority Alerts</h4>
+                          <p className="text-sm text-gray-400">Minor security events and informational alerts</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.lowAlerts}
+                          onCheckedChange={() => toggleNotificationPref("lowAlerts")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Detection Alerts</h4>
+                          <p className="text-sm text-gray-400">New threat detections and malware findings</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.detectionAlerts}
+                          onCheckedChange={() => toggleNotificationPref("detectionAlerts")}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Work & Assignments Section */}
+                  <div className="pt-4 border-t border-[#1f1f1f]">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Settings className="h-4 w-4 text-green-400" />
+                      <h3 className="font-semibold text-white">Work & Assignments</h3>
+                    </div>
+                    <div className="space-y-4 ml-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Assignment Updates</h4>
+                          <p className="text-sm text-gray-400">When you're assigned to investigate threats</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.assignmentUpdates}
+                          onCheckedChange={() => toggleNotificationPref("assignmentUpdates")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Pushed Requests</h4>
+                          <p className="text-sm text-gray-400">Admin pushed requests requiring your attention</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.pushedRequests}
+                          onCheckedChange={() => toggleNotificationPref("pushedRequests")}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Delivery Methods Section */}
+                  <div className="pt-4 border-t border-[#1f1f1f]">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Settings className="h-4 w-4 text-blue-400" />
+                      <h3 className="font-semibold text-white">Delivery Methods</h3>
+                    </div>
+                    <div className="space-y-4 ml-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Email Notifications</h4>
+                          <p className="text-sm text-gray-400">Receive notifications via email</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.emailNotifications}
+                          onCheckedChange={() => toggleNotificationPref("emailNotifications")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Browser Notifications</h4>
+                          <p className="text-sm text-gray-400">Pop-up notifications in your browser</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.browserNotifications}
+                          onCheckedChange={() => toggleNotificationPref("browserNotifications")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Desktop Notifications</h4>
+                          <p className="text-sm text-gray-400">System notifications on your computer</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.desktopNotifications}
+                          onCheckedChange={() => toggleNotificationPref("desktopNotifications")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Sound Alerts</h4>
+                          <p className="text-sm text-gray-400">Audio notifications for critical alerts</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.soundAlerts}
+                          onCheckedChange={() => toggleNotificationPref("soundAlerts")}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Reports & Summaries Section */}
+                  <div className="pt-4 border-t border-[#1f1f1f]">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Settings className="h-4 w-4 text-purple-400" />
+                      <h3 className="font-semibold text-white">Reports & Summaries</h3>
+                    </div>
+                    <div className="space-y-4 ml-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Daily Digest</h4>
+                          <p className="text-sm text-gray-400">Daily summary of security events and activities</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.dailyDigest}
+                          onCheckedChange={() => toggleNotificationPref("dailyDigest")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">Weekly Report</h4>
+                          <p className="text-sm text-gray-400">Comprehensive weekly security report</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.weeklyReport}
+                          onCheckedChange={() => toggleNotificationPref("weeklyReport")}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-medium text-white">System Updates</h4>
+                          <p className="text-sm text-gray-400">Platform maintenance and feature updates</p>
+                        </div>
+                        <Switch
+                          checked={notificationPrefs.systemUpdates}
+                          onCheckedChange={() => toggleNotificationPref("systemUpdates")}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+                <CardFooter className="flex justify-end gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setActiveTab("profile")}
+                    className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
+                  >
+                    Cancel
+                  </Button>
+                  <Button 
+                    onClick={handleSaveNotificationPrefs} 
+                    disabled={isLoading}
+                    className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
+                  >
+                    {isLoading ? "Saving..." : "Save Preferences"}
                   </Button>
                 </CardFooter>
               </Card>

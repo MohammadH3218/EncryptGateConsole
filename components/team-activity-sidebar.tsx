@@ -2,12 +2,13 @@
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
-import { AlertTriangle, CheckCircle2, Clock, Shield, BellRing } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Clock, Shield, BellRing, Mail, Users, FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { useNotifications } from "@/hooks/useNotifications"
 
 interface TeamMember {
   id: string
@@ -91,15 +92,14 @@ interface TeamActivitySidebarProps {
   className?: string
   isCollapsed: boolean
   onToggle: () => void
-  notificationsCount?: number
 }
 
 export function TeamActivitySidebar({
   className,
   isCollapsed,
   onToggle,
-  notificationsCount = 0,
 }: TeamActivitySidebarProps) {
+  const { unreadNotifications, unreadCount, markAsRead } = useNotifications()
   const getStatusColor = (status: string) => {
     switch (status) {
       case "online":
@@ -126,6 +126,39 @@ export function TeamActivitySidebar({
     }
   }
 
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case "critical_email":
+        return <AlertTriangle className="h-4 w-4 text-red-500" />
+      case "pushed_request":
+        return <FileText className="h-4 w-4 text-blue-500" />
+      case "assignment":
+        return <Users className="h-4 w-4 text-green-500" />
+      case "detection":
+        return <Shield className="h-4 w-4 text-orange-500" />
+      case "system_update":
+        return <CheckCircle2 className="h-4 w-4 text-purple-500" />
+      case "weekly_report":
+        return <Mail className="h-4 w-4 text-gray-500" />
+      default:
+        return <BellRing className="h-4 w-4 text-gray-500" />
+    }
+  }
+
+  const formatTimeAgo = (createdAt: string) => {
+    const now = new Date()
+    const created = new Date(createdAt)
+    const diffMs = now.getTime() - created.getTime()
+    const diffMins = Math.floor(diffMs / (1000 * 60))
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+    if (diffMins < 1) return "Just now"
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    return `${diffDays}d ago`
+  }
+
   // Filter online and busy members first
   const sortedMembers = [...teamMembers].sort((a, b) => {
     if ((a.status === "online" || a.status === "busy") && b.status !== "online" && b.status !== "busy") return -1
@@ -144,43 +177,42 @@ export function TeamActivitySidebar({
           <h2 className="text-lg font-semibold">Team Activity</h2>
           <Button variant="ghost" size="icon" className="relative">
             <BellRing className="h-5 w-5" />
-            {notificationsCount > 0 && (
+            {unreadCount > 0 && (
               <Badge
                 variant="destructive"
                 className="h-4 w-4 absolute -top-1 -right-1 flex items-center justify-center text-[10px] p-0"
               >
-                {notificationsCount > 99 ? "99+" : notificationsCount}
+                {unreadCount > 99 ? "99+" : unreadCount}
               </Badge>
             )}
           </Button>
         </div>
 
-        {notificationsCount > 0 && (
+        {unreadCount > 0 && (
           <div className="p-4 border-b">
-            <h3 className="text-sm font-medium text-muted-foreground mb-2">NOTIFICATIONS</h3>
-            <div className="space-y-3">
-              <div className="bg-accent/50 p-3 rounded-md">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium">New Detection</p>
-                    <p className="text-xs text-muted-foreground">A new suspicious email has been detected.</p>
-                    <p className="text-xs text-muted-foreground mt-1">2 minutes ago</p>
-                  </div>
-                </div>
-              </div>
-              {notificationsCount > 1 && (
-                <div className="bg-accent/50 p-3 rounded-md">
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">NOTIFICATIONS ({unreadCount})</h3>
+            <div className="space-y-3 max-h-48 overflow-y-auto">
+              {unreadNotifications.slice(0, 3).map((notification) => (
+                <div 
+                  key={notification.id} 
+                  className="bg-accent/50 p-3 rounded-md hover:bg-accent/70 cursor-pointer transition-colors"
+                  onClick={() => markAsRead(notification.id)}
+                >
                   <div className="flex items-start gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-blue-500 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium">Assignment Update</p>
-                      <p className="text-xs text-muted-foreground">
-                        You have been assigned to investigate a detection.
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">1 hour ago</p>
+                    {getNotificationIcon(notification.type)}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{notification.title}</p>
+                      <p className="text-xs text-muted-foreground line-clamp-2">{notification.message}</p>
+                      <p className="text-xs text-muted-foreground mt-1">{formatTimeAgo(notification.createdAt)}</p>
                     </div>
                   </div>
+                </div>
+              ))}
+              {unreadCount > 3 && (
+                <div className="text-center">
+                  <p className="text-xs text-muted-foreground">
+                    +{unreadCount - 3} more notifications
+                  </p>
                 </div>
               )}
             </div>
