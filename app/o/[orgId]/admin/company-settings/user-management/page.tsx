@@ -90,7 +90,7 @@ export default function UserManagementPage() {
 
   // User selection states
   const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-  const [selectedRole, setSelectedRole] = useState("Security Admin")
+  const [selectedRole, setSelectedRole] = useState("Analyst")
   const [isUserDropdownOpen, setIsUserDropdownOpen] = useState(false)
   const [userSearchQuery, setUserSearchQuery] = useState("")
 
@@ -103,8 +103,8 @@ export default function UserManagementPage() {
   const [isWorkmailSyncing, setIsWorkmailSyncing] = useState(false)
   const [workmailStatus, setWorkmailStatus] = useState<any>(null)
 
-  // Available roles
-  const availableRoles = ["Security Admin", "IT Specialist", "Security Analyst", "Team Lead"]
+  // Available roles (aligned with roles page hierarchy)
+  const availableRoles = ["Owner", "Sr. Admin", "Admin", "Analyst", "Viewer"]
 
   // Filter available pool users (exclude already added users)
   const availablePoolUsers = poolUsers.filter(
@@ -341,7 +341,7 @@ export default function UserManagementPage() {
   const resetUserDialogState = () => {
     setSelectedUsers([])
     setUserSearchQuery("")
-    setSelectedRole("Security Admin")
+    setSelectedRole("Analyst")
     setIsUserDropdownOpen(false)
   }
 
