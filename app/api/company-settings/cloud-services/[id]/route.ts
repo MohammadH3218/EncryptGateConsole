@@ -18,14 +18,13 @@ import {
   DescribeOrganizationCommand,
 } from "@aws-sdk/client-workmail";
 
-// Only use the org ID env var
-const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
+// Table name from environment
 const TABLE = 
   process.env.CLOUDSERVICES_TABLE_NAME || 
   process.env.CLOUDSERVICES_TABLE || 
   "CloudServices";
 
-console.log("🔧 Cloud Services [id] API starting with:", { DEFAULT_ORG_ID, TABLE });
+console.log("🔧 Cloud Services [id] API starting with table:", TABLE);
 
 // Use default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
@@ -36,13 +35,25 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Extract orgId from URL path
+    const url = new URL(req.url);
+    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
+    const urlOrgId = pathMatch?.[1];
+
+    if (!urlOrgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in URL" },
+        { status: 400 }
+      );
+    }
+
     const id = params.id;
     const [orgId, serviceType] = id.split('_');
     
     // Validate parameters
-    if (orgId !== DEFAULT_ORG_ID || !serviceType) {
+    if (orgId !== urlOrgId || !serviceType) {
       return NextResponse.json(
-        { error: "Invalid service ID format" },
+        { error: "Invalid service ID format or organization mismatch" },
         { status: 400 }
       );
     }
@@ -51,7 +62,7 @@ export async function PUT(
     const existingService = await ddb.send(new GetItemCommand({
       TableName: TABLE,
       Key: {
-        orgId: { S: DEFAULT_ORG_ID },
+        orgId: { S: orgId },
         serviceType: { S: serviceType },
       },
     }));
@@ -66,9 +77,9 @@ export async function PUT(
     const body = await req.json();
     
     if (serviceType === 'aws-cognito') {
-      return await handleCognitoUpdate(serviceType, body);
+      return await handleCognitoUpdate(orgId, serviceType, body);
     } else if (serviceType === 'aws-workmail') {
-      return await handleWorkMailUpdate(serviceType, body);
+      return await handleWorkMailUpdate(orgId, serviceType, body);
     } else {
       return NextResponse.json(
         { error: "Unsupported service type" },
@@ -84,7 +95,7 @@ export async function PUT(
   }
 }
 
-async function handleCognitoUpdate(serviceType: string, body: any) {
+async function handleCognitoUpdate(orgId: string, serviceType: string, body: any) {
   const { userPoolId, clientId, clientSecret, region } = body;
   
   if (!userPoolId || !clientId || !region) {
@@ -146,7 +157,7 @@ async function handleCognitoUpdate(serviceType: string, body: any) {
     new UpdateItemCommand({
       TableName: TABLE,
       Key: {
-        orgId: { S: DEFAULT_ORG_ID },
+        orgId: { S: orgId },
         serviceType: { S: serviceType },
       },
       UpdateExpression: updateExpression,
@@ -157,7 +168,7 @@ async function handleCognitoUpdate(serviceType: string, body: any) {
   
   // Return the updated service (don't include the secret in response)
   return NextResponse.json({
-    id: `${DEFAULT_ORG_ID}_${serviceType}`,
+    id: `${orgId}_${serviceType}`,
     name: "AWS Cognito",
     serviceType: serviceType,
     status: "connected",
@@ -170,7 +181,7 @@ async function handleCognitoUpdate(serviceType: string, body: any) {
   });
 }
 
-async function handleWorkMailUpdate(serviceType: string, body: any) {
+async function handleWorkMailUpdate(orgId: string, serviceType: string, body: any) {
   const { organizationId, alias, region } = body;
   
   if (!organizationId || !region) {
@@ -231,7 +242,7 @@ async function handleWorkMailUpdate(serviceType: string, body: any) {
     new UpdateItemCommand({
       TableName: TABLE,
       Key: {
-        orgId: { S: DEFAULT_ORG_ID },
+        orgId: { S: orgId },
         serviceType: { S: serviceType },
       },
       UpdateExpression: updateExpression,
@@ -242,7 +253,7 @@ async function handleWorkMailUpdate(serviceType: string, body: any) {
   
   // Return the updated service
   return NextResponse.json({
-    id: `${DEFAULT_ORG_ID}_${serviceType}`,
+    id: `${orgId}_${serviceType}`,
     name: "AWS WorkMail",
     serviceType: serviceType,
     status: "connected",
@@ -260,13 +271,25 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Extract orgId from URL path
+    const url = new URL(req.url);
+    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
+    const urlOrgId = pathMatch?.[1];
+
+    if (!urlOrgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in URL" },
+        { status: 400 }
+      );
+    }
+
     const id = params.id;
     const [orgId, serviceType] = id.split('_');
     
     // Validate parameters
-    if (orgId !== DEFAULT_ORG_ID || !serviceType) {
+    if (orgId !== urlOrgId || !serviceType) {
       return NextResponse.json(
-        { error: "Invalid service ID format" },
+        { error: "Invalid service ID format or organization mismatch" },
         { status: 400 }
       );
     }
@@ -276,7 +299,7 @@ export async function DELETE(
       new DeleteItemCommand({
         TableName: TABLE,
         Key: {
-          orgId: { S: DEFAULT_ORG_ID },
+          orgId: { S: orgId },
           serviceType: { S: serviceType },
         },
       })
