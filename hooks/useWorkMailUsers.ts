@@ -2,6 +2,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useParams } from "next/navigation"
 
 export interface WorkMailUser {
   id: string // WorkMail User ID
@@ -13,15 +14,22 @@ export interface WorkMailUser {
 }
 
 export function useWorkMailUsers() {
+  const params = useParams()
+  const orgId = params.orgId as string
   const [workMailUsers, setWorkMailUsers] = useState<WorkMailUser[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
   const fetchWorkMailUsers = useCallback(async () => {
+    if (!orgId) return
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch("/api/company-settings/employees/workmail-users")
+      const res = await fetch("/api/company-settings/employees/workmail-users", {
+        headers: {
+          'x-org-id': orgId
+        }
+      })
       
       if (!res.ok) {
         const errorData = await res.json()
@@ -36,7 +44,7 @@ export function useWorkMailUsers() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [orgId])
 
   const refresh = useCallback(() => {
     return fetchWorkMailUsers()

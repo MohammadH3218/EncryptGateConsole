@@ -15,29 +15,26 @@ import {
 } from "@aws-sdk/client-workmail";
 
 // Environment variables
-const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees";
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
                  process.env.CLOUDSERVICES_TABLE || 
                  "CloudServices";
 
-// Note: In production, ORG_ID should be extracted from request context
-
-console.log("🔧 WorkMail Sync API starting with:", { DEFAULT_ORG_ID, EMPLOYEES_TABLE, CS_TABLE });
+console.log("🔧 WorkMail Sync API starting with:", { EMPLOYEES_TABLE, CS_TABLE });
 
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 // Helper function to get WorkMail configuration from DynamoDB
-async function getWorkMailConfig() {
-  console.log(`🔍 Fetching WorkMail config for org ${DEFAULT_ORG_ID} from table ${CS_TABLE}`);
+async function getWorkMailConfig(orgId: string) {
+  console.log(`🔍 Fetching WorkMail config for org ${orgId} from table ${CS_TABLE}`);
   
   try {
     const resp = await ddb.send(
       new GetItemCommand({
         TableName: CS_TABLE,
         Key: {
-          orgId:       { S: DEFAULT_ORG_ID },
+          orgId:       { S: orgId },
           serviceType: { S: "aws-workmail" },
         },
       })
@@ -66,8 +63,18 @@ export async function POST(req: Request) {
   try {
     console.log("🔄 Syncing employees from AWS WorkMail...");
 
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id');
+
+    if (!orgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in headers" },
+        { status: 400 }
+      );
+    }
+
     // Get WorkMail configuration from DynamoDB
-    const { organizationId, region: workmailRegion, alias } = await getWorkMailConfig();
+    const { organizationId, region: workmailRegion, alias } = await getWorkMailConfig(orgId);
     
     // Create WorkMail client with the region from config
     const workmail = new WorkMailClient({ region: workmailRegion });
@@ -133,7 +140,7 @@ export async function POST(req: Request) {
           const putRequests = batch.map(emp => ({
             PutRequest: {
               Item: {
-                orgId: { S: DEFAULT_ORG_ID },
+                orgId: { S: orgId },
                 email: { S: emp.email },
                 name: { S: emp.name },
                 department: { S: emp.department },
@@ -210,8 +217,18 @@ export async function POST(req: Request) {
 // GET - Check WorkMail connection status
 export async function GET(req: Request) {
   try {
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id');
+
+    if (!orgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in headers" },
+        { status: 400 }
+      );
+    }
+
     // Get WorkMail configuration from DynamoDB
-    const { organizationId, region: workmailRegion, alias } = await getWorkMailConfig();
+    const { organizationId, region: workmailRegion, alias } = await getWorkMailConfig(orgId);
     
     // Create WorkMail client with the region from config
     const workmail = new WorkMailClient({ region: workmailRegion });
