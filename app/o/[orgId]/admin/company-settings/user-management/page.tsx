@@ -291,7 +291,10 @@ export default function UserManagementPage() {
     try {
       const res = await fetch("/api/company-settings/employees/sync-workmail", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "x-org-id": params.orgId as string
+        },
         body: JSON.stringify({})
       })
       
@@ -323,7 +326,11 @@ export default function UserManagementPage() {
 
   const checkWorkmailStatus = async () => {
     try {
-      const res = await fetch("/api/company-settings/employees/sync-workmail")
+      const res = await fetch("/api/company-settings/employees/sync-workmail", {
+        headers: {
+          "x-org-id": params.orgId as string
+        }
+      })
       const status = await res.json()
       setWorkmailStatus(status)
     } catch (err) {

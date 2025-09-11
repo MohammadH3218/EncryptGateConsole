@@ -12,27 +12,24 @@ import {
 } from "@aws-sdk/client-cognito-identity-provider";
 
 // Environment variables
-const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
                  process.env.CLOUDSERVICES_TABLE || 
                  "CloudServices";
 
-// Note: In production, ORG_ID should be extracted from request context
-
-console.log("🔧 Pool Users API starting with:", { DEFAULT_ORG_ID, CS_TABLE });
+console.log("🔧 Pool Users API starting with table:", CS_TABLE);
 
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
-async function getCognitoConfig() {
-  console.log(`🔍 Fetching Cognito config for org ${DEFAULT_ORG_ID} from table ${CS_TABLE}`);
+async function getCognitoConfig(orgId: string) {
+  console.log(`🔍 Fetching Cognito config for org ${orgId} from table ${CS_TABLE}`);
   
   try {
     const resp = await ddb.send(
       new GetItemCommand({
         TableName: CS_TABLE,
         Key: {
-          orgId:       { S: DEFAULT_ORG_ID },
+          orgId:       { S: orgId },
           serviceType: { S: "aws-cognito" },
         },
       })
@@ -61,7 +58,17 @@ export async function GET(req: Request) {
   console.log("🔍 GET /api/company-settings/users/pool - Getting all Cognito pool users");
   
   try {
-    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id');
+
+    if (!orgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in headers" },
+        { status: 400 }
+      );
+    }
+
+    const { userPoolId, region: cognitoRegion } = await getCognitoConfig(orgId);
     
     // Create Cognito client
     const cognito = new CognitoIdentityProviderClient({

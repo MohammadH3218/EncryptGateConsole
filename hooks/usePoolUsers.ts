@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { useParams } from "next/navigation"
 
 export interface PoolUser {
   username: string
@@ -9,16 +10,23 @@ export interface PoolUser {
 }
 
 export function usePoolUsers() {
+  const params = useParams()
+  const orgId = params.orgId as string
   const [poolUsers, setPoolUsers] = useState<PoolUser[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
   const fetchPoolUsers = useCallback(async () => {
+    if (!orgId) return
     setLoading(true)
     setError(null)
     try {
       console.log('📋 Fetching pool users...')
-      const res = await fetch("/api/company-settings/users/pool")
+      const res = await fetch("/api/company-settings/users/pool", {
+        headers: {
+          'x-org-id': orgId
+        }
+      })
       
       if (!res.ok) {
         const errorData = await res.json()
@@ -34,7 +42,7 @@ export function usePoolUsers() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [orgId])
 
   const refresh = useCallback(() => {
     return fetchPoolUsers()

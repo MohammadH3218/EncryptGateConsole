@@ -14,29 +14,26 @@ import {
 } from "@aws-sdk/client-workmail";
 
 // Environment variables
-const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || "Employees";
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
                  process.env.CLOUDSERVICES_TABLE || 
                  "CloudServices";
 
-// Note: In production, ORG_ID should be extracted from request context
-
-console.log("🔧 WorkMail Users API starting with:", { DEFAULT_ORG_ID, EMPLOYEES_TABLE, CS_TABLE });
+console.log("🔧 WorkMail Users API starting with:", { EMPLOYEES_TABLE, CS_TABLE });
 
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 // Helper function to get WorkMail configuration from DynamoDB
-async function getWorkMailConfig() {
-  console.log(`🔍 Fetching WorkMail config for org ${DEFAULT_ORG_ID} from table ${CS_TABLE}`);
+async function getWorkMailConfig(orgId: string) {
+  console.log(`🔍 Fetching WorkMail config for org ${orgId} from table ${CS_TABLE}`);
   
   try {
     const resp = await ddb.send(
       new GetItemCommand({
         TableName: CS_TABLE,
         Key: {
-          orgId:       { S: DEFAULT_ORG_ID },
+          orgId:       { S: orgId },
           serviceType: { S: "aws-workmail" },
         },
       })
@@ -62,14 +59,14 @@ async function getWorkMailConfig() {
 }
 
 // Helper function to get currently monitored employees
-async function getMonitoredEmployeeEmails() {
+async function getMonitoredEmployeeEmails(orgId: string) {
   try {
     const resp = await ddb.send(
       new QueryCommand({
         TableName: EMPLOYEES_TABLE,
         KeyConditionExpression: 'orgId = :orgId',
         ExpressionAttributeValues: {
-          ':orgId': { S: DEFAULT_ORG_ID },
+          ':orgId': { S: orgId },
         },
         ProjectionExpression: 'email', // Only get emails to filter out already monitored users
       })
@@ -87,11 +84,21 @@ export async function GET(req: Request) {
   console.log("🔍 GET /api/company-settings/employees/workmail-users - Getting available WorkMail users");
   
   try {
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id');
+
+    if (!orgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in headers" },
+        { status: 400 }
+      );
+    }
+
     // Get WorkMail configuration from DynamoDB
-    const { organizationId, region: workmailRegion } = await getWorkMailConfig();
+    const { organizationId, region: workmailRegion } = await getWorkMailConfig(orgId);
     
     // Get currently monitored employees to filter them out
-    const monitoredEmails = await getMonitoredEmployeeEmails();
+    const monitoredEmails = await getMonitoredEmployeeEmails(orgId);
     console.log(`📋 Found ${monitoredEmails.size} already monitored employees`);
     
     // Create WorkMail client with the region from config
