@@ -10,14 +10,13 @@ import {
   ListTablesCommand,
 } from "@aws-sdk/client-dynamodb";
 
-// Only two env-vars now: your org ID and table name
-const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
+// Table name from environment
 const TABLE  =
   process.env.CLOUDSERVICES_TABLE_NAME ||
   process.env.CLOUDSERVICES_TABLE         ||
   "CloudServices";
 
-console.log("🔧 Cloud Services API starting with:", { DEFAULT_ORG_ID, TABLE });
+console.log("🔧 Cloud Services API starting with table:", TABLE);
 
 // Instantiate DynamoDBClient with the default credential/provider chain.
 // Amplify will inject AWS_REGION and your SSR IAM role at runtime.
@@ -26,6 +25,18 @@ const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 // GET handler
 export async function GET(req: Request) {
   try {
+    // Extract orgId from URL path
+    const url = new URL(req.url);
+    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
+    const orgId = pathMatch?.[1];
+
+    if (!orgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in URL" },
+        { status: 400 }
+      );
+    }
+
     // Quick connectivity check
     const list = await ddb.send(new ListTablesCommand({}));
     console.log("✅ ListTables OK:", list.TableNames);
@@ -35,10 +46,10 @@ export async function GET(req: Request) {
       TableName: TABLE,
       KeyConditionExpression: "orgId = :orgId",
       ExpressionAttributeValues: {
-        ":orgId": { S: DEFAULT_ORG_ID },
+        ":orgId": { S: orgId },
       },
     }));
-    console.log(`✅ Query returned ${resp.Count} items`);
+    console.log(`✅ Query returned ${resp.Count} items for org ${orgId}`);
 
     // Map to your UI shape
     const services = (resp.Items || []).map(item => {
@@ -47,7 +58,7 @@ export async function GET(req: Request) {
       if (!orgId || !serviceType) return null;
       
       const baseService = {
-        id:         `${orgId}_${serviceType}`,
+        id:         `${item.orgId?.S}_${serviceType}`,
         name:       serviceType === "aws-cognito" ? "AWS Cognito" : 
                    serviceType === "aws-workmail" ? "AWS WorkMail" : serviceType,
         serviceType: serviceType as 'aws-cognito' | 'aws-workmail',
@@ -92,6 +103,18 @@ export async function GET(req: Request) {
 // POST handler
 export async function POST(req: Request) {
   try {
+    // Extract orgId from URL path
+    const url = new URL(req.url);
+    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
+    const orgId = pathMatch?.[1];
+
+    if (!orgId) {
+      return NextResponse.json(
+        { error: "Organization ID not found in URL" },
+        { status: 400 }
+      );
+    }
+
     const body = await req.json();
     const { serviceType } = body;
     
@@ -103,9 +126,9 @@ export async function POST(req: Request) {
     }
 
     if (serviceType === 'aws-cognito') {
-      return await handleCognitoPost(body);
+      return await handleCognitoPost(body, orgId);
     } else if (serviceType === 'aws-workmail') {
-      return await handleWorkMailPost(body);
+      return await handleWorkMailPost(body, orgId);
     } else {
       return NextResponse.json(
         { error: "Invalid serviceType. Must be 'aws-cognito' or 'aws-workmail'" },
@@ -121,7 +144,7 @@ export async function POST(req: Request) {
   }
 }
 
-async function handleCognitoPost(body: any) {
+async function handleCognitoPost(body: any, orgId: string) {
   const { serviceType, userPoolId, clientId, clientSecret, region } = body;
   
   if (!userPoolId || !clientId || !region) {
@@ -134,7 +157,7 @@ async function handleCognitoPost(body: any) {
   // Build DynamoDB item with proper typing
   const now = new Date().toISOString();
   const item: Record<string, any> = {
-    orgId:       { S: DEFAULT_ORG_ID },
+    orgId:       { S: orgId },
     serviceType: { S: serviceType },
     userPoolId:  { S: userPoolId },
     clientId:    { S: clientId },
@@ -158,7 +181,7 @@ async function handleCognitoPost(body: any) {
 
   // Return the new service (don't include the secret in the response for security)
   return NextResponse.json({
-    id:         `${DEFAULT_ORG_ID}_${serviceType}`,
+    id:         `${orgId}_${serviceType}`,
     name:       "AWS Cognito",
     serviceType: serviceType,
     status:     "connected",
@@ -171,7 +194,7 @@ async function handleCognitoPost(body: any) {
   });
 }
 
-async function handleWorkMailPost(body: any) {
+async function handleWorkMailPost(body: any, orgId: string) {
   const { serviceType, organizationId, alias, region } = body;
   
   if (!organizationId || !region) {
@@ -184,7 +207,7 @@ async function handleWorkMailPost(body: any) {
   // Build DynamoDB item with proper typing
   const now = new Date().toISOString();
   const item: Record<string, any> = {
-    orgId:          { S: DEFAULT_ORG_ID },
+    orgId:          { S: orgId },
     serviceType:    { S: serviceType },
     organizationId: { S: organizationId },
     region:         { S: region },
@@ -207,7 +230,7 @@ async function handleWorkMailPost(body: any) {
 
   // Return the new service
   return NextResponse.json({
-    id:             `${DEFAULT_ORG_ID}_${serviceType}`,
+    id:             `${orgId}_${serviceType}`,
     name:           "AWS WorkMail",
     serviceType:    serviceType,
     status:         "connected",
