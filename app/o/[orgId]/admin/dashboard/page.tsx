@@ -116,7 +116,6 @@ export default function OrgAwareDashboardPage() {
   // ——— Data fetching functions ———
   const loadEmails = useCallback(async () => {
     try {
-      console.log(`📧 Dashboard (${orgId}): Loading emails...`)
       const token = localStorage.getItem("access_token")
       const response = await fetch('/api/email?limit=1000', {
         headers: {
@@ -131,7 +130,6 @@ export default function OrgAwareDashboardPage() {
       
       const data = await response.json()
       setEmails(data.emails || [])
-      console.log(`✅ Dashboard (${orgId}): Loaded ${data.emails?.length || 0} emails`)
     } catch (err: any) {
       console.error(`❌ Dashboard (${orgId}): Failed to load emails:`, err)
       setError(`Failed to load emails: ${err.message}`)
@@ -140,7 +138,6 @@ export default function OrgAwareDashboardPage() {
 
   const loadDetections = useCallback(async () => {
     try {
-      console.log(`🚨 Dashboard (${orgId}): Loading detections...`)
       const token = localStorage.getItem("access_token")
       const response = await fetch('/api/detections?limit=1000', {
         headers: {
@@ -155,7 +152,6 @@ export default function OrgAwareDashboardPage() {
       
       const data = await response.json()
       setDetections(Array.isArray(data) ? data : [])
-      console.log(`✅ Dashboard (${orgId}): Loaded ${Array.isArray(data) ? data.length : 0} detections`)
     } catch (err: any) {
       console.error(`❌ Dashboard (${orgId}): Failed to load detections:`, err)
       setError(`Failed to load detections: ${err.message}`)
@@ -167,9 +163,7 @@ export default function OrgAwareDashboardPage() {
     setError(null)
     
     try {
-      console.log(`🔄 Dashboard (${orgId}): Loading all data...`)
       await Promise.all([loadEmails(), loadDetections()])
-      console.log(`✅ Dashboard (${orgId}): All data loaded successfully`)
     } catch (err: any) {
       console.error(`❌ Dashboard (${orgId}): Error loading data:`, err)
       setError('Failed to load dashboard data')
@@ -180,14 +174,12 @@ export default function OrgAwareDashboardPage() {
 
   // ——— Effects ———
   useEffect(() => {
-    console.log(`🚀 Dashboard (${orgId}): Component mounted, loading data...`)
     loadAllData()
   }, [loadAllData])
 
   // Auto-refresh every 60 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      console.log(`🔄 Dashboard (${orgId}): Auto-refreshing data...`)
       loadAllData()
     }, 60000) // 60 seconds
 

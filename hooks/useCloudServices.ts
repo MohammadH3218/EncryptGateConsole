@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useParams } from 'next/navigation'
 
 export type ServiceType = 'aws-cognito' | 'aws-workmail'
 
@@ -49,15 +50,22 @@ export interface ValidationResult {
 }
 
 export function useCloudServices() {
+  const params = useParams()
+  const orgId = params.orgId as string
   const [services, setServices] = useState<CloudService[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
   // ─── Fetch all connected services ─────────────────────────────────────────────
   const fetchServices = useCallback(async () => {
+    if (!orgId) return
     setLoading(true)
     try {
-      const res = await fetch('/api/company-settings/cloud-services')
+      const res = await fetch('/api/company-settings/cloud-services', {
+        headers: {
+          'x-org-id': orgId
+        }
+      })
       if (!res.ok) throw new Error('Failed to load cloud services')
       const data: CloudService[] = await res.json()
       setServices(data)
@@ -67,7 +75,7 @@ export function useCloudServices() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [orgId])
 
   useEffect(() => {
     fetchServices()
@@ -76,11 +84,15 @@ export function useCloudServices() {
   // ─── Add (connect) a service ─────────────────────────────────────────────────
   const addService = useCallback(
     async (details: AddServiceDetails) => {
+      if (!orgId) throw new Error('Organization ID not found')
       setLoading(true)
       try {
         const res = await fetch('/api/company-settings/cloud-services', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-org-id': orgId
+          },
           body: JSON.stringify(details),
         })
         const data = await res.json()
@@ -98,19 +110,23 @@ export function useCloudServices() {
         setLoading(false)
       }
     },
-    []
+    [orgId]
   )
 
   // ─── Update an existing service ────────────────────────────────────────────────
   const updateService = useCallback(
     async (id: string, details: UpdateServiceDetails) => {
+      if (!orgId) throw new Error('Organization ID not found')
       setLoading(true)
       try {
         const res = await fetch(
           `/api/company-settings/cloud-services/${encodeURIComponent(id)}`,
           {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-org-id': orgId
+            },
             body: JSON.stringify(details),
           }
         )
@@ -129,17 +145,23 @@ export function useCloudServices() {
         setLoading(false)
       }
     },
-    []
+    [orgId]
   )
 
   // ─── Remove (disconnect) a service ────────────────────────────────────────────
   const removeService = useCallback(
     async (id: string) => {
+      if (!orgId) throw new Error('Organization ID not found')
       setLoading(true)
       try {
         const res = await fetch(
           `/api/company-settings/cloud-services/${encodeURIComponent(id)}`,
-          { method: 'DELETE' }
+          { 
+            method: 'DELETE',
+            headers: {
+              'x-org-id': orgId
+            }
+          }
         )
         const data = await res.json()
         if (!res.ok) {
@@ -154,7 +176,7 @@ export function useCloudServices() {
         setLoading(false)
       }
     },
-    []
+    [orgId]
   )
 
   // ─── Validate credentials (before add/update) ────────────────────────────────

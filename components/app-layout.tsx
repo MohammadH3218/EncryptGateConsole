@@ -477,12 +477,6 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
                         const displayRole = session.user.isOwner ? 'Owner' : 
                                           session.user.isAdmin ? 'Admin' : 
                                           session.user.rawRoles?.[0] || 'Member'
-                        console.log('🏷️ Profile role display:', { 
-                          isOwner: session.user.isOwner, 
-                          isAdmin: session.user.isAdmin, 
-                          rawRoles: session.user.rawRoles, 
-                          displayRole 
-                        })
                         return displayRole
                       })()}
                     </p>

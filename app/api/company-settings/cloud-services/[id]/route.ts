@@ -35,14 +35,12 @@ export async function PUT(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Extract orgId from URL path
-    const url = new URL(req.url);
-    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
-    const urlOrgId = pathMatch?.[1];
+    // Extract orgId from request headers
+    const headerOrgId = req.headers.get('x-org-id');
 
-    if (!urlOrgId) {
+    if (!headerOrgId) {
       return NextResponse.json(
-        { error: "Organization ID not found in URL" },
+        { error: "Organization ID not found in headers" },
         { status: 400 }
       );
     }
@@ -51,7 +49,7 @@ export async function PUT(
     const [orgId, serviceType] = id.split('_');
     
     // Validate parameters
-    if (orgId !== urlOrgId || !serviceType) {
+    if (orgId !== headerOrgId || !serviceType) {
       return NextResponse.json(
         { error: "Invalid service ID format or organization mismatch" },
         { status: 400 }
@@ -271,14 +269,12 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    // Extract orgId from URL path
-    const url = new URL(req.url);
-    const pathMatch = url.pathname.match(/\/o\/([^/]+)/);
-    const urlOrgId = pathMatch?.[1];
+    // Extract orgId from request headers
+    const headerOrgId = req.headers.get('x-org-id');
 
-    if (!urlOrgId) {
+    if (!headerOrgId) {
       return NextResponse.json(
-        { error: "Organization ID not found in URL" },
+        { error: "Organization ID not found in headers" },
         { status: 400 }
       );
     }
@@ -287,7 +283,7 @@ export async function DELETE(
     const [orgId, serviceType] = id.split('_');
     
     // Validate parameters
-    if (orgId !== urlOrgId || !serviceType) {
+    if (orgId !== headerOrgId || !serviceType) {
       return NextResponse.json(
         { error: "Invalid service ID format or organization mismatch" },
         { status: 400 }
