@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server'
 
 const PUBLIC = new Set([
   '/', '/setup-organization',
-  '/login',                 // optional legacy
+  '/login',        
 ])
 
 // Treat only these API namespaces as public:
