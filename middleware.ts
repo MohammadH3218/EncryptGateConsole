@@ -7,7 +7,6 @@ const PUBLIC = new Set([
   '/login',        
 ])
 
-// Treat only these API namespaces as public:
 const PUBLIC_API_PREFIXES = [
   '/api/auth/',             // login/callback/logout/mfa/etc.
   '/api/setup/',            // org creation & validation
