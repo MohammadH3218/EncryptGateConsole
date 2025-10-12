@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import { useMemo } from "react"
 import { usePathname } from "next/navigation"
@@ -39,6 +39,12 @@ export function CommandCenter() {
           <p className="text-xs text-gray-400">Contextual shortcuts will appear here.</p>
         </CardContent>
       </Card>
-    </div>
+
+      {pathname && pathname.includes("/admin/investigate") && (
+        <>
+          <IocsPanel />
+          <CaseTimeline />
+        </>
+      )}    </div>
   )
 }
