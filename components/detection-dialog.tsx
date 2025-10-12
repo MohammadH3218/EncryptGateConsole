@@ -98,10 +98,23 @@ export function DetectionDialog({ detection, open, onOpenChange, onAssign }: Det
   }
 
   const handleInvestigateClick = () => {
-    const isAdmin = window.location.pathname.includes("/admin")
-    const baseRoute = isAdmin ? "/admin" : "/employee"
-    router.push(`${baseRoute}/investigate/${detection.id}`)
-    onOpenChange(false)
+  // Always navigate within the org-scoped admin area to keep layout/theme
+  const orgId = (params.orgId as string) || ""
+
+  // Prefer an email/message identifier if present; fall back gracefully
+  const rawId = (detection as any).emailMessageId
+    || (detection as any).uniqueId
+    || String(detection.id)
+
+  // Encode the id for safe routing (handles <, >, @, spaces, etc.)
+  const encodedId = encodeURIComponent(rawId)
+
+    const target = orgId
+    ? '/o/' + orgId + '/admin/investigate/' + encodedId
+    : '/admin/investigate/' + encodedId // best-effort fallback
+
+  router.push(target)
+  onOpenChange(false)
   }
 
   const toggleAssignee = (assignee: string) => {

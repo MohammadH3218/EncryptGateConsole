@@ -22,7 +22,7 @@ export async function POST(
     const messageId = decodeURIComponent(params.id)
     console.log('🔄 Assigning investigation for messageId:', messageId)
 
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const idToken = cookieStore.get('id_token')?.value
 
     if (!idToken) {

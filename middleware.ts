@@ -9,7 +9,7 @@ const PUBLIC = new Set([
 
 const PUBLIC_API_PREFIXES = [
   '/api/auth/',             // login/callback/logout/mfa/etc.
-  '/api/setup/',            // org creation & validation
+  '/api/setup/',            
   '/_next/', '/favicon.ico',
 ]
 

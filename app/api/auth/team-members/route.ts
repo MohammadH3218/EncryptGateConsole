@@ -27,7 +27,7 @@ function getAuthContext(request: NextRequest) {
       token = authHeader.replace('Bearer ', '').trim();
     } else {
       // Fallback to cookies
-      const cookieStore = cookies();
+      const cookieStore = await cookies();
       token = cookieStore.get('access_token')?.value || cookieStore.get('id_token')?.value;
     }
 
