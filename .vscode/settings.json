@@ -1,3 +1,1 @@
-{
-    "claudeCodeChat.permissions.yoloMode": true
-}
+﻿{"claudeCodeChat.permissions.yoloMode": true, "git.enableSmartCommit": true, "git.smartCommitChanges": "all", "git.suggestSmartCommit": false, "git.postCommitCommand": "none"}

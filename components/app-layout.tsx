@@ -21,6 +21,7 @@ import {
   LogOut,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { CommandCenter } from "@/components/command-center/command-center"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useSession, useSessionState } from "@/providers/SessionProvider"
@@ -63,7 +64,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
 
   // Only render AppLayout if session is ready
   if (sessionState.status !== "ready") {
-    console.log(`🔄 AppLayout: Session not ready, status=${sessionState.status}, blocking render`)
+    console.log(`?? AppLayout: Session not ready, status=${sessionState.status}, blocking render`)
     // The SessionProvider will handle loading/error states
     return null
   }
@@ -82,7 +83,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   // Since we're guaranteed to have session data (status === "ready"), use it directly
   useEffect(() => {
     if (session?.user) {
-      console.log('👤 AppLayout: Setting userInfo from session data:', { 
+      console.log('?? AppLayout: Setting userInfo from session data:', { 
         sessionUserName: session.user.name, 
         sessionUserEmail: session.user.email,
         finalName: session.user.name || session.user.email || ''
@@ -169,7 +170,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   // Debug: Log session data to help diagnose the role issue
   useEffect(() => {
     if (session?.user) {
-      console.log('🔍 Session data for profile display:', {
+      console.log('?? Session data for profile display:', {
         name: session.user.name,
         email: session.user.email,
         rawRoles: session.user.rawRoles,
@@ -227,7 +228,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
   const fetchTeamMembers = async () => {
     try {
       const data = await apiGet('/api/auth/team-members')
-      console.log('📋 Team members data received:', data)
+      console.log('?? Team members data received:', data)
       setTeamMembers(data.team_members || data.teamMembers || [])
     } catch (error) {
       console.error("Failed to fetch team members:", error)
@@ -556,7 +557,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
           </Button>
 
           <div className="p-6">
-            <h2 className="text-white font-semibold text-lg mb-6">Activity Center</h2>
+            <h2 className="text-white font-semibold text-lg mb-6">Command Center</h2>
 
             {/* Notifications Section */}
             <div className="mb-8">
@@ -595,59 +596,10 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
               </div>
             </div>
 
-            {/* Team Members Section */}
-            <div>
-              <div className="px-3 py-2 mb-4">
-                <div className="h-px bg-[#1f1f1f] mb-2"></div>
-                <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Team Members</span>
-              </div>
-
-              <div className="space-y-3 max-h-64 overflow-y-auto custom-scrollbar">
-                {teamMembers.length === 0 ? (
-                  <div className="text-center text-gray-400 text-sm py-4">
-                    <div className="animate-pulse">Loading team members...</div>
-                  </div>
-                ) : (
-                  teamMembers.map((member, index) => (
-                    <div
-                      key={member.id || index}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-[#1f1f1f] transition-colors cursor-pointer"
-                      title={`${member.name || member.email} - ${member.email}`}
-                    >
-                      <div className="relative">
-                        <Avatar className="w-8 h-8">
-                          <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">
-                            {member.avatar || (member.name || member.email)?.substring(0, 2).toUpperCase() || 'U'}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div
-                          className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-[#0f0f0f] ${getStatusColor(member.status)}`}
-                          title={`${member.status.charAt(0).toUpperCase() + member.status.slice(1)}`}
-                        ></div>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium truncate">
-                          {member.name || member.email}
-                        </p>
-                        <p className="text-gray-400 text-xs truncate">
-                          {getStatusText(member)}
-                        </p>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-              
-              {/* Team Members Count */}
-              <div className="mt-4 px-3 py-2 text-center">
-                <span className="text-gray-500 text-xs">
-                  {teamMembers.filter(m => m.status === 'online').length} online • {teamMembers.length} total
-                </span>
-              </div>
+            <CommandCenter />
             </div>
           </div>
-        </div>
       )}
-    </div>
+      </div>
   )
 }

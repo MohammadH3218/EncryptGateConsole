@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server'
+﻿import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { userProfileService } from '@/lib/user-profile-service'
 
 export async function GET() {
   try {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const token = cookieStore.get('access_token')?.value
 
     if (!token) {
@@ -27,7 +27,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const token = cookieStore.get('access_token')?.value
 
     if (!token) {
@@ -47,5 +47,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(pushedRequest)
   } catch (error) {
     return NextResponse.json({ error: 'Failed to push to admin' }, { status: 500 })
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const cookieStore = await cookies()
+    const token = cookieStore.get('access_token')?.value
+
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const profile = await userProfileService.getUserProfile(token)
+    
+    // Only reviewers/admins can accept/deny
+    if (!userProfileService.hasPermission(profile.id, 'review_pushed_requests')) {
+      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
+    }
+
+    const { id, action, notes } = await request.json()
+    if (!id || !['accept', 'deny', 'complete'].includes(action)) {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+    }
+
+    const updated = userProfileService.reviewPushedRequest(id, action, profile.id, notes)
+    if (!updated) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    return NextResponse.json(updated)
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to update pushed request' }, { status: 500 })
   }
 }

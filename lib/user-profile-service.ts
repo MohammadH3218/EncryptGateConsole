@@ -1,4 +1,4 @@
-import { jwtVerify } from 'jose'
+﻿import { jwtVerify } from 'jose'
 
 export interface UserProfile {
   id: string
@@ -358,6 +358,56 @@ class UserProfileService {
     )
   }
 }
+  // Update a pushed request status (accept -> in_review, deny -> rejected, complete -> completed)
+  reviewPushedRequest(id: string, action: 'accept' | 'deny' | 'complete', reviewedBy: string, notes?: string): PushedRequest | null {
+    const req = this.pushedRequests.get(id)
+    if (!req) return null
+
+    if (action === 'accept') {
+      req.status = 'in_review'
+    } else if (action === 'deny') {
+      req.status = 'rejected'
+    } else if (action === 'complete') {
+      req.status = 'completed'
+    }
+    req.reviewedBy = reviewedBy
+    req.reviewedAt = new Date().toISOString()
+    if (notes) req.adminNotes = notes
+
+    this.pushedRequests.set(req.id, req)
+    return req
+  }
+
+  getRecentPushedRequests(limit = 5, status: PushedRequest['status'] | 'any' = 'pending'): PushedRequest[] {
+    const all = this.getAllPushedRequests()
+    const filtered = status === 'any' ? all : all.filter(r => r.status === status)
+    return filtered.slice(0, limit)
+    // Update a pushed request status (accept -> in_review, deny -> rejected, complete -> completed)
+  reviewPushedRequest(id: string, action: 'accept' | 'deny' | 'complete', reviewedBy: string, notes?: string): PushedRequest | null {
+    const req = this.pushedRequests.get(id)
+    if (!req) return null
+
+    if (action === 'accept') {
+      req.status = 'in_review'
+    } else if (action === 'deny') {
+      req.status = 'rejected'
+    } else if (action === 'complete') {
+      req.status = 'completed'
+    }
+    req.reviewedBy = reviewedBy
+    req.reviewedAt = new Date().toISOString()
+    if (notes) req.adminNotes = notes
+
+    this.pushedRequests.set(req.id, req)
+    return req
+  }
+
+  getRecentPushedRequests(limit = 5, status: PushedRequest['status'] | 'any' = 'pending'): PushedRequest[] {
+    const all = this.getAllPushedRequests()
+    const filtered = status === 'any' ? all : all.filter(r => r.status === status)
+    return filtered.slice(0, limit)
+  }}
+
 
 // Export singleton instance
 export const userProfileService = new UserProfileService()

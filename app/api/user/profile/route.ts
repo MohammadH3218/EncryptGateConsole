@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
       token = authHeader.replace('Bearer ', '').trim()
       console.log('✅ Using token from Authorization header')
     } else {
-      const cookieStore = cookies()
+      const cookieStore = await cookies()
       token = cookieStore.get('access_token')?.value || cookieStore.get('id_token')?.value
       console.log('✅ Using token from cookies')
     }
@@ -171,7 +171,7 @@ export async function GET(request: NextRequest) {
     
     // Try orgId_hint cookie set by middleware
     if (!orgId) {
-      const cookieStore = cookies()
+      const cookieStore = await cookies()
       orgId = cookieStore.get('orgId_hint')?.value
     }
     
@@ -283,7 +283,7 @@ export async function PUT(request: NextRequest) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.replace('Bearer ', '').trim()
     } else {
-      const cookieStore = cookies()
+      const cookieStore = await cookies()
       token = cookieStore.get('access_token')?.value
     }
 

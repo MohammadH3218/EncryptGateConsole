@@ -15,7 +15,7 @@ function decodeJWT(token: string) {
 
 export async function GET() {
   try {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const idToken = cookieStore.get('id_token')?.value
 
     if (!idToken) {
@@ -52,7 +52,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = cookies()
+    const cookieStore = await cookies()
     const idToken = cookieStore.get('id_token')?.value
 
     if (!idToken) {

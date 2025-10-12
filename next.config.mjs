@@ -63,23 +63,21 @@ const nextConfig = {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   },
 
-  // 5) Your existing rewrites
+  // 5) Route API calls to remote backend by default
+  // Put the specific /api/auth route first so it stays local
   async rewrites() {
     return [
       {
-        source: '/api/:path*',
-        destination: 'https://backend.console-encryptgate.net/api/:path*',
-        has: [
-          {
-            type: 'header',
-            key: 'x-skip-rewrite',
-            value: '1',
-          },
-        ],
-      },
-      {
         source: '/api/auth/:path*',
         destination: '/api/auth/:path*',
+      },
+      {
+        source: '/api/user/:path*',
+        destination: '/api/user/:path*',
+      },
+      {
+        source: '/api/:path*',
+        destination: 'https://backend.console-encryptgate.net/api/:path*',
       },
     ];
   },

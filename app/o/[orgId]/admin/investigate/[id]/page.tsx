@@ -14,6 +14,7 @@ export default function InvestigatePage() {
   const params = useParams()
   const orgId = params.orgId as string
   const investigationId = params.id as string
+  const displayId = decodeURIComponent(investigationId)
   
   const [loading, setLoading] = useState(true)
   const [investigation, setInvestigation] = useState<any>(null)
@@ -110,7 +111,7 @@ export default function InvestigatePage() {
                   Investigation Details
                 </CardTitle>
                 <Badge variant="outline" className="text-gray-300">
-                  ID: {investigationId}
+                  ID: {displayId}
                 </Badge>
               </div>
             </CardHeader>
