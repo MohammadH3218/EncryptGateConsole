@@ -559,43 +559,7 @@ export function AppLayout({ children, username, notificationsCount = 0 }: AppLay
           <div className="p-6">
             <h2 className="text-white font-semibold text-lg mb-6">Command Center</h2>
 
-            {/* Notifications Section */}
-            <div className="mb-8">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-white font-medium">Notifications</h3>
-              </div>
-
-              <div className="space-y-3">
-                {notifications.map((notification) => (
-                  <div
-                    key={notification.id}
-                    className={`p-3 rounded-lg transition-colors hover:bg-[#1f1f1f] ${
-                      notification.unread
-                        ? "bg-[#0f0f0f] border border-[#1f1f1f]"
-                        : "bg-transparent border border-[#1f1f1f]"
-                    }`}
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="flex-shrink-0 mt-1">
-                        {notification.type === "detection" && <AlertCircle className="w-4 h-4 text-red-400" />}
-                        {notification.type === "assignment" && <UserCheck className="w-4 h-4 text-gray-400" />}
-                        {notification.type === "system" && <CheckCircle className="w-4 h-4 text-green-400" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium">{notification.title}</p>
-                        <p className="text-gray-400 text-xs mt-1">{notification.message}</p>
-                        <div className="flex items-center gap-1 mt-2">
-                          <Clock className="w-3 h-3 text-gray-500" />
-                          <span className="text-gray-500 text-xs">{notification.time}</span>
-                        </div>
-                      </div>
-                      {notification.unread && <div className="w-2 h-2 bg-white rounded-full flex-shrink-0 mt-2"></div>}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
+            <CommandCenter />
             <CommandCenter />
             </div>
           </div>

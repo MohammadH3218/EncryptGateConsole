@@ -1,36 +1,40 @@
-﻿"use client"
+"use client"
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Lightbulb, MessageSquareText } from "lucide-react"
-
-const prompts = [
-  { id: "summarize", label: "Summarize this page", tip: "Creates a short overview" },
-  { id: "explain-score", label: "Explain threat score", tip: "Why an item is high risk" },
-  { id: "next", label: "Recommend next steps", tip: "Action checklist" },
-]
 
 export function CopilotShortcuts() {
-  const run = (id: string) => {
-    // Placeholder: fire a custom event that your Copilot can listen for
-    const ev = new CustomEvent("copilot:prompt", { detail: { id } })
-    window.dispatchEvent(ev)
+  const shortcuts = [
+    { id: "summarize", label: "Summarize Email" },
+    { id: "analyze-threat", label: "Analyze Threat" },
+    { id: "suggest-action", label: "Suggest Action" },
+  ]
+
+  const handlePrompt = (id: string) => {
+    // Dispatch window event for copilot to handle
+    window.dispatchEvent(new CustomEvent("copilot:prompt", { detail: { id } }))
   }
 
   return (
-    <Card className="bg-[#0f0f0f] border-[#1f1f1f]">
-      <CardHeader>
-        <CardTitle className="text-white text-sm flex items-center gap-2">
-          <Lightbulb className="w-4 h-4" /> Copilot Shortcuts
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="grid grid-cols-1 gap-2">
-        {prompts.map(p => (
-          <Button key={p.id} className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => run(p.id)}>
-            <MessageSquareText className="w-4 h-4 mr-2" /> {p.label}
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 px-2">
+        <Sparkles className="w-4 h-4 text-purple-400" />
+        <h3 className="text-white font-medium text-sm">Copilot</h3>
+      </div>
+
+      <div className="space-y-1">
+        {shortcuts.map((shortcut) => (
+          <Button
+            key={shortcut.id}
+            variant="ghost"
+            size="sm"
+            onClick={() => handlePrompt(shortcut.id)}
+            className="h-7 w-full justify-start text-xs text-gray-300 hover:text-white hover:bg-[#1f1f1f]"
+          >
+            {shortcut.label}
           </Button>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

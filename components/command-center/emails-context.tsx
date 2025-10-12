@@ -1,43 +1,58 @@
-﻿"use client"
+"use client"
 
-import { useEffect, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useRouter } from "next/navigation"
 
-interface Saved { name: string; query: string }
+interface SavedSearch {
+  label: string
+  query: string
+}
 
 export function EmailsContext() {
-  const [saved, setSaved] = useState<Saved[]>([])
-  const [examples] = useState<Saved[]>([
-    { name: 'Suspicious Domains', query: 'threat:high OR flaggedCategory:ai' },
-    { name: 'From External', query: 'direction:inbound -domain:company.com' },
+  const router = useRouter()
+  const [searches, setSearches] = useState<SavedSearch[]>([
+    { label: "Flagged Emails", query: "flagged:true" },
+    { label: "High Priority", query: "priority:high" },
+    { label: "Unread", query: "status:unread" },
   ])
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem('saved_email_searches')
-      if (raw) setSaved(JSON.parse(raw))
-    } catch {}
+    const stored = localStorage.getItem("saved_email_searches")
+    if (stored) {
+      try {
+        setSearches(JSON.parse(stored))
+      } catch (error) {
+        console.log("[v0] Failed to parse saved searches:", error)
+      }
+    }
   }, [])
 
-  const use = (q: string) => {
-    const url = new URL(window.location.href)
-    url.searchParams.set('search', q)
-    window.location.href = url.toString()
+  const handleSearch = (query: string) => {
+    router.push(`/emails?search=${encodeURIComponent(query)}`)
   }
 
   return (
-    <Card className="bg-[#0f0f0f] border-[#1f1f1f]">
-      <CardHeader>
-        <CardTitle className="text-white text-sm">Email Shortcuts</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {(saved.length === 0 ? examples : saved).map((s, i) => (
-          <Button key={i} className="w-full justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => use(s.query)}>
-            {s.name}
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 px-2">
+        <Search className="w-4 h-4 text-green-400" />
+        <h3 className="text-white font-medium text-sm">Saved Searches</h3>
+      </div>
+
+      <div className="space-y-1">
+        {searches.map((search, index) => (
+          <Button
+            key={index}
+            size="sm"
+            variant="ghost"
+            onClick={() => handleSearch(search.query)}
+            className="h-7 w-full justify-start text-xs text-gray-300 hover:text-white hover:bg-[#1f1f1f]"
+          >
+            {search.label}
           </Button>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

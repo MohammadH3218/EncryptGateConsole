@@ -1,40 +1,37 @@
-﻿"use client"
+"use client"
 
-import { usePathname, useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import Link from "next/link"
+import { Shield, Mail, AlertTriangle, UserCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Shield, Mail, AlertTriangle, ArrowUpRight } from "lucide-react"
 
 export function QuickActions() {
-  const router = useRouter()
-  const pathname = usePathname()
-
-  const getOrg = () => {
-    const parts = pathname?.split("/") || []
-    return parts[1] === "o" ? parts[2] : ""
-  }
-
-  const go = (path: string) => router.push(`/o/${getOrg()}${path}`)
+  const actions = [
+    { icon: AlertTriangle, label: "Detections", href: "/detections" },
+    { icon: Mail, label: "Emails", href: "/emails" },
+    { icon: Shield, label: "Pushed", href: "/pushed-requests" },
+    { icon: UserCheck, label: "Assignments", href: "/assignments" },
+  ]
 
   return (
-    <Card className="bg-[#0f0f0f] border-[#1f1f1f]">
-      <CardHeader>
-        <CardTitle className="text-white text-sm">Quick Actions</CardTitle>
-      </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-1.5">
-        <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/detections')}>
-          <AlertTriangle className="w-4 h-4 mr-2" /> Detections
-        </Button>
-        <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/all-emails')}>
-          <Mail className="w-4 h-4 mr-2" /> Emails
-        </Button>
-        <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/pushed-requests')}>
-          <ArrowUpRight className="w-4 h-4 mr-2" /> Pushed
-        </Button>
-        <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/assignments')}>
-          <Shield className="w-4 h-4 mr-2" /> Assignments
-        </Button>
-      </CardContent>
-    </Card>
+    <div className="space-y-2">
+      <div className="px-2">
+        <h3 className="text-white font-medium text-sm">Quick Actions</h3>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {actions.map((action, index) => (
+          <Link key={index} href={action.href}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 w-full text-xs bg-[#1f1f1f] border-[#2a2a2a] hover:bg-[#2a2a2a] text-white"
+            >
+              <action.icon className="w-3 h-3 mr-1" />
+              {action.label}
+            </Button>
+          </Link>
+        ))}
+      </div>
+    </div>
   )
 }
