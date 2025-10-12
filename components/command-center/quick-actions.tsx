@@ -21,15 +21,15 @@ export function QuickActions() {
       <CardHeader>
         <CardTitle className="text-white text-sm">Quick Actions</CardTitle>
       </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-2">
+      <CardContent className="grid grid-cols-2 gap-1.5">
         <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/detections')}>
           <AlertTriangle className="w-4 h-4 mr-2" /> Detections
         </Button>
         <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/all-emails')}>
-          <Mail className="w-4 h-4 mr-2" /> All Emails
+          <Mail className="w-4 h-4 mr-2" /> Emails
         </Button>
         <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/pushed-requests')}>
-          <ArrowUpRight className="w-4 h-4 mr-2" /> Pushed Requests
+          <ArrowUpRight className="w-4 h-4 mr-2" /> Pushed
         </Button>
         <Button className="justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a]" onClick={() => go('/admin/assignments')}>
           <Shield className="w-4 h-4 mr-2" /> Assignments
