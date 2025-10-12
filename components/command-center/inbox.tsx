@@ -26,10 +26,10 @@ export function ActionInbox() {
   const severityBadge = (sev: string) => {
     const base = "px-2 py-0.5 text-xs"
     switch (sev) {
-      case "Critical": return <Badge variant="destructive" className="bg-red-600 text-white">Critical</Badge>
-      case "High": return <Badge variant="destructive" className="bg-orange-600 text-white">High</Badge>
-      case "Medium": return <Badge variant="outline" className="border-yellow-500 text-yellow-500">Medium</Badge>
-      default: return <Badge variant="outline">Low</Badge>
+      case "Critical": return <Badge variant="destructive" className="bg-red-600 text-white px-1.5 py-0 text-[10px]">Crit</Badge>
+      case "High": return <Badge variant="destructive" className="bg-orange-600 text-white px-1.5 py-0 text-[10px]">High</Badge>
+      case "Medium": return <Badge variant="outline" className="border-yellow-500 text-yellow-500 px-1.5 py-0 text-[10px]">Med</Badge>
+      default: return <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Low</Badge>
     }
   }
 
@@ -88,23 +88,23 @@ export function ActionInbox() {
           transition={{ duration: 0.35 }}
         >
           <Card className="bg-[#0f0f0f] border-[#1f1f1f]">
-            <CardContent className="p-3">
+            <CardContent className="p-2">
               <div className="flex items-start gap-3">
                 <div className="mt-0.5">
-                  <AlertTriangle className="w-4 h-4 text-red-400" />
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm text-white font-medium truncate">Escalation: {current.emailSubject}</p>
+                    <p className="text-xs text-white font-medium truncate">Escalation: {current.emailSubject}</p>
                     {severityBadge(current.severity)}
                   </div>
-                  <p className="text-xs text-gray-400 truncate">From {current.sender} • Reason: {current.reason}</p>
+                  <p className="text-xs text-gray-400 truncate">From {current.sender} � Reason: {current.reason}</p>
                   <div className="mt-2 flex gap-2">
-                    <Button size="sm" className="h-7 bg-[#1f1f1f] border-[#2a2a2a] text-white hover:bg-[#2a2a2a]" onClick={() => handleAction(current.id, "accept")}>
-                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Accept
+                    <Button size="sm" className="h-7 text-xs px-2 bg-[#1f1f1f] border-[#2a2a2a] text-white hover:bg-[#2a2a2a]" onClick={() => handleAction(current.id, "accept")}>
+                      <CheckCircle2 className="w-3 h-3 mr-1" /> Accept
                     </Button>
                     <Button size="sm" variant="outline" className="h-7 bg-[#1a1a1a] border-[#2a2a2a] text-white hover:bg-[#2a2a2a]" onClick={() => handleAction(current.id, "deny")}>
-                      <XCircle className="w-3.5 h-3.5 mr-1" /> Deny
+                      <XCircle className="w-3 h-3 mr-1" /> Deny
                     </Button>
                   </div>
                 </div>

@@ -35,9 +35,9 @@ export function CommandCenter() {
   const showDashboard = !!pathname?.includes("/admin/dashboard")
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       {/* Always-on */}
-      <div className="space-y-4">
+      <div className="space-y-3">
         <ActionInbox />
         <QuickActions />
         <CopilotShortcuts />

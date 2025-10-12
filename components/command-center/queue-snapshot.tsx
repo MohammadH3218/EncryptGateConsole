@@ -46,26 +46,25 @@ export function QueueSnapshot() {
       <CardHeader>
         <CardTitle className="text-white text-sm">Queue Snapshot</CardTitle>
       </CardHeader>
-      <CardContent>
-        {!snap ? (
-          <div className="text-xs text-gray-500">Loading…</div>
+      <CardContent className="p-3">`n        {!snap ? (
+          <div className="text-xs text-gray-500">Loading�</div>
         ) : (
-          <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="grid grid-cols-2 gap-2 text-xs">
             <div className="p-2 rounded bg-[#1a1a1a]">
               <div className="text-gray-400 text-xs">Detections</div>
               <div className="text-white font-medium">{snap.detections.total}</div>
               <div className="mt-1 flex gap-1 text-xs">
-                <Badge variant="destructive" className="bg-red-600">New {snap.detections.new}</Badge>
-                <Badge variant="secondary" className="bg-yellow-600">In Progress {snap.detections.inProgress}</Badge>
-                <Badge variant="outline" className="border-green-500 text-green-500">Resolved {snap.detections.resolved}</Badge>
+                <Badge variant="destructive" className="bg-red-600 px-1.5 py-0 text-[10px] leading-4 whitespace-nowrap">New {snap.detections.new}</Badge>
+                <Badge variant="secondary" className="bg-yellow-600 px-1.5 py-0 text-[10px] leading-4 whitespace-nowrap">In Prog {snap.detections.inProgress}</Badge>
+                <Badge variant="outline" className="border-green-500 text-green-500 px-1.5 py-0 text-[10px] leading-4 whitespace-nowrap">Res {snap.detections.resolved}</Badge>
               </div>
             </div>
             <div className="p-2 rounded bg-[#1a1a1a]">
               <div className="text-gray-400 text-xs">Emails</div>
-              <div className="text-white font-medium">—</div>
+              <div className="text-white font-medium">�</div>
               <div className="mt-1 flex gap-1 text-xs">
-                <Badge variant="destructive" className="bg-purple-600">Flagged {snap.emails.flagged}</Badge>
-                <Badge variant="outline" className="border-gray-500 text-gray-400">Clean {snap.emails.clean}</Badge>
+                <Badge variant="destructive" className="bg-purple-600 px-1.5 py-0 text-[10px] leading-4 whitespace-nowrap">Flg {snap.emails.flagged}</Badge>
+                <Badge variant="outline" className="border-gray-500 text-gray-400 px-1.5 py-0 text-[10px] leading-4 whitespace-nowrap">Clean {snap.emails.clean}</Badge>
               </div>
             </div>
           </div>
