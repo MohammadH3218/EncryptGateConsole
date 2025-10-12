@@ -1,104 +1,82 @@
-﻿"use client"
+"use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { usePathname } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { useState, useEffect } from "react"
+import { LinkIcon, Copy, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Copy } from "lucide-react"
+import { useParams } from "next/navigation"
 
-interface EmailResp {
-  id: string
-  messageId: string
-  body?: string
-  bodyHtml?: string
-  headers?: Record<string,string>
+interface IOC {
+  type: "url" | "domain" | "ip"
+  value: string
 }
 
-const urlRegex = /https?:\/\/[^\s"'<>]+/gi
-const domainRegex = /([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}/gi
-
 export function IocsPanel() {
-  const pathname = usePathname()
-  const [email, setEmail] = useState<EmailResp | null>(null)
-
-  // extract org and id from org-scoped investigate path
-  const { orgId, invId } = useMemo(() => {
-    const parts = (pathname || '').split('/')
-    return { orgId: parts[2] || '', invId: parts[parts.length-1] || '' }
-  }, [pathname])
+  const params = useParams()
+  const [iocs, setIocs] = useState<IOC[]>([])
 
   useEffect(() => {
-    let active = true
-    const load = async () => {
+    const fetchIOCs = async () => {
       try {
-        const id = decodeURIComponent(invId)
-        const res = await fetch(`/api/email/${encodeURIComponent(id)}`, { cache: 'no-store' })
-        if (!active) return
-        if (res.ok) {
-          const data = await res.json()
-          setEmail(data)
-        } else {
-          setEmail(null)
+        const response = await fetch(`/api/email/${params.id}`)
+        if (response.ok) {
+          const data = await response.json()
+          // Extract URLs/domains from email body
+          const urlRegex = /(https?:\/\/[^\s]+)/g
+          const urls = data.body?.match(urlRegex) || []
+          setIocs(urls.map((url: string) => ({ type: "url" as const, value: url })))
         }
-      } catch {
-        setEmail(null)
+      } catch (error) {
+        console.log("[v0] Failed to fetch IOCs:", error)
       }
     }
-    if (invId) load()
-    return () => { active = false }
-  }, [invId])
 
-  const text = (email?.bodyHtml || email?.body || '')
-  const urls = useMemo(() => (text.match(urlRegex) || []).slice(0, 10), [text])
-  const domains = useMemo(() => (text.match(domainRegex) || []).slice(0, 10), [text])
+    if (params.id) {
+      fetchIOCs()
+    }
+  }, [params.id])
 
-  const copy = (val: string) => navigator.clipboard.writeText(val).catch(()=>{})
+  const copyToClipboard = (value: string) => {
+    navigator.clipboard.writeText(value)
+  }
 
-  if (!invId) return null
+  if (iocs.length === 0) return null
 
   return (
-    <Card className="bg-[#0f0f0f] border-[#1f1f1f]">
-      <CardHeader>
-        <CardTitle className="text-white text-sm">Indicators of Compromise</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {urls.length === 0 && domains.length === 0 ? (
-          <p className="text-xs text-gray-500">No IOCs found yet.</p>
-        ) : (
-          <>
-            {urls.length > 0 && (
-              <div>
-                <div className="text-xs text-gray-400 mb-1">URLs</div>
-                <div className="flex flex-wrap gap-2">
-                  {urls.map((u, i) => (
-                    <div key={i} className="flex items-center gap-1">
-                      <a href={u} target="_blank" rel="noreferrer" className="text-xs text-blue-300 hover:text-blue-200 truncate max-w-[12rem]">
-                        {u}
-                      </a>
-                      <Button variant="outline" size="icon" className="h-6 w-6 bg-[#1a1a1a] border-[#2a2a2a]" onClick={() => copy(u)}>
-                        <Copy className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {domains.length > 0 && (
-              <div>
-                <div className="text-xs text-gray-400 mb-1 mt-1">Domains</div>
-                <div className="flex flex-wrap gap-2">
-                  {domains.map((d, i) => (
-                    <Badge key={i} variant="outline" className="border-gray-500 text-gray-300">
-                      <a className="hover:underline" href={`https://www.virustotal.com/gui/domain/${d}`} target="_blank" rel="noreferrer">{d}</a>
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </CardContent>
-    </Card>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 px-2">
+        <LinkIcon className="w-4 h-4 text-red-400" />
+        <h3 className="text-white font-medium text-sm">IOCs</h3>
+      </div>
+
+      <div className="space-y-2">
+        {iocs.map((ioc, index) => (
+          <div key={index} className="p-2 rounded-lg bg-[#1f1f1f] space-y-1">
+            <p className="text-gray-400 text-xs uppercase">{ioc.type}</p>
+            <p className="text-white text-xs break-all">{ioc.value}</p>
+            <div className="flex gap-1">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => copyToClipboard(ioc.value)}
+                className="h-6 text-xs text-gray-400 hover:text-white"
+              >
+                <Copy className="w-3 h-3 mr-1" />
+                Copy
+              </Button>
+              <a
+                href={`https://www.virustotal.com/gui/search/${encodeURIComponent(ioc.value)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Button size="sm" variant="ghost" className="h-6 text-xs text-gray-400 hover:text-white">
+                  <ExternalLink className="w-3 h-3 mr-1" />
+                  VT
+                </Button>
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }

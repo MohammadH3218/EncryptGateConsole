@@ -1,60 +1,60 @@
-﻿"use client"
+"use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { usePathname } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { useState, useEffect } from "react"
+import { Clock } from "lucide-react"
+import { useParams } from "next/navigation"
 
-interface EventItem { label: string; at: string }
+interface TimelineEvent {
+  label: string
+  timestamp: string
+}
 
-export function CaseTimeline() {
-  const pathname = usePathname()
-  const [events, setEvents] = useState<EventItem[]>([])
-
-  const invId = useMemo(() => (pathname || '').split('/').pop() || '', [pathname])
+export function Timeline() {
+  const params = useParams()
+  const [events, setEvents] = useState<TimelineEvent[]>([])
 
   useEffect(() => {
-    let active = true
-    const load = async () => {
+    const fetchTimeline = async () => {
       try {
-        const id = decodeURIComponent(invId)
-        const res = await fetch(`/api/investigations/${encodeURIComponent(id)}`, { cache: 'no-store' })
-        if (!active) return
-        if (res.ok) {
-          const data = await res.json()
-          const base: EventItem[] = []
-          if (data?.startedAt) base.push({ label: 'Created', at: data.startedAt })
-          if (data?.lastUpdated) base.push({ label: 'Last Updated', at: data.lastUpdated })
-          if (data?.escalatedToAdmin) base.push({ label: 'Escalated to Admin', at: data?.lastUpdated || new Date().toISOString() })
-          setEvents(base.length ? base : [{ label: 'Opened', at: new Date().toISOString() }])
-        } else {
-          setEvents([{ label: 'Opened', at: new Date().toISOString() }])
+        const response = await fetch(`/api/investigations/${params.id}`)
+        if (response.ok) {
+          const data = await response.json()
+          setEvents([
+            { label: "Created", timestamp: data.created || "N/A" },
+            { label: "Last Updated", timestamp: data.lastUpdated || "N/A" },
+            ...(data.escalated ? [{ label: "Escalated", timestamp: data.escalated }] : []),
+          ])
         }
-      } catch {
-        setEvents([{ label: 'Opened', at: new Date().toISOString() }])
+      } catch (error) {
+        console.log("[v0] Failed to fetch timeline:", error)
+        // Graceful fallback
+        setEvents([
+          { label: "Created", timestamp: "N/A" },
+          { label: "Last Updated", timestamp: "N/A" },
+        ])
       }
     }
-    if (invId) load()
-    return () => { active = false }
-  }, [invId])
 
-  if (!invId) return null
+    if (params.id) {
+      fetchTimeline()
+    }
+  }, [params.id])
 
   return (
-    <Card className="bg-[#0f0f0f] border-[#1f1f1f]">
-      <CardHeader>
-        <CardTitle className="text-white text-sm">Case Timeline</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2 text-xs text-gray-300">
-        {events.map((e, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-white/70" />
-            <div className="flex-1">
-              <div className="text-white/90">{e.label}</div>
-              <div className="text-gray-500">{new Date(e.at).toLocaleString()}</div>
-            </div>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 px-2">
+        <Clock className="w-4 h-4 text-blue-400" />
+        <h3 className="text-white font-medium text-sm">Timeline</h3>
+      </div>
+
+      <div className="space-y-2">
+        {events.map((event, index) => (
+          <div key={index} className="p-2 rounded-lg bg-[#1f1f1f]">
+            <p className="text-gray-400 text-xs">{event.label}</p>
+            <p className="text-white text-xs mt-0.5">{event.timestamp}</p>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

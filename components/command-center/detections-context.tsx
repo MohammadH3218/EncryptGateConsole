@@ -1,59 +1,83 @@
-﻿"use client"
+"use client"
 
-import { useEffect, useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { useState, useEffect } from "react"
+import { Filter } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Clock } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 
-interface Detection { id: string; status: string; severity: string; createdAt?: string }
+interface DetectionStats {
+  critical: number
+  high: number
+  medium: number
+  low: number
+}
 
 export function DetectionsContext() {
-  const [stats, setStats] = useState<{ newC:number; inP:number; res:number }>({ newC:0, inP:0, res:0 })
+  const [stats, setStats] = useState<DetectionStats>({ critical: 0, high: 0, medium: 0, low: 0 })
 
   useEffect(() => {
-    let m = true
-    const load = async () => {
+    const fetchStats = async () => {
       try {
-        const r = await fetch('/api/detections', { cache: 'no-store' })
-        if (!m) return
-        if (r.ok) {
-          const data = await r.json()
-          const list: Detection[] = data.detections || data || []
+        const response = await fetch("/api/detections")
+        if (response.ok) {
+          const data = await response.json()
           setStats({
-            newC: list.filter(d=>d.status==='new').length,
-            inP: list.filter(d=>d.status==='in_progress').length,
-            res: list.filter(d=>d.status==='resolved').length,
+            critical: data.critical || 0,
+            high: data.high || 0,
+            medium: data.medium || 0,
+            low: data.low || 0,
           })
         }
-      } catch {}
+      } catch (error) {
+        console.log("[v0] Failed to fetch detection stats:", error)
+      }
     }
-    load()
-    const i = setInterval(load, 30000)
-    return ()=>{ m=false; clearInterval(i) }
+
+    fetchStats()
+    const interval = setInterval(fetchStats, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   return (
-    <Card className="bg-[#0f0f0f] border-[#1f1f1f]">
-      <CardHeader>
-        <CardTitle className="text-white text-sm">Detections Tools</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-xs">
-        <div className="flex gap-2">
-          <Badge variant="destructive" className="bg-red-600">New {stats.newC}</Badge>
-          <Badge variant="secondary" className="bg-yellow-600">In Progress {stats.inP}</Badge>
-          <Badge variant="outline" className="border-green-500 text-green-500">Resolved {stats.res}</Badge>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 px-2">
+        <Filter className="w-4 h-4 text-orange-400" />
+        <h3 className="text-white font-medium text-sm">Detection Tools</h3>
+      </div>
+
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <Badge variant="destructive" className="justify-center text-xs h-6">
+            Critical: {stats.critical}
+          </Badge>
+          <Badge variant="destructive" className="justify-center text-xs h-6 bg-orange-600">
+            High: {stats.high}
+          </Badge>
+          <Badge variant="secondary" className="justify-center text-xs h-6 bg-yellow-600">
+            Medium: {stats.medium}
+          </Badge>
+          <Badge variant="secondary" className="justify-center text-xs h-6 bg-blue-600">
+            Low: {stats.low}
+          </Badge>
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" className="h-7 bg-[#1f1f1f] hover:bg-[#2a2a2a]">Critical</Button>
-          <Button size="sm" className="h-7 bg-[#1f1f1f] hover:bg-[#2a2a2a]">High</Button>
-          <Button size="sm" variant="outline" className="h-7 bg-[#1a1a1a] border-[#2a2a2a]">Reset</Button>
+
+        <div className="space-y-1">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-full justify-start text-xs text-gray-300 hover:text-white hover:bg-[#1f1f1f]"
+          >
+            Show Critical Only
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-full justify-start text-xs text-gray-300 hover:text-white hover:bg-[#1f1f1f]"
+          >
+            Show Unassigned
+          </Button>
         </div>
-        <div className="flex items-center gap-1 text-gray-500">
-          <Clock className="w-3 h-3" />
-          Auto-refreshes every 30s
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
