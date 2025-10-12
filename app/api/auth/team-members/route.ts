@@ -17,7 +17,7 @@ const USERS_TABLE = process.env.USERS_TABLE_NAME || 'SecurityTeamUsers';
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
 // Helper to extract auth context from request
-function getAuthContext(request: NextRequest) {
+async function getAuthContext(request: NextRequest) {
   try {
     // Try Authorization header first
     const authHeader = request.headers.get('Authorization');
@@ -141,7 +141,7 @@ export async function GET(request: NextRequest) {
     console.log('📋 Fetching team members from SecurityTeamUsers table...');
 
     // Get auth context
-    const authCtx = getAuthContext(request);
+    const authCtx = await getAuthContext(request);
     if (!authCtx.success) {
       return NextResponse.json(
         { ok: false, error: authCtx.error },
