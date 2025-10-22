@@ -2,568 +2,403 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
-import { useRouter, usePathname } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
+import { usePathname, useRouter } from "next/navigation"
 import {
   Bell,
-  User,
-  Shield,
-  Mail,
-  AlertTriangle,
-  Users,
+  Briefcase,
   FileText,
-  Lock,
-  UserCheck,
-  Menu,
-  Clock,
-  CheckCircle,
-  AlertCircle,
+  Inbox,
+  Layers,
   LogOut,
+  Mail,
+  Menu,
+  Settings,
+  Shield,
+  User,
+  Users,
 } from "lucide-react"
+
 import { Button } from "@/components/ui/button"
-import { CommandCenter } from "@/components/command-center/command-center"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { CommandMenu } from "@/components/command/command-menu"
+import { RightRail } from "@/components/rails/right-rail"
 import { useSession, useSessionState } from "@/providers/SessionProvider"
-import { can } from "@/lib/session"
 import { apiGet, apiPost } from "@/lib/api"
+import { cn } from "@/lib/utils"
 
 interface AppLayoutProps {
   children: React.ReactNode
-  username?: string
   notificationsCount?: number
 }
 
-// Helper function to decode JWT and get user info (prefer ID token for profile claims)
-const getUserInfoFromToken = () => {
-  try {
-    const decode = (t: string) => JSON.parse(atob(t.split(".")[1]));
-    const idTok = localStorage.getItem("id_token");
-    const accTok = localStorage.getItem("access_token");
-    const p = idTok ? decode(idTok) : accTok ? decode(accTok) : {};
-
-    const email = p.email || p["cognito:username"] || p.username || "";
-    const name = p.preferred_username || p.name || p.given_name || p.nickname || email || "";
-
-    return { email, name };
-  } catch {
-    return { email: "", name: "" };
-  }
+type NavItem = {
+  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
+  label: string
+  href: string
+  permissions: string[]
 }
 
-export function AppLayout({ children, username, notificationsCount = 0 }: AppLayoutProps) {
+export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) {
   const session = useSession()
   const sessionState = useSessionState()
-  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true)
-  const [rightSidebarOpen, setRightSidebarOpen] = useState(true)
-  const [userInfo, setUserInfo] = useState({ email: "", name: "" })
-  const [teamMembers, setTeamMembers] = useState([])
-  const [loading, setLoading] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
 
-  // Only render AppLayout if session is ready
-  if (sessionState.status !== "ready") {
-    console.log(`?? AppLayout: Session not ready, status=${sessionState.status}, blocking render`)
-    // The SessionProvider will handle loading/error states
-    return null
-  }
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
-  // Extract orgId from current pathname
+  // Keep heartbeat + team members fetch even if not yet surfaced in UI
+  const [, setTeamMembers] = useState<any[]>([])
+
   const getOrgId = () => {
-    const pathSegments = pathname.split('/')
-    if (pathSegments[1] === 'o' && pathSegments[2]) {
-      return pathSegments[2]
+    const segments = pathname.split("/").filter(Boolean)
+    if (segments[0] === "o" && segments[1]) {
+      return segments[1]
     }
     return null
   }
-  
+
   const orgId = getOrgId()
 
-  // Since we're guaranteed to have session data (status === "ready"), use it directly
   useEffect(() => {
-    if (session?.user) {
-      console.log('?? AppLayout: Setting userInfo from session data:', { 
-        sessionUserName: session.user.name, 
-        sessionUserEmail: session.user.email,
-        finalName: session.user.name || session.user.email || ''
-      })
-      setUserInfo({ 
-        email: session.user.email || '', 
-        name: session.user.name || session.user.email || ''
-      })
-    }
-  }, [session?.user?.name, session?.user?.email])
+    if (sessionState.status !== "ready") return
 
-  // Initialize data and set up intervals on mount
-  useEffect(() => {
-    // Initial data fetch
-    fetchTeamMembers()
-    sendHeartbeat()
-
-    // Set up intervals
-    const heartbeatInterval = setInterval(sendHeartbeat, 60000) // Every minute
-    const teamMembersInterval = setInterval(fetchTeamMembers, 30000) // Every 30 seconds
-
-    // Cleanup intervals on unmount
-    return () => {
-      clearInterval(heartbeatInterval)
-      clearInterval(teamMembersInterval)
-    }
-  }, [])
-
-  // Send heartbeat on user activity (mouse move, key press, click)
-  useEffect(() => {
-    const handleActivity = () => {
-      sendHeartbeat()
-    }
-
-    // Throttle activity updates to max once per minute
     let lastHeartbeat = 0
-    const throttledActivity = () => {
+    let cancelled = false
+
+    const handleActivity = () => {
       const now = Date.now()
-      if (now - lastHeartbeat > 60000) { // 60 seconds
+      if (now - lastHeartbeat > 60000) {
         lastHeartbeat = now
-        handleActivity()
+        sendHeartbeat()
       }
     }
 
-    document.addEventListener('mousemove', throttledActivity)
-    document.addEventListener('keypress', throttledActivity)
-    document.addEventListener('click', throttledActivity)
+    const fetchTeamMembers = async () => {
+      try {
+        const data = await apiGet("/api/auth/team-members")
+        if (!cancelled) {
+          setTeamMembers(data.team_members || data.teamMembers || [])
+        }
+      } catch (error) {
+        console.error("Failed to fetch team members", error)
+      }
+    }
+
+    const fetchInitial = async () => {
+      await Promise.all([fetchTeamMembers(), sendHeartbeat()])
+    }
+
+    fetchInitial()
+
+    const heartbeatInterval = setInterval(sendHeartbeat, 60000)
+    const teamInterval = setInterval(fetchTeamMembers, 30000)
+    const activityListener = () => handleActivity()
+
+    window.addEventListener("mousemove", activityListener)
+    window.addEventListener("keydown", activityListener)
+    window.addEventListener("click", activityListener)
 
     return () => {
-      document.removeEventListener('mousemove', throttledActivity)
-      document.removeEventListener('keypress', throttledActivity)
-      document.removeEventListener('click', throttledActivity)
+      cancelled = true
+      clearInterval(heartbeatInterval)
+      clearInterval(teamInterval)
+      window.removeEventListener("mousemove", activityListener)
+      window.removeEventListener("keydown", activityListener)
+      window.removeEventListener("click", activityListener)
     }
-  }, [])
+  }, [sessionState.status])
 
-  // Get organization-aware URLs
-  const getOrgPath = (path: string) => orgId ? `/o/${orgId}${path}` : path
-
-  const allMainNavItems = [
-    { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["dashboard.read"] },
-    { icon: Mail, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["dashboard.read"] },
-    { icon: AlertTriangle, label: "Detections", href: getOrgPath("/admin/detections"), permissions: ["detections.read"] },
-    { icon: FileText, label: "Allow/Block List", href: getOrgPath("/admin/allow-block-list"), permissions: ["blocked_emails.read"] },
-    { icon: UserCheck, label: "Assignments", href: getOrgPath("/admin/assignments"), permissions: ["assignments.read"] },
-    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["manage_employees.read"] },
-  ]
-
-  const allPushedRequestsItems = [
-    { icon: FileText, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests"), permissions: ["pushed_requests.read"] },
-  ]
-
-  const allCompanySettingsItems = [
-    { icon: Lock, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["company_settings.read"] },
-    { icon: User, label: "User Management", href: getOrgPath("/admin/company-settings/user-management"), permissions: ["company_settings.read"] },
-    { icon: Shield, label: "Roles & Permissions", href: getOrgPath("/admin/company-settings/roles"), permissions: ["company_settings.read"] },
-  ]
-
-  const allUserSettingsItems = [
-    { icon: User, label: "Profile", href: getOrgPath("/admin/user-settings/profile"), permissions: ["profile.read"] },
-    { icon: Bell, label: "Notifications", href: getOrgPath("/admin/user-settings/notifications"), permissions: ["notifications.read"] },
-    { icon: Lock, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: ["security.read"] },
-  ]
-
-  // Debug: Log session data to help diagnose the role issue
-  useEffect(() => {
-    if (session?.user) {
-      console.log('?? Session data for profile display:', {
-        name: session.user.name,
-        email: session.user.email,
-        rawRoles: session.user.rawRoles,
-        isOwner: session.user.isOwner,
-        isAdmin: session.user.isAdmin,
-        permissions: session.user.permissions
+  const sendHeartbeat = async () => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null
+      if (!token) return
+      await apiPost("/api/auth/activity/heartbeat", {
+        timestamp: new Date().toISOString(),
+        orgId,
       })
+    } catch (error) {
+      console.warn("Heartbeat failed", error)
     }
-  }, [session?.user])
-
-  // Check user roles for hierarchy-based permissions
-  const userRoles = session?.user?.rawRoles || []
-  const isOwner = userRoles.includes('Owner') || session?.user?.isOwner
-  const isSrAdmin = userRoles.includes('Sr. Admin')
-  const isAdmin = userRoles.includes('Admin') || session?.user?.isAdmin
-  const isAnalyst = userRoles.includes('Analyst')
-  const isViewer = userRoles.includes('Viewer')
-  
-  // Check if user has Super permissions (Owner/Sr. Admin)
-  const isSuper = !!(isOwner || isSrAdmin)
-  
-  // Helper function for permission checking based on role hierarchy
-  const hasPermission = (requiredPermissions: string[]) => {
-    // Super users bypass all permission checks
-    if (isSuper) return true
-    
-    // No permissions required means accessible to all
-    if (requiredPermissions.length === 0) return true
-    
-    // Check if user has any of the required permissions
-    return requiredPermissions.some(permission => {
-      // Handle special permissions based on role hierarchy
-      if (permission === "pushed_requests.read") {
-        return isAdmin || isOwner || isSrAdmin
-      }
-      if (permission === "company_settings.read") {
-        return isSrAdmin || isOwner
-      }
-      // Check against actual user permissions
-      return can(session?.user?.permissions, permission)
-    })
   }
-  
-  // Filter navigation items based on user permissions and role hierarchy
-  const mainNavItems = allMainNavItems.filter(item => hasPermission(item.permissions))
-  const pushedRequestsItems = allPushedRequestsItems.filter(item => hasPermission(item.permissions))
-  const companySettingsItems = allCompanySettingsItems.filter(item => hasPermission(item.permissions))
-  const userSettingsItems = allUserSettingsItems.filter(item => hasPermission(item.permissions))
+
+  if (sessionState.status !== "ready" || !session) {
+    return null
+  }
+
+  const getOrgPath = (path: string) => (orgId ? `/o/${orgId}${path}` : path)
+
+  const allMainNavItems: NavItem[] = [
+    { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["dashboard.read"] },
+    { icon: Mail, label: "Detections", href: getOrgPath("/admin/detections"), permissions: ["detections.read"] },
+    { icon: Inbox, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["view_all_emails"] },
+    { icon: Users, label: "Assignments", href: getOrgPath("/admin/assignments"), permissions: ["assignments.read"] },
+    { icon: Briefcase, label: "Investigations", href: getOrgPath("/admin/investigate"), permissions: ["investigations.read"] },
+    { icon: Layers, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests"), permissions: ["pushed_requests.read"] },
+  ]
+
+  const allCompanySettingsItems: NavItem[] = [
+    { icon: Settings, label: "Company Settings", href: getOrgPath("/admin/company-settings"), permissions: ["company_settings.read"] },
+    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["manage_employees.read"] },
+    { icon: Shield, label: "Allow & Block List", href: getOrgPath("/admin/allow-block-list"), permissions: ["blocked_emails.read"] },
+    { icon: FileText, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["cloud_settings.read"] },
+  ]
+
+  const allUserSettingsItems: NavItem[] = [
+    { icon: Bell, label: "Notifications", href: getOrgPath("/admin/user-settings/notifications"), permissions: ["notifications.read"] },
+    { icon: Settings, label: "Profile", href: getOrgPath("/admin/user-settings/profile"), permissions: ["profile.read"] },
+    { icon: Shield, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: ["security.read"] },
+  ]
+
+  const userRoles = session.user?.rawRoles || []
+  const isOwner = userRoles.includes("Owner") || session.user?.isOwner
+  const isSrAdmin = userRoles.includes("Sr. Admin")
+  const isAdmin = userRoles.includes("Admin") || session.user?.isAdmin
+
+  const hasPermission = (requiredPermissions: string[]) => {
+    if (requiredPermissions.length === 0) return true
+    const userPermissions = session.user?.permissions || []
+    if (userPermissions.includes("*")) return true
+    return requiredPermissions.every((permission) => userPermissions.includes(permission))
+  }
+
+  const mainNavItems = allMainNavItems.filter((item) => hasPermission(item.permissions))
+  const companySettingsItems = allCompanySettingsItems.filter((item) => {
+    if (item.label === "Manage Employees") {
+      return isAdmin || isSrAdmin || isOwner
+    }
+    if (item.label === "Allow & Block List") {
+      return isAdmin || isSrAdmin || isOwner
+    }
+    return hasPermission(item.permissions)
+  })
+  const userSettingsItems = allUserSettingsItems.filter((item) => hasPermission(item.permissions))
+
+  const sections = useMemo(
+    () =>
+      [
+        { title: "Workspace", items: mainNavItems },
+        { title: "Company", items: companySettingsItems },
+        { title: "My Settings", items: userSettingsItems },
+      ].filter((section) => section.items.length > 0),
+    [companySettingsItems, mainNavItems, userSettingsItems],
+  )
 
   const handleNavigation = (href: string) => {
+    setMobileNavOpen(false)
     router.push(href)
   }
 
-  // Fetch team members from API
-  const fetchTeamMembers = async () => {
-    try {
-      const data = await apiGet('/api/auth/team-members')
-      console.log('?? Team members data received:', data)
-      setTeamMembers(data.team_members || data.teamMembers || [])
-    } catch (error) {
-      console.error("Failed to fetch team members:", error)
-      // Don't throw error, just log it - team members is not critical
-    }
-  }
-
-  // Send activity heartbeat
-  const sendHeartbeat = async () => {
-    try {
-      const token = localStorage.getItem("access_token")
-      if (!token) return
-
-      await apiPost("/api/auth/activity/heartbeat", {})
-    } catch (error) {
-      console.error("Failed to send heartbeat:", error)
-      // Don't throw error, heartbeat is not critical
-    }
-  }
-
   const handleLogout = () => {
-    // Clear all tokens and storage
-    localStorage.clear()
-    sessionStorage.clear()
-    
-    // Clear any cookies by setting them to expire
-    document.cookie = "access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
-    document.cookie = "id_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
-    document.cookie = "refresh_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;"
-    
-    // Redirect to logout page with orgId
+    try {
+      localStorage.removeItem("access_token")
+      localStorage.removeItem("id_token")
+      localStorage.removeItem("refresh_token")
+      localStorage.removeItem("organization_name")
+      localStorage.removeItem("organization_id")
+    } catch (error) {
+      console.warn("Failed clearing local storage", error)
+    }
     const logoutUrl = orgId ? `/logout?orgId=${orgId}` : "/logout"
     router.push(logoutUrl)
   }
 
-  const notifications = [
-    {
-      id: 1,
-      type: "detection",
-      title: "New Detection",
-      message: "A new suspicious email has been detected.",
-      time: "2 minutes ago",
-      unread: true,
-    },
-    {
-      id: 2,
-      type: "assignment",
-      title: "Assignment Update",
-      message: "You have been assigned to investigate a detection.",
-      time: "1 hour ago",
-      unread: true,
-    },
-    {
-      id: 3,
-      type: "system",
-      title: "System Update",
-      message: "EncryptGate system has been updated successfully.",
-      time: "3 hours ago",
-      unread: false,
-    },
-  ]
-
-  // Status colors
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'online': return 'bg-green-500'
-      case 'away': return 'bg-yellow-500'
-      case 'offline': return 'bg-gray-500'
-      default: return 'bg-gray-500'
-    }
-  }
-
-  const getStatusText = (member) => {
-    if (member.status === 'online') {
-      return 'Online'
-    }
-    return member.last_seen || 'Offline'
-  }
+  const NavigationContent = ({ onNavigate }: { onNavigate: (href: string) => void }) => (
+    <div className="flex h-full flex-col">
+      <div className="px-4 pb-6 pt-5">
+        <div className="text-xs font-semibold uppercase tracking-widest text-white/40">
+          EncryptGate
+        </div>
+        <div className="mt-2 text-lg font-semibold text-white">
+          {session.org?.name || "Security Console"}
+        </div>
+      </div>
+      <div className="flex-1 space-y-6 overflow-y-auto px-2 pb-6">
+        {sections.map((section) => (
+          <div key={section.title} className="space-y-2">
+            <div className="px-2 text-xs font-semibold uppercase tracking-wide text-white/40">
+              {section.title}
+            </div>
+            <div className="space-y-1.5">
+              {section.items.map((item) => {
+                const active = pathname === item.href
+                const Icon = item.icon
+                return (
+                  <button
+                    key={item.href}
+                    onClick={() => onNavigate(item.href)}
+                    className={cn(
+                      "pressable flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+                      active
+                        ? "bg-white/10 text-white"
+                        : "text-white/70 hover:bg-white/5 hover:text-white focus-visible:outline-none focus-ring",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="px-4 pb-6">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="pressable flex w-full items-center gap-3 rounded-xl border border-app-border bg-app-panel px-3 py-3 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-ring">
+              <Avatar className="h-9 w-9">
+                <AvatarFallback className="bg-white/10 text-sm text-white">
+                  {(session.user?.name || session.user?.email || "EG")
+                    .split(" ")
+                    .map((part) => part[0])
+                    .join("")
+                    .toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-white">
+                  {session.user?.name || session.user?.email}
+                </p>
+                <p className="truncate text-xs text-white/60">
+                  {session.user?.isOwner
+                    ? "Owner"
+                    : session.user?.isAdmin
+                    ? "Admin"
+                    : session.user?.rawRoles?.[0] || "Member"}
+                </p>
+              </div>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="w-56 rounded-xl border border-app-border bg-app-panel p-1 text-white shadow-card"
+          >
+            <DropdownMenuItem
+              onClick={() => onNavigate(getOrgPath("/admin/user-settings/profile"))}
+              className="cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-white/5 focus:bg-white/5"
+            >
+              <User className="mr-2 h-4 w-4 text-blue-400" />
+              Profile settings
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={handleLogout}
+              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-red-900/20 focus:bg-red-900/20"
+            >
+              <LogOut className="mr-2 h-4 w-4 text-red-400" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  )
 
   return (
-    <div className="min-h-screen bg-[#171717] flex h-screen">
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: #1f1f1f;
-          border-radius: 2px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #2f2f2f;
-          border-radius: 2px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #3f3f3f;
-        }
-      `}</style>
-      {/* Left Sidebar */}
-      {leftSidebarOpen && (
-        <div className="w-64 bg-[#0f0f0f] relative overflow-y-auto custom-scrollbar">
-          {/* Close Button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setLeftSidebarOpen(false)}
-            className="absolute top-4 right-4 text-gray-400 hover:text-white hover:bg-[#1f1f1f] z-10"
-          >
-            <Menu className="w-4 h-4" />
-          </Button>
+    <div className="min-h-screen bg-app text-white">
+      <CommandMenu />
+      <div className="grid min-h-screen lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_340px]">
+        <aside className="hidden border-r border-app-border bg-app lg:flex">
+          <NavigationContent onNavigate={handleNavigation} />
+        </aside>
 
-          {/* Logo */}
-          <div className="p-6 border-b border-[#1f1f1f]">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center">
-                <Shield className="w-5 h-5 text-black" />
+        <div className="flex min-h-screen flex-col bg-app">
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-app-border bg-app-surface/80 px-4 py-4 backdrop-blur supports-[backdrop-filter]:bg-app-surface/60 lg:px-6">
+            <div className="flex items-center gap-3">
+              <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+                <SheetTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="lg:hidden text-white/70 hover:text-white hover:bg-white/5 focus-visible:outline-none focus-ring"
+                  >
+                    <Menu className="h-5 w-5" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-72 border-app-border bg-app px-0 pb-0 pt-0 text-white">
+                  <NavigationContent onNavigate={handleNavigation} />
+                </SheetContent>
+              </Sheet>
+              <div>
+                <div className="text-xs uppercase tracking-widest text-white/40">Active organization</div>
+                <div className="text-sm font-semibold text-white">
+                  {session.org?.name || "EncryptGate"}
+                </div>
               </div>
-              <span className="text-white font-semibold text-lg">EncryptGate</span>
             </div>
-            {session?.org?.name && (
-              <div className="text-gray-400 text-sm truncate">
-                {session.org.name}
-              </div>
-            )}
-          </div>
-
-          {/* Navigation */}
-          <nav className="p-4 space-y-1">
-            {/* Main Navigation */}
-            {mainNavItems.map((item, index) => {
-              const isActive = pathname === item.href
-              return (
-                <button
-                  key={index}
-                  onClick={() => handleNavigation(item.href)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                    isActive
-                      ? "bg-[#1f1f1f] text-white"
-                      : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
-                  }`}
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </button>
-              )
-            })}
-
-            {/* Pushed Requests section (Admins and above only) */}
-            {pushedRequestsItems.length > 0 && (
-              <div className="pt-4">
-                <div className="px-3 py-2">
-                  <div className="h-px bg-[#1f1f1f] mb-2"></div>
-                  <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Admin Tools</span>
-                </div>
-                {pushedRequestsItems.map((item, index) => {
-                  const isActive = pathname === item.href
-                  return (
-                    <button
-                      key={`pushed-${index}`}
-                      onClick={() => handleNavigation(item.href)}
-                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                        isActive
-                          ? "bg-[#1f1f1f] text-white"
-                          : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
-                      }`}
-                    >
-                      <item.icon className="w-4 h-4" />
-                      {item.label}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Company Settings section (Sr. Admin and above only) */}
-            {companySettingsItems.length > 0 && (
-              <div className="pt-4">
-                <div className="px-3 py-2">
-                  <div className="h-px bg-[#1f1f1f] mb-2"></div>
-                  <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">Company Settings</span>
-                </div>
-              {companySettingsItems.map((item, index) => {
-                const isActive = pathname === item.href
-                return (
-                  <button
-                    key={`company-${index}`}
-                    onClick={() => handleNavigation(item.href)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                      isActive
-                        ? "bg-[#1f1f1f] text-white"
-                        : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
-                    }`}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="relative text-white/70 hover:text-white hover:bg-white/5 focus-visible:outline-none focus-ring"
+              >
+                <Bell className="h-5 w-5" />
+                {notificationsCount > 0 ? (
+                  <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 rounded-full bg-blue-400" />
+                ) : null}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    className="hidden items-center gap-2 rounded-full px-3 py-1.5 text-white/80 hover:text-white hover:bg-white/5 focus-visible:outline-none focus-ring sm:flex"
                   >
-                    <item.icon className="w-4 h-4" />
-                    {item.label}
-                  </button>
-                )
-              })}
-              </div>
-            )}
-
-            {/* User Settings section (Always visible but filtered by permissions) */}
-            {userSettingsItems.length > 0 && (
-              <div className="pt-4">
-                <div className="px-3 py-2">
-                  <div className="h-px bg-[#1f1f1f] mb-2"></div>
-                  <span className="text-gray-500 text-xs font-medium uppercase tracking-wider">User Settings</span>
-                </div>
-              {userSettingsItems.map((item, index) => {
-                const isActive = pathname === item.href
-                return (
-                  <button
-                    key={`user-${index}`}
-                    onClick={() => handleNavigation(item.href)}
-                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                      isActive
-                        ? "bg-[#1f1f1f] text-white"
-                        : "text-gray-300 hover:bg-[#1f1f1f] hover:text-white focus:bg-[#1f1f1f] focus:outline-none"
-                    }`}
+                    <Avatar className="h-7 w-7">
+                      <AvatarFallback className="bg-white/10 text-xs text-white">
+                        {(session.user?.name || session.user?.email || "EG")
+                          .split(" ")
+                          .map((part) => part[0])
+                          .join("")
+                          .toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col items-start">
+                      <span className="text-xs leading-tight text-white/60">Signed in as</span>
+                      <span className="text-sm leading-tight text-white">
+                        {session.user?.name || session.user?.email}
+                      </span>
+                    </div>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="w-56 rounded-xl border border-app-border bg-app-panel p-1 text-white shadow-card"
+                >
+                  <DropdownMenuItem
+                    onClick={() => handleNavigation(getOrgPath("/admin/user-settings/profile"))}
+                    className="cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-white/5 focus:bg-white/5"
                   >
-                    <item.icon className="w-4 h-4" />
-                    {item.label}
-                  </button>
-                )
-              })}
-              </div>
-            )}
-          </nav>
+                    <User className="mr-2 h-4 w-4 text-blue-400" />
+                    Profile settings
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleLogout}
+                    className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-red-900/20 focus:bg-red-900/20"
+                  >
+                    <LogOut className="mr-2 h-4 w-4 text-red-400" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </header>
 
-          {/* User Profile */}
-          <div className="absolute bottom-0 left-0 w-64 p-4">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <div className="flex items-center gap-3 cursor-pointer hover:bg-[#1f1f1f] p-2 rounded-lg transition-colors">
-                  <Avatar className="w-8 h-8">
-                    <AvatarFallback className="bg-[#1f1f1f] text-white text-xs">
-                      {(session.user.name || session.user.email)
-                        .split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{session.user.name || session.user.email}</p>
-                    <p className="text-gray-400 text-xs">
-                      {(() => {
-                        const displayRole = session.user.isOwner ? 'Owner' : 
-                                          session.user.isAdmin ? 'Admin' : 
-                                          session.user.rawRoles?.[0] || 'Member'
-                        return displayRole
-                      })()}
-                    </p>
-                  </div>
-                </div>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 bg-[#0f0f0f] border border-[#2f2f2f] shadow-xl">
-                <DropdownMenuItem 
-                  onClick={() => handleNavigation(getOrgPath("/admin/user-settings/profile"))}
-                  className="text-white hover:bg-[#1f1f1f] hover:text-white cursor-pointer focus:bg-[#1f1f1f] focus:text-white transition-all duration-200"
-                >
-                  <User className="mr-2 h-4 w-4 text-blue-400" />
-                  <span className="font-medium">Profile Settings</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={handleLogout}
-                  className="text-white hover:bg-red-900/20 hover:text-red-200 cursor-pointer focus:bg-red-900/20 focus:text-red-200 transition-all duration-200"
-                >
-                  <LogOut className="mr-2 h-4 w-4 text-red-400" />
-                  <span className="font-medium">Sign out</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          <main className="flex-1 overflow-y-auto px-4 pb-10 pt-6 lg:px-6">
+            <div className="mx-auto w-full max-w-[1200px] space-y-6">{children}</div>
+          </main>
         </div>
-      )}
 
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col">
-        {/* Header */}
-        <header className="bg-[#171717] p-4">
-          <div className="flex items-center justify-between">
-            {/* Left Side with Menu Toggle */}
-            <div className="flex items-center gap-4">
-              {!leftSidebarOpen && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setLeftSidebarOpen(true)}
-                  className="text-gray-400 hover:text-white hover:bg-[#1f1f1f]"
-                >
-                  <Menu className="w-4 h-4" />
-                </Button>
-              )}
-            </div>
-
-            {/* Right Side */}
-            <div className="flex items-center gap-4">
-              {!rightSidebarOpen && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setRightSidebarOpen(true)}
-                  className="text-gray-400 hover:text-white hover:bg-[#1f1f1f]"
-                >
-                  <Menu className="w-4 h-4" />
-                </Button>
-              )}
-            </div>
-          </div>
-        </header>
-
-        {/* Page Content */}
-        <main className="flex-1 p-6 overflow-auto bg-[#171717] custom-scrollbar">{children}</main>
+        <aside className="hidden border-l border-app-border bg-app xl:block">
+          <RightRail />
+        </aside>
       </div>
-
-      {rightSidebarOpen && (
-        <div className="w-80 bg-[#0f0f0f] relative overflow-y-auto custom-scrollbar">
-          {/* Close Button */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setRightSidebarOpen(false)}
-            className="absolute top-4 right-4 text-gray-400 hover:text-white hover:bg-[#1f1f1f] z-10"
-          >
-            <Menu className="w-4 h-4" />
-          </Button>
-
-          <div className="p-6">
-            <h2 className="text-white font-semibold text-lg mb-6">Command Center</h2>
-
-            <CommandCenter />
-            <CommandCenter />
-            </div>
-          </div>
-      )}
-      </div>
+    </div>
   )
 }

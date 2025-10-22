@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 :root {
+  color-scheme: dark;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -36,6 +37,47 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+:root,
+html,
+body {
+  background: #0f0f0f;
+}
+
+body {
+  @apply text-white/90 antialiased;
+  font-feature-settings: "rlig" 1, "calt" 1;
+}
+
+* {
+  outline: none;
+}
+
+.focus-ring {
+  @apply ring-2 ring-app-ring/60 ring-offset-0 transition-shadow duration-150;
+}
+
+.pressable {
+  @apply active:scale-[.98] transition-transform duration-75 will-change-transform;
+}
+
+.card {
+  @apply bg-app-panel border border-app-border shadow-card rounded-2xl;
+}
+
+.surface {
+  @apply bg-app-surface border border-app-border rounded-2xl;
+}
+
+::selection {
+  background: #2563eb33;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 .dark {
@@ -150,7 +192,7 @@ select:-moz-autofill {
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
   body {
     @apply bg-background text-foreground;

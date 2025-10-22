@@ -728,24 +728,24 @@ export default function AdminAllEmailsPage() {
     >
       <FadeInSection>
         {/* Success Message */}
-        {successMessage && (
-          <Alert className="mb-6 bg-green-900/20 border-green-500/20 text-white">
-            <CheckCircle className="h-4 w-4 text-green-400" />
-            <AlertTitle className="text-white">Success</AlertTitle>
-            <AlertDescription className="text-gray-300">
-              {successMessage}
-            </AlertDescription>
-          </Alert>
-        )}
+          {successMessage && (
+            <Alert className="mb-6 border-green-500/30 bg-green-500/10 text-white">
+              <CheckCircle className="h-4 w-4 text-green-400" />
+              <AlertTitle className="text-white">Success</AlertTitle>
+              <AlertDescription className="text-gray-300">
+                {successMessage}
+              </AlertDescription>
+            </Alert>
+          )}
 
-        {/* Info Message */}
-        {infoMessage && (
-          <Alert className="mb-6 bg-blue-900/20 border-blue-500/20 text-white">
-            <Info className="h-4 w-4 text-blue-400" />
-            <AlertTitle className="text-white">Information</AlertTitle>
-            <AlertDescription className="text-gray-300">
-              {infoMessage}
-            </AlertDescription>
+          {/* Info Message */}
+          {infoMessage && (
+            <Alert className="mb-6 border-blue-500/30 bg-blue-500/10 text-white">
+              <Info className="h-4 w-4 text-blue-400" />
+              <AlertTitle className="text-white">Information</AlertTitle>
+              <AlertDescription className="text-gray-300">
+                {infoMessage}
+              </AlertDescription>
           </Alert>
         )}
 
@@ -1467,7 +1467,7 @@ export default function AdminAllEmailsPage() {
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
+                        <div className="rounded-lg border border-app-border bg-app-surface p-4">
                           {selectedEmail.body && selectedEmail.body.trim().length > 0 ? (
                             <div className="space-y-3">
                               <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -1505,12 +1505,12 @@ export default function AdminAllEmailsPage() {
                   )}
 
                   {emailViewerTab === "html" && selectedEmail.bodyHtml && (
-                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                    <Card className="card">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-white text-base">HTML Content</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
+                        <div className="rounded-lg border border-app-border bg-app-surface p-4">
                           <div className="space-y-3">
                             <div className="flex items-center gap-2 text-sm text-gray-400">
                               <span>HTML Content:</span>
@@ -1536,16 +1536,16 @@ export default function AdminAllEmailsPage() {
                   )}
 
                   {emailViewerTab === "headers" && (
-                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                    <Card className="card">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-white text-base">Email Headers</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
+                        <div className="rounded-lg border border-app-border bg-app-surface p-4">
                           {Object.keys(selectedEmail.headers).length > 0 ? (
                             <div className="space-y-2">
                               {Object.entries(selectedEmail.headers).map(([key, value]) => (
-                                <div key={key} className="border-b border-[#2a2a2a] pb-2">
+                                <div key={key} className="border-b border-app-border/70 pb-2">
                                   <div className="font-mono text-sm">
                                     <span className="text-blue-400">{key}:</span>{' '}
                                     <span className="text-white break-all">{value}</span>
@@ -1562,12 +1562,12 @@ export default function AdminAllEmailsPage() {
                   )}
 
                   {emailViewerTab === "debug" && (
-                    <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                    <Card className="card">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-white text-base">Debug Information</CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="bg-[#0f0f0f] p-4 rounded-lg border border-[#2a2a2a]">
+                        <div className="rounded-lg border border-app-border bg-app-surface p-4">
                           <div className="space-y-4">
                             <div>
                               <h4 className="text-sm font-medium text-white mb-2">Content Analysis</h4>
@@ -1597,7 +1597,7 @@ export default function AdminAllEmailsPage() {
                             
                             <div>
                               <h4 className="text-sm font-medium text-white mb-2">Raw Email Object</h4>
-                              <pre className="text-xs text-gray-300 whitespace-pre-wrap font-mono bg-[#0a0a0a] p-3 rounded border border-[#2a2a2a] max-h-96 overflow-y-auto">
+                              <pre className="max-h-96 overflow-y-auto rounded border border-app-border bg-app p-3 font-mono text-xs text-gray-300">
                                 {JSON.stringify(selectedEmail, null, 2)}
                               </pre>
                             </div>
@@ -1611,7 +1611,7 @@ export default function AdminAllEmailsPage() {
                   {(selectedEmail.attachments?.length > 0 || (selectedEmail.urls && selectedEmail.urls.length > 0)) && (
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                       {selectedEmail.attachments?.length > 0 && (
-                        <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                        <Card className="card">
                           <CardHeader className="pb-3">
                             <CardTitle className="text-white text-base flex items-center gap-2">
                               <span>Attachments</span>
@@ -1623,7 +1623,7 @@ export default function AdminAllEmailsPage() {
                           <CardContent>
                             <div className="space-y-2">
                               {selectedEmail.attachments?.map((attachment, index) => (
-                                <div key={index} className="p-3 bg-[#0f0f0f] rounded-lg border border-[#2a2a2a]">
+                                <div key={index} className="rounded-lg border border-app-border bg-app-surface p-3">
                                   <p className="text-sm text-white font-mono break-all">{attachment}</p>
                                 </div>
                               )) || (
@@ -1635,7 +1635,7 @@ export default function AdminAllEmailsPage() {
                       )}
 
                       {(selectedEmail.urls?.length ?? 0) > 0 && (
-                        <Card className="bg-[#1a1a1a] border-[#2a2a2a]">
+                        <Card className="card">
                           <CardHeader className="pb-3">
                             <CardTitle className="text-white text-base flex items-center gap-2">
                               <span>URLs Found</span>
@@ -1647,7 +1647,7 @@ export default function AdminAllEmailsPage() {
                           <CardContent>
                             <div className="space-y-2">
                               {(selectedEmail.urls ?? []).map((url, index) => (
-                                <div key={index} className="p-3 bg-[#0f0f0f] rounded-lg border border-[#2a2a2a]">
+                                <div key={index} className="rounded-lg border border-app-border bg-app-surface p-3">
                                   <p className="text-sm text-blue-400 font-mono break-all">{url}</p>
                                 </div>
                               ))}
