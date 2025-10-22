@@ -1405,7 +1405,7 @@ export default function AdminDetectionsPage() {
 
         {/* Assignment Dialog */}
         <Dialog open={assignmentDialogOpen} onOpenChange={setAssignmentDialogOpen}>
-          <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white max-w-md">
+        <DialogContent className="max-w-md border-app-border bg-app-panel text-white">
             <DialogHeader>
               <DialogTitle className="text-white">Assign Detection</DialogTitle>
               <DialogDescription className="text-gray-400">
@@ -1415,7 +1415,7 @@ export default function AdminDetectionsPage() {
             
             {detectionToAssign && (
               <div className="space-y-4">
-                <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-4">
+                <div className="rounded-lg border border-app-border bg-app-surface p-4">
                   <div className="space-y-2">
                     <div>
                       <label className="text-sm font-medium text-gray-400">Detection</label>
@@ -1435,15 +1435,15 @@ export default function AdminDetectionsPage() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-white">Assign to</label>
                   <Select value={selectedAssignee} onValueChange={setSelectedAssignee}>
-                    <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white">
+                  <SelectTrigger className="bg-app-surface border-app-border text-white">
                       <SelectValue placeholder="Select a team member" />
                     </SelectTrigger>
-                    <SelectContent className="bg-[#0f0f0f] border-[#1f1f1f]">
+                    <SelectContent className="border-app-border bg-app-panel">
                       {assignmentUsers.map(user => (
                         <SelectItem 
                           key={user.id} 
                           value={user.preferredUsername}
-                          className="text-white hover:bg-[#1f1f1f]"
+                          className="text-white hover:bg-white/5"
                         >
                           <div className="flex items-center gap-2">
                             <div>
@@ -1463,7 +1463,7 @@ export default function AdminDetectionsPage() {
               <Button 
                 variant="outline" 
                 onClick={cancelAssignment}
-                className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a]"
+                className="border-app-border bg-app-surface text-white hover:bg-white/5"
               >
                 Cancel
               </Button>

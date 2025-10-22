@@ -1,15 +1,22 @@
 import { cn } from "@/lib/utils"
 
-function Skeleton({
-  className,
-  ...props
-}: React.HTMLAttributes<HTMLDivElement>) {
+interface SkeletonProps {
+  className?: string
+}
+
+export function Skeleton({ className }: SkeletonProps) {
   return (
     <div
-      className={cn("animate-pulse rounded-md bg-muted", className)}
-      {...props}
+      role="presentation"
+      className={cn(
+        "relative overflow-hidden rounded-md bg-white/5",
+        "animate-shimmer",
+        className,
+      )}
+      style={{
+        backgroundImage: "linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent)",
+        backgroundSize: "200% 100%",
+      }}
     />
   )
 }
-
-export { Skeleton }
