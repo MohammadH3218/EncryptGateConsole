@@ -88,4 +88,4 @@ Notes and Tips
 - To test graph/LLM features locally without AWS SSM, set `OPENAI_API_KEY` and `NEO4J_*` in `.env.local`.
 - The Next.js config includes rewrites that send most `/api/:path*` to the remote backend. Consider adjusting `next.config.mjs` or using the `x-skip-rewrite: 1` header in requests if you need to hit local Next.js route handlers for those paths.
 - For production, the app reads secrets from AWS SSM Parameter Store. In local dev, environment variables take precedence where supported.
-
+- The landing page now routes existing customers through `/orgs/select`, which queries local `/api/orgs/search` (remember to include an `x-skip-rewrite: 1` header when calling this API from scripts to avoid the global proxy). Friendly org names on `/o/{orgId}/login` come from `/api/orgs/[orgId]`, so keep the `Organizations` table populated with `name`, `region`, and optional `orgCode` fields.
