@@ -13,7 +13,7 @@ export default function LandingPage() {
   }
 
   const handleExistingLogin = () => {
-    router.push("/login")
+    router.push("/orgs/select")
   }
 
   // Landing page always renders - no loading state needed

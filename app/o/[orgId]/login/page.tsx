@@ -69,19 +69,63 @@ export default function OrgAwareLoginPage() {
   const [forgotPasswordError, setForgotPasswordError] = useState("")
   const [isForgotPasswordLoading, setIsForgotPasswordLoading] = useState(false)
 
+  const displayOrgName = orgName || orgId || "Your Organization"
+
   useEffect(() => {
-    // Get org name from localStorage if available
-    const storedOrgName = localStorage.getItem('organization_name')
-    if (storedOrgName) {
-      setOrgName(storedOrgName)
+    if (typeof window !== "undefined") {
+      const storedOrgName = window.localStorage.getItem("organization_name")
+      if (storedOrgName) {
+        setOrgName(storedOrgName)
+      }
     }
-    
-    // Initialize API base URL
+
     const configured = process.env.NEXT_PUBLIC_API_URL
     const fallback = "https://api.console-encryptgate.net"
-    const base = configured || fallback
-    setApiBaseUrl(base)
-  }, [])
+    setApiBaseUrl(configured || fallback)
+
+    let cancelled = false
+    const controller = new AbortController()
+
+    const loadOrgMetadata = async () => {
+      if (!orgId) return
+      try {
+        const response = await fetch(`/api/orgs/${encodeURIComponent(orgId)}`, {
+          headers: {
+            "x-skip-rewrite": "1",
+          },
+          cache: "no-store",
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          throw new Error(`Failed to resolve organization. Status ${response.status}`)
+        }
+
+        const data = await response.json()
+        const friendlyName = data.name || data.organizationId || orgId
+
+        if (cancelled) return
+        setOrgName(friendlyName)
+
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem("organization_name", friendlyName)
+          window.localStorage.setItem(
+            "organization_id",
+            data.organizationId || orgId,
+          )
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return
+        console.warn("Organization metadata lookup failed:", error)
+      }
+    }
+
+    loadOrgMetadata()
+    return () => {
+      cancelled = true
+      controller.abort()
+    }
+  }, [orgId])
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -298,7 +342,7 @@ export default function OrgAwareLoginPage() {
             refresh: refreshToken 
           },
           organizationId: orgId,
-          organizationName: orgName
+          organizationName: displayOrgName
         })
       })
       
@@ -588,7 +632,7 @@ export default function OrgAwareLoginPage() {
 
           <div className="text-center space-y-2">
             <CardTitle className="text-2xl font-bold text-white">
-              {orgName ? `Welcome to ${orgName}` : 'Organization Login'}
+              {displayOrgName ? `Welcome to ${displayOrgName}` : 'Organization Login'}
             </CardTitle>
             <CardDescription className="text-gray-400">
               Enter your credentials to access your organization
