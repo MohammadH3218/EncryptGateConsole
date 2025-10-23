@@ -202,7 +202,7 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
     } catch (error) {
       console.warn("Failed clearing local storage", error)
     }
-    const logoutUrl = orgId ? /logout?orgId= : "/logout"
+    const logoutUrl = orgId ? `/logout?orgId=${orgId}` : "/logout"
     router.push(logoutUrl)
   }
 

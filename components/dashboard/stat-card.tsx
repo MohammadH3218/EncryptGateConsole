@@ -27,8 +27,9 @@ export function StatCard({ title, value, description, previousValue, icon }: Sta
 
             {previousValue && (
               <div
-                className={
-ounded px-2 py-1 text-sm font-medium }
+                className={`rounded px-2 py-1 text-sm font-medium ${
+                  isPositive ? 'text-green-500 bg-green-500/10' : 'text-red-500 bg-red-500/10'
+                }`}
               >
                 {isPositive ? "+" : ""}
                 {percentageChange.toFixed(0)}%

@@ -40,7 +40,7 @@ export default function OrgSelectPage() {
       console.log("[OrgSelect] starting search", { query: debouncedQuery })
       try {
         const response = await fetch(
-          /api/orgs/search?q=,
+          `/api/orgs/search?q=${encodeURIComponent(debouncedQuery)}`,
           {
             headers: {
               "x-skip-rewrite": "1",
@@ -124,7 +124,7 @@ export default function OrgSelectPage() {
             {isSearching && (
               <div className="flex items-center gap-2 text-sm text-app-textSecondary">
                 <Loader2 className="h-4 w-4 animate-spin text-app-accent" />
-                Searching…
+                Searchingï¿½
               </div>
             )}
 
