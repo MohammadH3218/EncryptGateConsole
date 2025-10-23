@@ -54,9 +54,15 @@ export default function OrgSelectPage() {
         }
 
         const payload = await response.json()
-        setResults(Array.isArray(payload.items) ? payload.items : [])
-        if (!payload.items?.length) {
-          setErrorMessage("No organizations matched that search.")
+        if (payload?.error) {
+          setResults([])
+          setErrorMessage("We couldn't complete that search. Try again later.")
+        } else {
+          const items = Array.isArray(payload.items) ? payload.items : []
+          setResults(items)
+          if (!items.length) {
+            setErrorMessage("No organizations matched that search.")
+          }
         }
       } catch (error) {
         if (controller.signal.aborted) return
@@ -96,13 +102,13 @@ export default function OrgSelectPage() {
         <CardContent className="space-y-6">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-            <Input
-              autoFocus
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Example: Interactive Coventry or ORG-12345"
-              className="bg-[#1a1a1a] border-[#2a2a2a] text-white pl-9"
-            />
+          <Input
+            autoFocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search and type your org here"
+            className="bg-[#1a1a1a] border-[#2a2a2a] text-white pl-9"
+          />
           </div>
 
           <div className="space-y-3">
