@@ -80,8 +80,9 @@ export default function InvestigatePage() {
   const [escalateDialogOpen, setEscalateDialogOpen] = useState(false)
   const [notes, setNotes] = useState("")
 
-  const [activeMainTab, setActiveMainTab] = useState<"overview" | "email" | "copilot" | "notes">("overview")
+  const [activeMainTab, setActiveMainTab] = useState<"overview" | "email" | "notes">("overview")
   const [activeEmailTab, setActiveEmailTab] = useState<"content" | "html" | "headers" | "attachments">("content")
+  const [copilotOpen, setCopilotOpen] = useState(false)
 
   const fetchInvestigation = useCallback(async () => {
     try {
@@ -109,9 +110,15 @@ export default function InvestigatePage() {
   const fetchEmail = useCallback(async () => {
     const attemptSingle = async (url: string) => {
       try {
-        const res = await fetch(url, { cache: "no-store" })
+        const res = await fetch(url, {
+          cache: "no-store",
+          headers: {
+            'x-org-id': orgId
+          }
+        })
         if (res.ok) {
           const payload = await res.json()
+          console.log('📧 Email fetch response:', payload)
           return payload?.email ?? payload
         }
       } catch (error) {
@@ -125,21 +132,28 @@ export default function InvestigatePage() {
       (await attemptSingle(`/api/email?messageId=${encodeURIComponent(messageId)}`))
 
     if (direct) {
+      console.log('✅ Found email directly:', direct)
       return direct
     }
 
     try {
-      const res = await fetch("/api/email?limit=1000", { cache: "no-store" })
+      const res = await fetch("/api/email?limit=1000", {
+        cache: "no-store",
+        headers: {
+          'x-org-id': orgId
+        }
+      })
       if (res.ok) {
         const payload = await res.json()
         const found = (payload.emails || []).find((item: any) => item.messageId === messageId)
+        console.log('📧 Found email in list:', found)
         return found ?? null
       }
     } catch (error) {
       console.warn("Failed fetching fallback email list", error)
     }
     return null
-  }, [messageId])
+  }, [messageId, orgId])
 
   useEffect(() => {
     let mounted = true
@@ -220,7 +234,7 @@ export default function InvestigatePage() {
     const configs = {
       critical: { text: "Critical", color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/50" },
       high: { text: "High", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/50" },
-      medium: { text: "Medium", color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/50" },
+      medium: { text: "Medium", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/50" },
       low: { text: "Low", color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/50" },
     }
     return configs[severity as keyof typeof configs] || configs.medium
@@ -331,36 +345,40 @@ export default function InvestigatePage() {
 
           {/* Main Tabs */}
           <Tabs value={activeMainTab} onValueChange={(v) => setActiveMainTab(v as any)} className="space-y-6">
-            <TabsList className="inline-flex h-12 items-center justify-start gap-1 rounded-xl bg-app-elevated p-1 border border-app-border">
-              <TabsTrigger
-                value="overview"
-                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
-              >
-                <Shield className="mr-2 h-4 w-4" />
-                Overview
-              </TabsTrigger>
-              <TabsTrigger
-                value="email"
-                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
-              >
-                <Mail className="mr-2 h-4 w-4" />
-                Email Analysis
-              </TabsTrigger>
-              <TabsTrigger
-                value="copilot"
-                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
+            <div className="flex items-center justify-between">
+              <TabsList className="inline-flex h-12 items-center justify-start gap-1 rounded-xl bg-app-elevated p-1 border border-app-border">
+                <TabsTrigger
+                  value="overview"
+                  className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
+                >
+                  <Shield className="mr-2 h-4 w-4" />
+                  Overview
+                </TabsTrigger>
+                <TabsTrigger
+                  value="email"
+                  className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
+                >
+                  <Mail className="mr-2 h-4 w-4" />
+                  Email Analysis
+                </TabsTrigger>
+                <TabsTrigger
+                  value="notes"
+                  className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  Investigation Notes
+                </TabsTrigger>
+              </TabsList>
+
+              {/* Floating Copilot Button */}
+              <Button
+                onClick={() => setCopilotOpen(!copilotOpen)}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
               >
                 <Bot className="mr-2 h-4 w-4" />
-                AI Copilot
-              </TabsTrigger>
-              <TabsTrigger
-                value="notes"
-                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
-              >
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Investigation Notes
-              </TabsTrigger>
-            </TabsList>
+                {copilotOpen ? "Close AI Copilot" : "Open AI Copilot"}
+              </Button>
+            </div>
 
             {/* Overview Tab */}
             <TabsContent value="overview" className="space-y-6">
@@ -593,78 +611,6 @@ export default function InvestigatePage() {
               </Card>
             </TabsContent>
 
-            {/* AI Copilot Tab */}
-            <TabsContent value="copilot" className="space-y-6">
-              <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
-                <Card className="bg-app-surface border-app-border">
-                  <CardHeader>
-                    <CardTitle className="text-lg text-app-textPrimary flex items-center gap-2">
-                      <Bot className="h-5 w-5 text-app-accent" />
-                      AI-Powered Investigation Assistant
-                    </CardTitle>
-                    <CardDescription className="text-app-textSecondary">
-                      Ask questions about this email, analyze threats, and get AI-powered recommendations
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-0">
-                    <div className="h-[600px]">
-                      <SecurityCopilotEnhanced
-                        emailData={email}
-                        messageId={messageId}
-                        className="border-0 h-full"
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <div className="space-y-4">
-                  <Card className="bg-app-surface border-app-border">
-                    <CardHeader>
-                      <CardTitle className="text-base text-app-textPrimary">Quick Analysis</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <InfoItem label="Email Source">
-                        {email?.sender || "Unknown"}
-                      </InfoItem>
-                      <InfoItem label="Recipients">
-                        {email?.recipients?.length || 0} recipient(s)
-                      </InfoItem>
-                      <InfoItem label="Attachments">
-                        {email?.attachments?.length || 0} file(s)
-                      </InfoItem>
-                      <InfoItem label="Analysis Status">
-                        <Badge className="bg-blue-500/10 text-blue-400">
-                          {investigation?.status || "In Progress"}
-                        </Badge>
-                      </InfoItem>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="bg-app-surface border-app-border">
-                    <CardHeader>
-                      <CardTitle className="text-base text-app-textPrimary">Suggested Questions</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <p className="text-xs text-app-textMuted mb-3">Try asking the AI copilot:</p>
-                      <div className="space-y-1">
-                        {[
-                          "Is this email a phishing attempt?",
-                          "Analyze the sender's reputation",
-                          "Check for malicious URLs or attachments",
-                          "What actions should I take?",
-                        ].map((question, idx) => (
-                          <div key={idx} className="flex items-start gap-2 text-xs text-app-textSecondary p-2 rounded bg-app-elevated">
-                            <ChevronRight className="h-3 w-3 mt-0.5 flex-shrink-0 text-app-accent" />
-                            <span>{question}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              </div>
-            </TabsContent>
-
             {/* Investigation Notes Tab */}
             <TabsContent value="notes" className="space-y-6">
               <Card className="bg-app-surface border-app-border">
@@ -775,6 +721,44 @@ export default function InvestigatePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Floating Copilot Drawer */}
+      {copilotOpen && (
+        <div className="fixed bottom-0 right-0 top-0 z-50 w-full max-w-2xl bg-app-surface border-l border-app-border shadow-2xl overflow-hidden flex flex-col">
+          {/* Copilot Header */}
+          <div className="flex items-center justify-between p-4 border-b border-app-border bg-app-elevated">
+            <div className="flex items-center gap-2">
+              <Bot className="h-5 w-5 text-blue-400" />
+              <h3 className="text-lg font-semibold text-app-textPrimary">AI Investigation Assistant</h3>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setCopilotOpen(false)}
+              className="text-app-textSecondary hover:text-app-textPrimary"
+            >
+              ✕
+            </Button>
+          </div>
+
+          {/* Copilot Content with scroll */}
+          <div className="flex-1 overflow-hidden">
+            <SecurityCopilotEnhanced
+              emailData={email}
+              messageId={messageId}
+              className="border-0 h-full"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Overlay */}
+      {copilotOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-40"
+          onClick={() => setCopilotOpen(false)}
+        />
+      )}
     </AppLayout>
   )
 }
