@@ -37,6 +37,7 @@ export default function OrgSelectPage() {
     const timeout = setTimeout(async () => {
       setIsSearching(true)
       setErrorMessage(null)
+      console.log("[OrgSelect] starting search", { query: debouncedQuery })
       try {
         const response = await fetch(
           `/api/orgs/search?q=${encodeURIComponent(debouncedQuery)}`,
@@ -49,16 +50,25 @@ export default function OrgSelectPage() {
           },
         )
 
-        if (!response.ok) {
-          throw new Error("Search failed")
+        const status = response.status
+        let payload: any = null
+
+        try {
+          payload = await response.json()
+        } catch (jsonError) {
+          console.error("[OrgSelect] failed to parse response JSON", jsonError)
+          throw jsonError
         }
 
-        const payload = await response.json()
-        if (payload?.error) {
+        console.log("[OrgSelect] response payload", { status, payload })
+
+        if (!response.ok || payload?.error) {
+          console.warn("[OrgSelect] search returned error", payload?.error)
           setResults([])
           setErrorMessage("We couldn't complete that search. Try again later.")
         } else {
           const items = Array.isArray(payload.items) ? payload.items : []
+          console.log("[OrgSelect] items returned", items.length)
           setResults(items)
           if (!items.length) {
             setErrorMessage("No organizations matched that search.")
@@ -66,8 +76,8 @@ export default function OrgSelectPage() {
         }
       } catch (error) {
         if (controller.signal.aborted) return
-        console.error("Organization search failed:", error)
-        setErrorMessage("We couldn’t complete that search. Try again.")
+        console.error("[OrgSelect] organization search failed", error)
+        setErrorMessage("We couldn't complete that search. Try again.")
       } finally {
         setIsSearching(false)
       }
@@ -93,8 +103,7 @@ export default function OrgSelectPage() {
               Sign in to your organization
             </CardTitle>
             <p className="text-sm text-gray-400">
-              Search by organization name or the short code you received during
-              onboarding.
+              Search by organization name or the short code you received during onboarding.
             </p>
           </div>
         </CardHeader>
@@ -102,13 +111,13 @@ export default function OrgSelectPage() {
         <CardContent className="space-y-6">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-          <Input
-            autoFocus
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search and type your org here"
-            className="bg-[#1a1a1a] border-[#2a2a2a] text-white pl-9"
-          />
+            <Input
+              autoFocus
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search and type your org here"
+              className="bg-[#1a1a1a] border-[#2a2a2a] text-white pl-9"
+            />
           </div>
 
           <div className="space-y-3">
