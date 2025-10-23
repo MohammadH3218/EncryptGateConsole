@@ -76,6 +76,10 @@ const nextConfig = {
         destination: '/api/user/:path*',
       },
       {
+        source: '/api/orgs/:path*',
+        destination: '/api/orgs/:path*',
+      },
+      {
         source: '/api/:path*',
         destination: 'https://backend.console-encryptgate.net/api/:path*',
       },
