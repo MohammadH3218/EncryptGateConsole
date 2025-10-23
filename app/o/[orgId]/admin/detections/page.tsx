@@ -1021,78 +1021,57 @@ export default function AdminDetectionsPage() {
                 </div>
               ) : (
                 <>
-                  <Table>
-                    <TableHeader>
-                      <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
-                        <TableHead className="text-white">Detection</TableHead>
-                        <TableHead className="text-white">Sender</TableHead>
-                        <TableHead className="text-white">Type</TableHead>
-                        <TableHead className="text-white">Severity</TableHead>
-                        <TableHead className="text-white">Status</TableHead>
-                        <TableHead className="text-white">Threat Score</TableHead>
-                        <TableHead className="text-white">Created</TableHead>
-                        <TableHead className="text-white">Assigned</TableHead>
-                        <TableHead className="text-white">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredDetections.map((detection) => (
-                        <TableRow key={detection.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
-                          <TableCell className="font-medium text-white">
-                            <div>
-                              <div className="font-medium">{detection.name}</div>
-                              <div className="text-sm text-gray-400">
-                                {detection.detectionId}
+                  <div className="overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                          <TableHead className="text-white w-[200px]">Detection</TableHead>
+                          <TableHead className="text-white w-[180px]">Sender</TableHead>
+                          <TableHead className="text-white w-[90px]">Type</TableHead>
+                          <TableHead className="text-white w-[100px]">Severity</TableHead>
+                          <TableHead className="text-white w-[110px]">Status</TableHead>
+                          <TableHead className="text-white w-[100px]">Created</TableHead>
+                          <TableHead className="text-white w-[120px]">Assigned</TableHead>
+                          <TableHead className="text-white w-[150px]">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredDetections.map((detection) => (
+                          <TableRow key={detection.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                            <TableCell className="font-medium text-white max-w-[200px]">
+                              <div className="truncate" title={detection.name}>
+                                {detection.name}
                               </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-white">{detection.sentBy}</TableCell>
-                          <TableCell>
-                            {getFlagTypeBadge(detection)}
-                          </TableCell>
-                          <TableCell>
-                            {getSeverityBadge(detection.severity)}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              {getStatusIcon(detection.status)}
+                            </TableCell>
+                            <TableCell className="text-white max-w-[180px]">
+                              <div className="truncate text-sm" title={detection.sentBy}>
+                                {detection.sentBy}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {getFlagTypeBadge(detection)}
+                            </TableCell>
+                            <TableCell>
+                              {getSeverityBadge(detection.severity)}
+                            </TableCell>
+                            <TableCell>
                               {getStatusBadge(detection.status)}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <div className="w-16 h-2 bg-[#1f1f1f] rounded-full">
-                                <div
-                                  className={`h-2 rounded-full ${
-                                    detection.threatScore >= 80 ? 'bg-red-500' :
-                                    detection.threatScore >= 60 ? 'bg-orange-500' :
-                                    detection.threatScore >= 40 ? 'bg-amber-500' :
-                                    'bg-green-500'
-                                  }`}
-                                  style={{ width: `${detection.threatScore}%` }}
-                                />
-                              </div>
-                              <span className="text-sm text-white">{detection.threatScore}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-white">
-                            {new Date(detection.createdAt).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell className="text-white">
-                            {detection.assignedTo.length > 0 ? (
+                            </TableCell>
+                            <TableCell className="text-white text-sm">
+                              {new Date(detection.createdAt).toLocaleDateString()}
+                            </TableCell>
+                            <TableCell className="text-white max-w-[120px]">
+                              {detection.assignedTo.length > 0 ? (
+                                <div className="truncate text-sm" title={detection.assignedTo.join(', ')}>
+                                  {detection.assignedTo[0]}
+                                  {detection.assignedTo.length > 1 && ` +${detection.assignedTo.length - 1}`}
+                                </div>
+                              ) : (
+                                <span className="text-sm text-gray-400">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
                               <div className="flex items-center gap-1">
-                                <Users className="h-4 w-4 text-gray-400" />
-                                <span className="text-sm">
-                                  {detection.assignedTo.slice(0, 2).join(', ')}
-                                  {detection.assignedTo.length > 2 && ` +${detection.assignedTo.length - 2}`}
-                                </span>
-                              </div>
-                            ) : (
-                              <span className="text-sm text-gray-400">Unassigned</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1171,6 +1150,7 @@ export default function AdminDetectionsPage() {
                       ))}
                     </TableBody>
                   </Table>
+                  </div>
 
                   {/* Loading More Indicator */}
                   {loadingMore && (

@@ -970,75 +970,41 @@ export default function AdminAllEmailsPage() {
               </div>
             ) : (
               <>
-                <div className="overflow-x-auto">
+                <div className="overflow-auto">
                   <Table>
                     <TableHeader>
                       <TableRow className="hover:bg-[#1f1f1f] border-white/10">
-                        <TableHead className="text-white w-48">Subject</TableHead>
-                        <TableHead className="text-white w-44">Sender</TableHead>
-                        <TableHead className="text-white w-44">Recipients</TableHead>
-                        <TableHead className="text-white w-36">Received</TableHead>
-                        <TableHead className="text-white w-24">Direction</TableHead>
-                        <TableHead className="text-white w-28">Flagged</TableHead>
-                        <TableHead className="text-white w-28">Investigation</TableHead>
-                        <TableHead className="text-white w-24">Status</TableHead>
-                        <TableHead className="text-white w-28">Actions</TableHead>
+                        <TableHead className="text-white w-[220px]">Subject</TableHead>
+                        <TableHead className="text-white w-[180px]">Sender</TableHead>
+                        <TableHead className="text-white w-[120px]">Received</TableHead>
+                        <TableHead className="text-white w-[110px]">Flagged</TableHead>
+                        <TableHead className="text-white w-[110px]">Investigation</TableHead>
+                        <TableHead className="text-white w-[120px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                   <TableBody>
                     {filteredEmails.map(email => (
                       <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-white/10">
-                        <TableCell className="font-medium text-white">
-                          <div className="w-48">
-                            <div className="truncate text-sm flex items-center gap-2" title={email.subject || 'No Subject'}>
-                              {email.subject || 'No Subject'}
-                              {email.body && email.body.trim().length > 0 ? (
-                                <FileText className="h-3 w-3 text-green-400" />
-                              ) : (
-                                <FileText className="h-3 w-3 text-red-400" />
-                              )}
-                            </div>
-                            {email.urls?.length ? (
-                              <div className="text-xs text-gray-400">
-                                {email.urls.length} URL{email.urls.length > 1 ? "s" : ""}
-                              </div>
-                            ) : null}
+                        <TableCell className="font-medium text-white max-w-[220px]">
+                          <div className="truncate text-sm" title={email.subject || 'No Subject'}>
+                            {email.subject || 'No Subject'}
                           </div>
                         </TableCell>
-                        <TableCell className="text-white">
-                          <div className="w-44 truncate text-sm" title={email.sender}>
+                        <TableCell className="text-white max-w-[180px]">
+                          <div className="truncate text-xs" title={email.sender}>
                             {email.sender}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-white">
-                          <div className="w-44 truncate text-sm" title={email.recipients.join(", ")}>
-                            {email.recipients.slice(0, 2).join(", ")}
-                            {email.recipients.length > 2 && ` +${email.recipients.length - 2}`}
                           </div>
                         </TableCell>
                         <TableCell className="text-white">
                           <div className="text-xs">
                             {new Date(email.timestamp).toLocaleDateString()}
-                            <br />
-                            {new Date(email.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={email.direction === "inbound" ? "secondary" : "outline"}
-                            className={email.direction === "inbound" ? "bg-blue-900/30 text-blue-300 border-blue-600/30" : "bg-gray-800/50 text-gray-300 border-gray-600/50"}
-                          >
-                            {email.direction}
-                          </Badge>
                         </TableCell>
                         <TableCell>
                           {getFlaggedBadge(email.flaggedCategory, email.flaggedSeverity)}
                         </TableCell>
                         <TableCell>
                           {getInvestigationBadge(email.investigationStatus)}
-                        </TableCell>
-                        <TableCell>
-                          {getStatusBadge(email.status)}
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
