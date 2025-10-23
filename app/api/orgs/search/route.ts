@@ -72,11 +72,13 @@ export async function GET(request: NextRequest) {
       .slice(0, MAX_RESULTS)
 
     return NextResponse.json({ items: matches })
-  } catch (error) {
+  } catch (error: any) {
     console.error("Org search failed:", error)
-    return NextResponse.json(
-      { items: [], error: "Failed to search organizations" },
-      { status: 500 },
-    )
+
+    // Gracefully degrade when credentials or table access are unavailable.
+    return NextResponse.json({
+      items: [],
+      error: error?.message ?? "Organization search is temporarily unavailable.",
+    })
   }
 }
