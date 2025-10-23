@@ -13,19 +13,22 @@ interface AutoBlockedEmailsProps {
 
 export function AutoBlockedEmails({ data, total }: AutoBlockedEmailsProps) {
   return (
-    <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+    <Card className="card text-white transition-all duration-300">
       <CardHeader>
-        <CardTitle className="text-white">Auto-Blocked Emails</CardTitle>
+        <CardTitle className="text-lg font-semibold text-white">Auto-Blocked Emails</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold text-white mb-2">{total}</div>
-        <p className="text-sm text-gray-400 mb-4">Total blocked</p>
+        <div className="mb-2 text-2xl font-bold text-white">{total}</div>
+        <p className="mb-4 text-sm text-white/60">Total blocked</p>
 
         <div className="space-y-2">
           {data.slice(0, 3).map((email, index) => (
-            <div key={index} className="bg-transparent hover:bg-[#1f1f1f] rounded-lg p-2 transition-all duration-300">
-              <p className="text-sm font-medium text-white truncate">{email.sender}</p>
-              <p className="text-xs text-gray-400">{email.reason}</p>
+            <div
+              key={index}
+              className="rounded-2xl border border-white/5 bg-white/5 px-3 py-2 transition duration-200 hover:border-blue-400/40"
+            >
+              <p className="truncate text-sm font-medium text-white">{email.sender}</p>
+              <p className="text-xs text-white/60">{email.reason}</p>
             </div>
           ))}
         </div>

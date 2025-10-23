@@ -27,23 +27,23 @@ export function AssignmentsOverview({}: AssignmentsOverviewProps) {
   ]
 
   return (
-    <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+    <Card className="card text-white transition-all duration-300">
       <CardHeader>
-        <CardTitle className="text-white">Your Assignments</CardTitle>
+        <CardTitle className="text-lg font-semibold text-white">Your Assignments</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="flex gap-4 mb-4">
+        <div className="mb-4 flex gap-4">
           <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm text-gray-300">Continue</span>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-sm text-white/70">Continue</span>
               <Badge variant="secondary" className="bg-white/20 text-white">
                 2
               </Badge>
             </div>
           </div>
           <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-sm text-gray-300">New Assignments</span>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-sm text-white/70">New Assignments</span>
               <Badge variant="secondary" className="bg-white/20 text-white">
                 2
               </Badge>
@@ -55,24 +55,24 @@ export function AssignmentsOverview({}: AssignmentsOverviewProps) {
           {assignments.map((assignment) => (
             <div
               key={assignment.id}
-              className="bg-transparent hover:bg-[#1f1f1f] rounded-lg p-3 transition-all duration-300"
+              className="rounded-2xl border border-white/5 bg-white/5 px-4 py-3 transition duration-200 hover:border-blue-400/40"
             >
-              <div className="flex items-start justify-between">
+              <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Clock className="w-4 h-4 text-gray-400" />
+                  <div className="mb-1 flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-white/50" />
                     <span className="text-sm font-medium text-white">{assignment.title}</span>
                     <Badge variant={assignment.severity === "Critical" ? "destructive" : "default"} className="text-xs">
                       {assignment.severity}
                     </Badge>
                   </div>
-                  <p className="text-xs text-gray-400">From: {assignment.from}</p>
-                  <p className="text-xs text-gray-400">Last updated: {assignment.lastUpdated}</p>
+                  <p className="text-xs text-white/60">From: {assignment.from}</p>
+                  <p className="text-xs text-white/60">Last updated: {assignment.lastUpdated}</p>
                 </div>
                 <Button
                   size="sm"
                   variant="outline"
-                  className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
+                  className="border-white/20 bg-white/10 text-white hover:border-blue-400/40 hover:bg-blue-500/10"
                 >
                   Continue
                 </Button>

@@ -30,24 +30,24 @@ export function CompletedDetections({ detections }: CompletedDetectionsProps) {
   }
 
   return (
-    <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+    <Card className="card text-white transition-all duration-300">
       <CardHeader>
-        <CardTitle className="text-white">Completed Detections</CardTitle>
+        <CardTitle className="text-lg font-semibold text-white">Completed Detections</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold text-white mb-2">{detections.length}</div>
-        <p className="text-sm text-gray-400 mb-4">Completed today</p>
+        <div className="mb-2 text-2xl font-bold text-white">{detections.length}</div>
+        <p className="mb-4 text-sm text-white/60">Completed today</p>
 
         <div className="space-y-2">
           {detections.slice(0, 3).map((detection) => (
             <div
               key={detection.id}
-              className="bg-transparent hover:bg-[#1f1f1f] rounded-lg p-2 transition-all duration-300"
+              className="rounded-2xl border border-white/5 bg-white/5 px-3 py-2 transition duration-200 hover:border-blue-400/40"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div className="flex-1">
                   <p className="text-sm font-medium text-white">{detection.name}</p>
-                  <p className="text-xs text-gray-400">Resolved by {detection.resolvedBy}</p>
+                  <p className="text-xs text-white/60">Resolved by {detection.resolvedBy}</p>
                 </div>
                 <Badge className={`${getSeverityColor(detection.severity)} text-white text-xs`}>
                   {detection.severity}

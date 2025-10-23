@@ -8,7 +8,9 @@ export function RightRail() {
       <div className="mb-4 px-1 text-sm font-semibold uppercase tracking-wide text-white/70">
         Command Center
       </div>
-      <CommandCenter />
+      <div className="space-y-4 rounded-3xl border border-white/10 bg-black/30 p-4 shadow-[0_20px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+        <CommandCenter />
+      </div>
     </div>
   )
 }

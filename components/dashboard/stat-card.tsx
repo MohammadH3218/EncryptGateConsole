@@ -15,8 +15,8 @@ export function StatCard({ title, value, description, previousValue, icon }: Sta
   const isNegative = percentageChange < 0
 
   return (
-    <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-      <CardContent className="p-6">
+    <Card className="rounded-3xl border border-white/10 bg-black/40 text-white transition-all duration-300 hover:border-blue-400/40 hover:shadow-[0_0_35px_rgba(37,99,235,0.15)]">
+      <CardContent className="p-6 lg:p-7">
         <div className="text-center">
           {icon && <div className="flex justify-center mb-3 text-white/70">{icon}</div>}
 

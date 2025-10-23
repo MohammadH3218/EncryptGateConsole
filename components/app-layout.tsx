@@ -302,15 +302,22 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
   )
 
   return (
-    <div className="min-h-screen bg-app text-white">
+    <div className="relative min-h-screen overflow-hidden bg-[#0b0b0d] text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-64 -left-40 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="absolute top-1/3 -right-32 h-[420px] w-[420px] rounded-full bg-purple-500/10 blur-3xl" />
+        <div className="absolute bottom-0 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
+      </div>
       <CommandMenu />
-      <div className="grid min-h-screen lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_340px]">
-        <aside className="hidden border-r border-app-border bg-app lg:flex">
-          <NavigationContent onNavigate={handleNavigation} />
+      <div className="relative grid min-h-screen lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_340px]">
+        <aside className="hidden border-r border-app-border/60 bg-[#101017]/80 backdrop-blur lg:flex">
+          <div className="sticky top-0 h-screen w-full overflow-y-auto px-2 py-4">
+            <NavigationContent onNavigate={handleNavigation} />
+          </div>
         </aside>
 
-        <div className="flex min-h-screen flex-col bg-app">
-          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-app-border bg-app-surface/80 px-4 py-4 backdrop-blur supports-[backdrop-filter]:bg-app-surface/60 lg:px-6">
+        <div className="flex min-h-screen flex-col bg-transparent">
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/5 bg-black/30 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-black/30 lg:px-6">
             <div className="flex items-center gap-3">
               <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
                 <SheetTrigger asChild>
@@ -390,13 +397,17 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto px-4 pb-10 pt-6 lg:px-6">
-            <div className="mx-auto w-full max-w-[1200px] space-y-6">{children}</div>
+          <main className="flex-1 overflow-y-auto px-4 pb-12 pt-8 lg:px-8">
+            <div className="mx-auto w-full max-w-[1200px] space-y-6 rounded-[32px] border border-white/5 bg-black/40 p-6 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.9)] backdrop-blur-2xl lg:p-8">
+              {children}
+            </div>
           </main>
         </div>
 
-        <aside className="hidden border-l border-app-border bg-app xl:block">
-          <RightRail />
+        <aside className="hidden border-l border-app-border/60 bg-[#101017]/80 backdrop-blur xl:block">
+          <div className="sticky top-0 h-screen overflow-y-auto px-3 py-4">
+            <RightRail />
+          </div>
         </aside>
       </div>
     </div>
