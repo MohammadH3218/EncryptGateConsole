@@ -412,9 +412,9 @@ export default function AdminDetectionsPage() {
       case 'high':
         return <Badge variant="destructive" className="bg-orange-500">High</Badge>
       case 'medium':
-        return <Badge variant="destructive" className="bg-yellow-500">Medium</Badge>
+        return <Badge variant="destructive" className="bg-amber-600 text-white">Medium</Badge>
       case 'low':
-        return <Badge variant="outline" className="border-yellow-500 text-yellow-500">Low</Badge>
+        return <Badge variant="outline" className="border-blue-500 text-blue-400">Low</Badge>
       default:
         return <Badge variant="secondary">{severity}</Badge>
     }
@@ -914,106 +914,6 @@ export default function AdminDetectionsPage() {
             </div>
           </div>
 
-          {/* Stats Cards - UPDATED */}
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-400">Total</p>
-                    <p className="text-2xl font-bold text-white">{stats.total}</p>
-                  </div>
-                  <Shield className="h-8 w-8 text-gray-400" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-400">New</p>
-                    <p className="text-2xl font-bold text-red-400">{stats.new}</p>
-                  </div>
-                  <AlertTriangle className="h-8 w-8 text-red-400" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-400">In Progress</p>
-                    <p className="text-2xl font-bold text-yellow-400">{stats.inProgress}</p>
-                  </div>
-                  <Activity className="h-8 w-8 text-yellow-400" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-400">Manual Flags</p>
-                    <p className="text-2xl font-bold text-orange-400">{stats.manualFlags}</p>
-                  </div>
-                  <Flag className="h-8 w-8 text-orange-400" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-400">AI Flags</p>
-                    <p className="text-2xl font-bold text-purple-400">{stats.aiFlags}</p>
-                  </div>
-                  <Shield className="h-8 w-8 text-purple-400" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-400">Resolved</p>
-                    <p className="text-2xl font-bold text-green-400">{stats.resolved}</p>
-                  </div>
-                  <CheckCircle className="h-8 w-8 text-green-400" />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Severity Distribution */}
-          <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-white">
-                <TrendingUp className="h-5 w-5 text-white" />
-                Threat Severity Distribution
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-4 gap-4">
-                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
-                  <div className="text-2xl font-bold text-red-400">{stats.critical}</div>
-                  <div className="text-sm text-gray-400">Critical</div>
-                </div>
-                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
-                  <div className="text-2xl font-bold text-orange-400">{stats.high}</div>
-                  <div className="text-sm text-gray-400">High</div>
-                </div>
-                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
-                  <div className="text-2xl font-bold text-yellow-400">{stats.medium}</div>
-                  <div className="text-sm text-gray-400">Medium</div>
-                </div>
-                <div className="text-center p-4 border border-[#1f1f1f] rounded-lg bg-[#1f1f1f]">
-                  <div className="text-2xl font-bold text-blue-400">{stats.low}</div>
-                  <div className="text-sm text-gray-400">Low</div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
           {/* Filters - UPDATED */}
           <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
             <CardHeader>
@@ -1162,11 +1062,11 @@ export default function AdminDetectionsPage() {
                           <TableCell>
                             <div className="flex items-center gap-2">
                               <div className="w-16 h-2 bg-[#1f1f1f] rounded-full">
-                                <div 
+                                <div
                                   className={`h-2 rounded-full ${
                                     detection.threatScore >= 80 ? 'bg-red-500' :
                                     detection.threatScore >= 60 ? 'bg-orange-500' :
-                                    detection.threatScore >= 40 ? 'bg-yellow-500' :
+                                    detection.threatScore >= 40 ? 'bg-amber-500' :
                                     'bg-green-500'
                                   }`}
                                   style={{ width: `${detection.threatScore}%` }}
