@@ -393,15 +393,15 @@ export function SecurityCopilotEnhanced({
   // Show loading state until component is mounted and initialized
   if (!isMounted || !initialized) {
     return (
-      <Card className={`${cardClassName} bg-[#0f0f0f] border-[#2a2a2a]`}>
-        <CardHeader className="pb-3 bg-[#0f0f0f]">
-          <CardTitle className="flex items-center gap-2 text-lg text-white">
+      <Card className={`${cardClassName} bg-app-surface border-app-border`}>
+        <CardHeader className="pb-3 bg-app-surface">
+          <CardTitle className="flex items-center gap-2 text-lg text-app-textPrimary">
             <Bot className="h-5 w-5 text-blue-400" />
             Security Copilot
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex-1 flex items-center justify-center bg-[#0f0f0f]">
-          <div className="flex items-center gap-2 text-gray-400">
+        <CardContent className="flex-1 flex items-center justify-center bg-app-surface">
+          <div className="flex items-center gap-2 text-app-textSecondary">
             <Loader2 className="h-4 w-4 animate-spin" />
             <span>Initializing...</span>
           </div>
@@ -411,9 +411,9 @@ export function SecurityCopilotEnhanced({
   }
 
   return (
-    <Card className={`${cardClassName} bg-[#0f0f0f] border-[#2a2a2a]`}>
-      <CardHeader className="pb-3 bg-[#0f0f0f]">
-        <CardTitle className="flex items-center justify-between text-lg text-white">
+    <Card className={`${cardClassName} bg-app-surface border-app-border`}>
+      <CardHeader className="pb-3 bg-app-surface">
+        <CardTitle className="flex items-center justify-between text-lg text-app-textPrimary">
           <div className="flex items-center gap-2">
             <Bot className="h-5 w-5 text-blue-400" />
             Security Copilot
@@ -423,8 +423,8 @@ export function SecurityCopilotEnhanced({
                 Neo4j
               </Badge>
               <Badge variant="outline" className={`text-xs ${
-                isConnected 
-                  ? 'bg-green-500/10 text-green-400 border-green-500/20' 
+                isConnected
+                  ? 'bg-green-500/10 text-green-400 border-green-500/20'
                   : 'bg-red-500/10 text-red-400 border-red-500/20'
               }`}>
                 {isConnected ? (
@@ -446,7 +446,7 @@ export function SecurityCopilotEnhanced({
               variant="ghost"
               size="sm"
               onClick={clearChat}
-              className="text-gray-400 hover:text-white hover:bg-[#2a2a2a] h-7 px-2"
+              className="text-app-textSecondary hover:text-app-textPrimary hover:bg-app-elevated h-7 px-2"
             >
               <Trash2 className="h-3 w-3 mr-1" />
               Clear
@@ -473,20 +473,20 @@ export function SecurityCopilotEnhanced({
           </Alert>
         )}
       </CardHeader>
-      
-      <CardContent className="flex-1 flex flex-col p-0 bg-[#0f0f0f]">
-        <ScrollArea className="flex-1 px-4 bg-[#0f0f0f]">
-          <div className="space-y-4 pb-4 bg-[#0f0f0f]">
+
+      <CardContent className="flex-1 flex flex-col p-0 bg-app-surface">
+        <ScrollArea className="flex-1 px-4 bg-app-surface">
+          <div className="space-y-4 pb-4 bg-app-surface">
             {messages.map((message) => (
               <div key={message.id} className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] rounded-lg p-3 ${
                   message.type === 'user'
                     ? 'bg-blue-600 text-white'
                     : message.type === 'system'
-                    ? 'bg-[#0f0f0f] border border-[#2a2a2a] text-white'
+                    ? 'bg-app-elevated border border-app-border text-app-textPrimary'
                     : message.type === 'error'
                     ? 'bg-red-900/20 border border-red-500/20 text-red-300'
-                    : 'bg-[#0f0f0f] text-white border border-[#2a2a2a]'
+                    : 'bg-app-elevated text-app-textPrimary border border-app-border'
                 }`}>
                   <div className="flex items-start gap-2">
                     {message.isLoading && (
@@ -509,7 +509,7 @@ export function SecurityCopilotEnhanced({
                           {message.metadata.error && (
                             <div className="flex items-center gap-1">
                               <AlertTriangle className="h-3 w-3 text-yellow-400" />
-                              <span className="text-xs text-gray-400">
+                              <span className="text-xs text-app-textSecondary">
                                 Error: {message.metadata.error}
                               </span>
                             </div>
@@ -518,7 +518,7 @@ export function SecurityCopilotEnhanced({
                       )}
                     </div>
                   </div>
-                  <div className="text-xs text-gray-400 mt-1">
+                  <div className="text-xs text-app-textMuted mt-1">
                     {message.timestamp.toLocaleTimeString()}
                   </div>
                 </div>
@@ -530,15 +530,15 @@ export function SecurityCopilotEnhanced({
 
         {/* Suggested Questions */}
         {messages.length <= 1 && isConnected && (
-          <div className="px-4 py-2 border-t border-[#2a2a2a] bg-[#0f0f0f]">
-            <p className="text-xs text-gray-400 mb-2">Suggested questions:</p>
+          <div className="px-4 py-2 border-t border-app-border bg-app-surface">
+            <p className="text-xs text-app-textMuted mb-2">Suggested questions:</p>
             <div className="flex flex-col gap-1">
               {suggestedQuestions.slice(0, 3).map((question, index) => (
                 <Button
                   key={index}
                   variant="ghost"
                   size="sm"
-                  className="justify-start h-auto py-2 px-2 text-xs text-gray-300 hover:bg-[#1a1a1a] hover:text-white bg-[#0f0f0f]"
+                  className="justify-start h-auto py-2 px-2 text-xs text-app-textSecondary hover:bg-app-elevated hover:text-app-textPrimary bg-app-surface"
                   onClick={() => handleSuggestedQuestion(question)}
                   disabled={isLoading || !isConnected}
                 >
@@ -551,12 +551,12 @@ export function SecurityCopilotEnhanced({
 
         {/* Context Info */}
         {context && isConnected && (
-          <div className="px-4 py-2 border-t border-[#2a2a2a] bg-[#0f0f0f]">
+          <div className="px-4 py-2 border-t border-app-border bg-app-surface">
             <div className="flex items-center gap-1 mb-1">
               <Info className="h-3 w-3 text-blue-400" />
-              <span className="text-xs font-medium text-gray-400">Email Context Loaded</span>
+              <span className="text-xs font-medium text-app-textSecondary">Email Context Loaded</span>
             </div>
-            <div className="text-xs text-gray-400 space-y-0.5">
+            <div className="text-xs text-app-textSecondary space-y-0.5">
               <div>From: {context.sender}</div>
               <div>To: {context.recipients?.join(', ') || 'N/A'}</div>
               <div>Subject: {context.subject}</div>
@@ -565,33 +565,33 @@ export function SecurityCopilotEnhanced({
         )}
 
         {/* Input */}
-        <div className="p-4 border-t border-[#2a2a2a] bg-[#0f0f0f]">
+        <div className="p-4 border-t border-app-border bg-app-surface">
           <form onSubmit={handleSubmit} className="flex gap-2">
             <Input
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={
-                !isConnected 
-                  ? "Reconnecting..." 
-                  : messageId 
-                    ? "Ask about this email..." 
+                !isConnected
+                  ? "Reconnecting..."
+                  : messageId
+                    ? "Ask about this email..."
                     : "Ask about email security..."
               }
               disabled={isLoading || !isConnected}
-              className="flex-1 bg-[#0f0f0f] border-[#2a2a2a] text-white placeholder:text-gray-400 focus:bg-[#0f0f0f] focus:border-[#2a2a2a]"
+              className="flex-1 bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted focus:bg-app-elevated focus:border-app-accent"
             />
-            <Button 
-              type="submit" 
-              size="icon" 
+            <Button
+              type="submit"
+              size="icon"
               disabled={isLoading || !input.trim() || !isConnected}
               className="bg-blue-600 hover:bg-blue-700"
             >
               <Send className="h-4 w-4" />
             </Button>
           </form>
-          <p className="text-xs text-gray-400 mt-1">
-            {isConnected 
-              ? "AI-powered email investigation assistant" 
+          <p className="text-xs text-app-textMuted mt-1">
+            {isConnected
+              ? "AI-powered email investigation assistant"
               : "Connection required for AI analysis"
             }
           </p>

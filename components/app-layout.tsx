@@ -132,7 +132,7 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
     return null
   }
 
-  const getOrgPath = (path: string) => (orgId ? /o/ : path)
+  const getOrgPath = (path: string) => (orgId ? `/o/${orgId}${path}` : path)
 
   const allMainNavItems: NavItem[] = [
     { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["dashboard.read"] },
