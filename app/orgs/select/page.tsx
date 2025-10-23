@@ -90,7 +90,7 @@ export default function OrgSelectPage() {
   }, [debouncedQuery])
 
   const handleSelectOrg = (orgId: string) => {
-    router.push(/o//login)
+    router.push(`/o/${orgId}/login`)
   }
 
   return (
