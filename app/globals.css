@@ -62,11 +62,11 @@ body {
 }
 
 .card {
-  @apply bg-app-panel border border-app-border shadow-card rounded-2xl;
+  @apply rounded-3xl border border-white/10 bg-black/40 shadow-[0_20px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl transition duration-200;
 }
 
 .surface {
-  @apply bg-app-surface border border-app-border rounded-2xl;
+  @apply rounded-3xl border border-white/10 bg-black/30 shadow-[0_20px_50px_rgba(0,0,0,0.35)] backdrop-blur-xl;
 }
 
 ::selection {

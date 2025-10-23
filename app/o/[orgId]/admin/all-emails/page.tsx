@@ -709,7 +709,7 @@ export default function AdminAllEmailsPage() {
                     <li>• AWS permissions issues</li>
                   </ul>
                 </div>
-                <Button onClick={refreshEmails} className="mt-4 bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
+                <Button onClick={refreshEmails} className="mt-4 bg-[#1f1f1f] border-white/10 text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Retry
                 </Button>
@@ -775,7 +775,7 @@ export default function AdminAllEmailsPage() {
               size="sm"
               onClick={refreshEmails}
               disabled={loading}
-              className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
+              className="bg-[#1f1f1f] border-white/10 text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
             >
               <RefreshCw className={`mr-2 ${loading ? "animate-spin" : ""}`} />
               Refresh
@@ -915,17 +915,17 @@ export default function AdminAllEmailsPage() {
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
                     placeholder="Search emails..."
-                    className="pl-10 bg-[#1f1f1f] border-[#1f1f1f] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
+                    className="pl-10 bg-[#1f1f1f] border-white/10 text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-[#2a2a2a]"
                   />
                 </div>
               </div>
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Direction</label>
                 <Select value={directionFilter} onValueChange={setDirectionFilter}>
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                  <SelectTrigger className="bg-[#1f1f1f] border-white/10 text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                     <SelectValue/>
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                  <SelectContent className="bg-[#1f1f1f] border-white/10">
                     <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
                     <SelectItem value="inbound" className="text-white focus:bg-[#2a2a2a] focus:text-white">Inbound</SelectItem>
                     <SelectItem value="outbound" className="text-white focus:bg-[#2a2a2a] focus:text-white">Outbound</SelectItem>
@@ -935,10 +935,10 @@ export default function AdminAllEmailsPage() {
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Status</label>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                  <SelectTrigger className="bg-[#1f1f1f] border-white/10 text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                     <SelectValue/>
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                  <SelectContent className="bg-[#1f1f1f] border-white/10">
                     <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
                     <SelectItem value="received" className="text-white focus:bg-[#2a2a2a] focus:text-white">Received</SelectItem>
                     <SelectItem value="analyzed" className="text-white focus:bg-[#2a2a2a] focus:text-white">Analyzed</SelectItem>
@@ -953,10 +953,10 @@ export default function AdminAllEmailsPage() {
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Flagged Category</label>
                 <Select value={flaggedFilter} onValueChange={setFlaggedFilter}>
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                  <SelectTrigger className="bg-[#1f1f1f] border-white/10 text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                     <SelectValue/>
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                  <SelectContent className="bg-[#1f1f1f] border-white/10">
                     <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
                     <SelectItem value="none" className="text-white focus:bg-[#2a2a2a] focus:text-white">None</SelectItem>
                     <SelectItem value="ai" className="text-white focus:bg-[#2a2a2a] focus:text-white">AI Flagged</SelectItem>
@@ -968,10 +968,10 @@ export default function AdminAllEmailsPage() {
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Investigation Status</label>
                 <Select value={investigationFilter} onValueChange={setInvestigationFilter}>
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                  <SelectTrigger className="bg-[#1f1f1f] border-white/10 text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                     <SelectValue/>
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                  <SelectContent className="bg-[#1f1f1f] border-white/10">
                     <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
                     <SelectItem value="new" className="text-white focus:bg-[#2a2a2a] focus:text-white">New</SelectItem>
                     <SelectItem value="in_progress" className="text-white focus:bg-[#2a2a2a] focus:text-white">In Progress</SelectItem>
@@ -982,10 +982,10 @@ export default function AdminAllEmailsPage() {
               <div>
                 <label className="block text-sm font-medium mb-2 text-white">Threat Level</label>
                 <Select value={threatFilter} onValueChange={setThreatFilter}>
-                  <SelectTrigger className="bg-[#1f1f1f] border-[#1f1f1f] text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
+                  <SelectTrigger className="bg-[#1f1f1f] border-white/10 text-white focus:bg-[#2a2a2a] focus:border-[#2a2a2a]">
                     <SelectValue/>
                   </SelectTrigger>
-                  <SelectContent className="bg-[#1f1f1f] border-[#1f1f1f]">
+                  <SelectContent className="bg-[#1f1f1f] border-white/10">
                     <SelectItem value="all" className="text-white focus:bg-[#2a2a2a] focus:text-white">All</SelectItem>
                     <SelectItem value="threats" className="text-white focus:bg-[#2a2a2a] focus:text-white">Any Threat</SelectItem>
                     <SelectItem value="critical" className="text-white focus:bg-[#2a2a2a] focus:text-white">Critical</SelectItem>
@@ -1089,12 +1089,12 @@ export default function AdminAllEmailsPage() {
                   <Button 
                     variant="outline" 
                     onClick={() => router.push(`/o/${params.orgId}/admin/company-settings/user-management`)}
-                    className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
+                    className="bg-[#1f1f1f] border-white/10 text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]"
                   >
                     <Users className="mr-2 h-4 w-4" />
                     Manage Employees
                   </Button>
-                  <Button onClick={refreshEmails} className="bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
+                  <Button onClick={refreshEmails} className="bg-[#1f1f1f] border-white/10 text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
                     <RefreshCw className="mr-2 h-4 w-4" />
                     Refresh
                   </Button>
@@ -1111,7 +1111,7 @@ export default function AdminAllEmailsPage() {
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
-                      <TableRow className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                      <TableRow className="hover:bg-[#1f1f1f] border-white/10">
                         <TableHead className="text-white w-48">Subject</TableHead>
                         <TableHead className="text-white w-44">Sender</TableHead>
                         <TableHead className="text-white w-44">Recipients</TableHead>
@@ -1125,7 +1125,7 @@ export default function AdminAllEmailsPage() {
                     </TableHeader>
                   <TableBody>
                     {filteredEmails.map(email => (
-                      <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-[#1f1f1f]">
+                      <TableRow key={email.id} className="hover:bg-[#1f1f1f] border-white/10">
                         <TableCell className="font-medium text-white">
                           <div className="w-48">
                             <div className="truncate text-sm flex items-center gap-2" title={email.subject || 'No Subject'}>
@@ -1233,7 +1233,7 @@ export default function AdminAllEmailsPage() {
 
                 {/* Pagination info at bottom */}
                 {filteredEmails.length > 0 && (
-                  <div className="text-center py-4 text-gray-400 border-t border-[#1f1f1f] mt-4">
+                  <div className="text-center py-4 text-gray-400 border-t border-white/10 mt-4">
                     <div className="text-sm">
                       Showing {filteredEmails.length} emails on page {currentPage}
                       {hasMore && <span className="text-blue-400"> • More pages available</span>}
@@ -1256,11 +1256,11 @@ export default function AdminAllEmailsPage() {
             }}
           >
             <div 
-              className="bg-[#0f0f0f] border border-[#1f1f1f] rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
+              className="bg-[#0f0f0f] border border-white/10 rounded-lg w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="border-b border-[#1f1f1f] p-6 flex justify-between items-center">
+              <div className="border-b border-white/10 p-6 flex justify-between items-center">
                 <h3 className="text-xl font-semibold text-white">Email Details</h3>
                 <div className="flex items-center gap-3">
                   {(selectedEmail.flaggedCategory === 'none' || selectedEmail.flaggedCategory === 'clean') && (
@@ -1307,7 +1307,7 @@ export default function AdminAllEmailsPage() {
               </div>
               
               {/* Tabs */}
-              <div className="border-b border-[#1f1f1f] px-6">
+              <div className="border-b border-white/10 px-6">
                 <div className="flex space-x-6">
                   <button
                     className={`py-2 px-1 border-b-2 text-sm font-medium ${

@@ -16,9 +16,9 @@ interface InteractiveLineChartProps {
 
 export function InteractiveLineChart({ title, data, color = "#3b82f6" }: InteractiveLineChartProps) {
   return (
-    <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+    <Card className="card text-white transition-all duration-300">
       <CardHeader>
-        <CardTitle className="text-white">{title}</CardTitle>
+        <CardTitle className="text-lg font-semibold text-white">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="h-64">
