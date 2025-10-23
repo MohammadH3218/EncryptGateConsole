@@ -49,7 +49,7 @@ export function CompletedDetections({ detections }: CompletedDetectionsProps) {
                   <p className="text-sm font-medium text-app-textPrimary">{detection.name}</p>
                   <p className="text-xs text-app-textSecondary">Resolved by {detection.resolvedBy}</p>
                 </div>
-                <Badge className={${getSeverityClasses(detection.severity)} text-xs}> 
+                <Badge className={`${getSeverityClasses(detection.severity)} text-xs`}> 
                   {detection.severity}
                 </Badge>
               </div>
