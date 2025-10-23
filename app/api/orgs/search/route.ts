@@ -38,10 +38,11 @@ export async function GET(request: NextRequest) {
     do {
       const scanCommand = new ScanCommand({
         TableName: ORGANIZATIONS_TABLE,
-        ProjectionExpression: "#id, #name, orgCode, region",
+        ProjectionExpression: "#id, #name, orgCode, #region",
         ExpressionAttributeNames: {
           "#id": "organizationId",
           "#name": "name",
+          "#region": "region",
         },
         ExclusiveStartKey: lastEvaluatedKey,
         Limit: 200,
