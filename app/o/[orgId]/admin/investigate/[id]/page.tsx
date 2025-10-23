@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft,
-  ArrowUpRight,
   AlertTriangle,
   FileText,
   Mail,
@@ -12,17 +11,24 @@ import {
   User,
   Clock,
   Copy,
+  ExternalLink,
+  Network,
+  Flag,
+  MessageSquare,
+  Bot,
+  ChevronRight,
 } from "lucide-react"
 
 import { AppLayout } from "@/components/app-layout"
 import { FadeInSection } from "@/components/fade-in-section"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Kebab } from "@/components/ui/kebab"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot"
 import { cn } from "@/lib/utils"
 
 type Investigation = {
@@ -35,6 +41,12 @@ type Investigation = {
   createdAt?: string
   description?: string
   assigneeName?: string
+  notes?: Array<{
+    id: string
+    content: string
+    author: string
+    timestamp: string
+  }>
 }
 
 type EmailData = {
@@ -68,7 +80,8 @@ export default function InvestigatePage() {
   const [escalateDialogOpen, setEscalateDialogOpen] = useState(false)
   const [notes, setNotes] = useState("")
 
-  const [activeTab, setActiveTab] = useState<"content" | "html" | "headers" | "attachments">("content")
+  const [activeMainTab, setActiveMainTab] = useState<"overview" | "email" | "copilot" | "notes">("overview")
+  const [activeEmailTab, setActiveEmailTab] = useState<"content" | "html" | "headers" | "attachments">("content")
 
   const fetchInvestigation = useCallback(async () => {
     try {
@@ -202,32 +215,47 @@ export default function InvestigatePage() {
     }
   }
 
-  const severityTone = useMemo(() => {
+  const severityConfig = useMemo(() => {
     const severity = (investigation?.severity || "medium").toLowerCase()
-    if (severity === "critical") return "text-red-400 border-red-500/50"
-    if (severity === "high") return "text-orange-300 border-orange-500/50"
-    if (severity === "low") return "text-blue-300 border-blue-500/50"
-    return "text-yellow-300 border-yellow-500/50"
+    const configs = {
+      critical: { text: "Critical", color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/50" },
+      high: { text: "High", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/50" },
+      medium: { text: "Medium", color: "text-yellow-400", bg: "bg-yellow-500/10", border: "border-yellow-500/50" },
+      low: { text: "Low", color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/50" },
+    }
+    return configs[severity as keyof typeof configs] || configs.medium
   }, [investigation?.severity])
 
+  const statusConfig = useMemo(() => {
+    const status = (investigation?.status || "in_progress").toLowerCase()
+    const configs = {
+      new: { text: "New", color: "text-blue-400", bg: "bg-blue-500/10" },
+      in_progress: { text: "In Progress", color: "text-yellow-400", bg: "bg-yellow-500/10" },
+      resolved: { text: "Resolved", color: "text-green-400", bg: "bg-green-500/10" },
+      escalated: { text: "Escalated", color: "text-red-400", bg: "bg-red-500/10" },
+    }
+    return configs[status as keyof typeof configs] || configs.in_progress
+  }, [investigation?.status])
+
   const backToAssignments = () => router.push(`/o/${orgId}/admin/assignments`)
-  const backToDetections = () => router.push(`/o/${orgId}/admin/detections`)
 
   if (loading) {
     return (
       <AppLayout>
         <FadeInSection>
-          <div className="max-w-[1200px] space-y-6">
-            <Card className="card p-10">
-              <div className="flex items-center gap-3 text-white/80">
-                <Shield className="h-5 w-5" />
-                <span>Loading investigation…</span>
-              </div>
-              <div className="mt-6 grid gap-4 md:grid-cols-2">
-                <Skeleton className="h-6 w-48" />
-                <Skeleton className="h-6 w-56" />
-                <Skeleton className="h-24 md:col-span-2" />
-              </div>
+          <div className="max-w-[1400px] space-y-6">
+            <Card className="bg-app-surface border-app-border">
+              <CardContent className="p-10">
+                <div className="flex items-center gap-3 text-app-textPrimary">
+                  <Shield className="h-5 w-5 text-app-accent" />
+                  <span>Loading investigation…</span>
+                </div>
+                <div className="mt-6 grid gap-4 md:grid-cols-2">
+                  <Skeleton className="h-6 w-48 bg-app-elevated" />
+                  <Skeleton className="h-6 w-56 bg-app-elevated" />
+                  <Skeleton className="h-24 md:col-span-2 bg-app-elevated" />
+                </div>
+              </CardContent>
             </Card>
           </div>
         </FadeInSection>
@@ -238,290 +266,511 @@ export default function InvestigatePage() {
   return (
     <AppLayout>
       <FadeInSection>
-        <div className="max-w-[1200px] space-y-6">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3 text-sm">
+        <div className="max-w-[1400px] space-y-6">
+          {/* Header */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={backToAssignments}
-                className="pressable text-white/70 hover:bg-white/5 hover:text-white focus-visible:outline-none focus-ring"
+                className="text-app-textSecondary hover:bg-app-elevated hover:text-app-textPrimary"
               >
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to Assignments
               </Button>
-              <span className="hidden h-4 w-px bg-app-border lg:block" />
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={backToDetections}
-                className="pressable text-white/70 hover:bg-white/5 hover:text-white focus-visible:outline-none focus-ring"
-              >
-                Back to Detections
-              </Button>
             </div>
-            <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${severityTone}`}>
-              {(investigation?.severity || "Medium").toString().toUpperCase()} PRIORITY
-            </span>
+            <div className="flex items-center gap-2">
+              <Badge className={`${severityConfig.bg} ${severityConfig.color} border ${severityConfig.border}`}>
+                <Flag className="mr-1 h-3 w-3" />
+                {severityConfig.text} Priority
+              </Badge>
+              <Badge className={`${statusConfig.bg} ${statusConfig.color}`}>
+                {statusConfig.text}
+              </Badge>
+            </div>
           </div>
 
+          {/* Investigation Title Card */}
+          <Card className="bg-app-surface border-app-border">
+            <CardHeader>
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 space-y-2">
+                  <CardTitle className="text-2xl text-app-textPrimary flex items-center gap-2">
+                    <Shield className="h-6 w-6 text-app-accent" />
+                    Email Investigation
+                  </CardTitle>
+                  <CardDescription className="text-app-textSecondary text-base">
+                    {email?.subject || "(No subject)"}
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigator.clipboard.writeText(messageId)}
+                  className="border-app-border bg-app-elevated text-app-textSecondary hover:bg-app-overlay hover:text-app-textPrimary"
+                >
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy ID
+                </Button>
+              </div>
+            </CardHeader>
+          </Card>
+
           {error ? (
-            <Card className="card border-red-500/40 bg-red-500/5 text-red-200">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-red-200">
+            <Card className="bg-red-500/5 border-red-500/40">
+              <CardContent className="p-6">
+                <div className="flex items-center gap-2 text-red-400">
                   <AlertTriangle className="h-5 w-5" />
-                  Error loading investigation
-                </CardTitle>
-              </CardHeader>
-              <CardContent>{error}</CardContent>
+                  <span className="font-medium">Error loading investigation</span>
+                </div>
+                <p className="mt-2 text-red-300">{error}</p>
+              </CardContent>
             </Card>
           ) : null}
 
-          <Card className="card">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-white">
-                  <Shield className="h-5 w-5" />
-                  Investigation Details
-                </CardTitle>
-                <Badge variant="outline" className="border-app-border text-white/70">
-                  ID: {messageId}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid gap-6 md:grid-cols-2">
-                <Meta label="Email Subject" icon={<Mail className="h-4 w-4" />}>
-                  {email?.subject || "(No subject)"}
-                </Meta>
-                <Meta label="Sender" icon={<User className="h-4 w-4" />}>
-                  {email?.sender || "—"}
-                </Meta>
-                <Meta label="Recipient(s)" icon={<User className="h-4 w-4" />}>
-                  {email?.recipients?.join(", ") || "—"}
-                </Meta>
-                <Meta label="Created" icon={<Clock className="h-4 w-4" />}>
-                  {investigation?.createdAt
-                    ? new Date(investigation.createdAt).toLocaleString()
-                    : email?.timestamp
-                    ? new Date(email.timestamp).toLocaleString()
-                    : "—"}
-                </Meta>
-              </div>
-
-              {investigation?.description ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-white/60">
-                    <Shield className="h-4 w-4" />
-                    <span className="text-sm">Description</span>
-                  </div>
-                  <p className="text-white/90">{investigation.description}</p>
-                </div>
-              ) : null}
-            </CardContent>
-          </Card>
-
-          <Card className="card">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base text-white">Investigation Actions</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap items-center gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setNotesDialogOpen(true)}
-                className="pressable border-app-border bg-app-surface text-white hover:bg-white/5 focus-visible:outline-none focus-ring"
+          {/* Main Tabs */}
+          <Tabs value={activeMainTab} onValueChange={(v) => setActiveMainTab(v as any)} className="space-y-6">
+            <TabsList className="inline-flex h-12 items-center justify-start gap-1 rounded-xl bg-app-elevated p-1 border border-app-border">
+              <TabsTrigger
+                value="overview"
+                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
               >
-                Mark as Resolved
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setEscalateDialogOpen(true)}
-                className="pressable border-app-border bg-app-surface text-white hover:bg-white/5 focus-visible:outline-none focus-ring"
+                <Shield className="mr-2 h-4 w-4" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger
+                value="email"
+                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
               >
-                Escalate to Admin
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setNotesDialogOpen(true)}
-                className="pressable border-app-border bg-app-surface text-white hover:bg-white/5 focus-visible:outline-none focus-ring"
+                <Mail className="mr-2 h-4 w-4" />
+                Email Analysis
+              </TabsTrigger>
+              <TabsTrigger
+                value="copilot"
+                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
               >
-                Add Notes
-              </Button>
-              <div className="ml-auto">
-                <Kebab
-                  items={[
-                    {
-                      label: "Copy Message-ID",
-                      onClick: () => navigator.clipboard.writeText(messageId),
-                    },
-                    {
-                      label: "Open raw email in new tab",
-                      onClick: () => window.open(`/api/email/raw?messageId=${encodeURIComponent(messageId)}`, "_blank"),
-                    },
-                  ]}
-                />
-              </div>
-            </CardContent>
-          </Card>
+                <Bot className="mr-2 h-4 w-4" />
+                AI Copilot
+              </TabsTrigger>
+              <TabsTrigger
+                value="notes"
+                className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary data-[state=active]:shadow-sm text-app-textSecondary"
+              >
+                <MessageSquare className="mr-2 h-4 w-4" />
+                Investigation Notes
+              </TabsTrigger>
+            </TabsList>
 
-          <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <Card className="card">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base text-white">Email</CardTitle>
-                  <div className="inline-flex rounded-lg border border-app-border bg-app-surface p-0.5">
-                    {(["content", "html", "headers", "attachments"] as const).map((tab) => (
-                      <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={cn(
-                          "rounded-md px-3 py-1.5 text-xs capitalize transition-colors",
-                          activeTab === tab ? "bg-white/10 text-white" : "text-white/70 hover:bg-white/5",
-                        )}
-                      >
-                        {tab}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {activeTab === "content" && (
-                  <div className="prose prose-invert max-w-none">
-                    {email?.body ? (
-                      <pre className="whitespace-pre-wrap text-white/90">{email.body}</pre>
-                    ) : email?.bodyHtml ? (
-                      <div
-                        className="overflow-hidden rounded-xl border border-app-border bg-app-surface"
-                        dangerouslySetInnerHTML={{ __html: email.bodyHtml }}
-                      />
-                    ) : (
-                      <EmptyState label="No email content available" />
+            {/* Overview Tab */}
+            <TabsContent value="overview" className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-2">
+                {/* Investigation Details */}
+                <Card className="bg-app-surface border-app-border">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-app-textPrimary">Investigation Details</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <MetaRow label="Status" icon={<Flag className="h-4 w-4" />}>
+                      <Badge className={`${statusConfig.bg} ${statusConfig.color}`}>
+                        {statusConfig.text}
+                      </Badge>
+                    </MetaRow>
+                    <MetaRow label="Priority" icon={<AlertTriangle className="h-4 w-4" />}>
+                      <Badge className={`${severityConfig.bg} ${severityConfig.color}`}>
+                        {severityConfig.text}
+                      </Badge>
+                    </MetaRow>
+                    <MetaRow label="Created" icon={<Clock className="h-4 w-4" />}>
+                      {investigation?.createdAt
+                        ? new Date(investigation.createdAt).toLocaleString()
+                        : email?.timestamp
+                        ? new Date(email.timestamp).toLocaleString()
+                        : "—"}
+                    </MetaRow>
+                    {investigation?.assigneeName && (
+                      <MetaRow label="Assigned To" icon={<User className="h-4 w-4" />}>
+                        {investigation.assigneeName}
+                      </MetaRow>
                     )}
-                  </div>
-                )}
-
-                {activeTab === "html" && (
-                  <>
-                    {email?.bodyHtml ? (
-                      <div
-                        className="overflow-hidden rounded-xl border border-app-border bg-app-surface"
-                        dangerouslySetInnerHTML={{ __html: email.bodyHtml }}
-                      />
-                    ) : (
-                      <EmptyState label="No HTML body" />
-                    )}
-                  </>
-                )}
-
-                {activeTab === "headers" && (
-                  <>
-                    {email?.headers ? (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <tbody>
-                            {Object.entries(email.headers).map(([key, value]) => (
-                              <tr key={key} className="border-b border-app-border/60 hover:bg-white/5">
-                                <td className="w-48 px-3 py-2 text-white/60">{key}</td>
-                                <td className="px-3 py-2 text-white/90">{String(value)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                    {investigation?.description && (
+                      <div className="pt-2 border-t border-app-border">
+                        <div className="text-sm font-medium text-app-textSecondary mb-2">Description</div>
+                        <p className="text-app-textPrimary text-sm">{investigation.description}</p>
                       </div>
-                    ) : (
-                      <EmptyState label="No headers available" />
                     )}
-                  </>
-                )}
+                  </CardContent>
+                </Card>
 
-                {activeTab === "attachments" && (
-                  <>
-                    {email?.attachments && email.attachments.length > 0 ? (
-                      <ul className="space-y-2">
-                        {email.attachments.map((attachment, index) => (
-                          <li
-                            key={`${attachment.name}-${index}`}
-                            className="flex items-center justify-between rounded-lg border border-app-border bg-app-surface px-3 py-2"
-                          >
-                            <div className="flex items-center gap-2 text-sm">
-                              <FileText className="h-4 w-4" />
-                              <span>{attachment.name}</span>
+                {/* Email Metadata */}
+                <Card className="bg-app-surface border-app-border">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-app-textPrimary">Email Metadata</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <MetaRow label="Subject" icon={<Mail className="h-4 w-4" />}>
+                      {email?.subject || "(No subject)"}
+                    </MetaRow>
+                    <MetaRow label="From" icon={<User className="h-4 w-4" />}>
+                      {email?.sender || "—"}
+                    </MetaRow>
+                    <MetaRow label="To" icon={<User className="h-4 w-4" />}>
+                      {email?.recipients?.join(", ") || "—"}
+                    </MetaRow>
+                    <MetaRow label="Timestamp" icon={<Clock className="h-4 w-4" />}>
+                      {email?.timestamp ? new Date(email.timestamp).toLocaleString() : "—"}
+                    </MetaRow>
+                    <MetaRow label="Message ID" icon={<Network className="h-4 w-4" />}>
+                      <code className="text-xs bg-app-elevated px-2 py-1 rounded">
+                        {messageId.length > 40 ? `${messageId.substring(0, 40)}...` : messageId}
+                      </code>
+                    </MetaRow>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Quick Actions */}
+              <Card className="bg-app-surface border-app-border">
+                <CardHeader>
+                  <CardTitle className="text-lg text-app-textPrimary">Investigation Actions</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      onClick={() => setNotesDialogOpen(true)}
+                      className="bg-app-accent hover:bg-app-accentHover text-white"
+                    >
+                      <MessageSquare className="mr-2 h-4 w-4" />
+                      Mark as Resolved
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setEscalateDialogOpen(true)}
+                      className="border-app-border bg-app-elevated text-app-textPrimary hover:bg-app-overlay"
+                    >
+                      <AlertTriangle className="mr-2 h-4 w-4" />
+                      Escalate to Admin
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setNotesDialogOpen(true)}
+                      className="border-app-border bg-app-elevated text-app-textPrimary hover:bg-app-overlay"
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Add Notes
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => window.open(`/api/email/raw?messageId=${encodeURIComponent(messageId)}`, "_blank")}
+                      className="border-app-border bg-app-elevated text-app-textPrimary hover:bg-app-overlay"
+                    >
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      View Raw Email
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            {/* Email Analysis Tab */}
+            <TabsContent value="email" className="space-y-6">
+              <Card className="bg-app-surface border-app-border">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg text-app-textPrimary">Email Content</CardTitle>
+                    <Tabs value={activeEmailTab} onValueChange={(v) => setActiveEmailTab(v as any)}>
+                      <TabsList className="h-10 bg-app-elevated border border-app-border">
+                        <TabsTrigger value="content" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                          Content
+                        </TabsTrigger>
+                        <TabsTrigger value="html" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                          HTML
+                        </TabsTrigger>
+                        <TabsTrigger value="headers" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                          Headers
+                        </TabsTrigger>
+                        <TabsTrigger value="attachments" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                          Attachments
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {activeEmailTab === "content" && (
+                    <div className="prose prose-invert max-w-none">
+                      {email?.body ? (
+                        <pre className="whitespace-pre-wrap text-app-textPrimary bg-app-elevated p-4 rounded-lg border border-app-border text-sm">
+                          {email.body}
+                        </pre>
+                      ) : email?.bodyHtml ? (
+                        <div
+                          className="overflow-hidden rounded-lg border border-app-border bg-white p-4"
+                          dangerouslySetInnerHTML={{ __html: email.bodyHtml }}
+                        />
+                      ) : (
+                        <EmptyState label="No email content available" />
+                      )}
+                    </div>
+                  )}
+
+                  {activeEmailTab === "html" && (
+                    <>
+                      {email?.bodyHtml ? (
+                        <div
+                          className="overflow-hidden rounded-lg border border-app-border bg-white p-4"
+                          dangerouslySetInnerHTML={{ __html: email.bodyHtml }}
+                        />
+                      ) : (
+                        <EmptyState label="No HTML body available" />
+                      )}
+                    </>
+                  )}
+
+                  {activeEmailTab === "headers" && (
+                    <>
+                      {email?.headers ? (
+                        <div className="overflow-x-auto rounded-lg border border-app-border">
+                          <table className="w-full text-sm">
+                            <tbody className="divide-y divide-app-border">
+                              {Object.entries(email.headers).map(([key, value]) => (
+                                <tr key={key} className="hover:bg-app-elevated transition-colors">
+                                  <td className="w-48 px-4 py-3 font-mono text-xs text-app-textSecondary">{key}</td>
+                                  <td className="px-4 py-3 text-app-textPrimary font-mono text-xs break-all">{String(value)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <EmptyState label="No headers available" />
+                      )}
+                    </>
+                  )}
+
+                  {activeEmailTab === "attachments" && (
+                    <>
+                      {email?.attachments && email.attachments.length > 0 ? (
+                        <div className="space-y-2">
+                          {email.attachments.map((attachment, index) => (
+                            <div
+                              key={`${attachment.name}-${index}`}
+                              className="flex items-center justify-between rounded-lg border border-app-border bg-app-elevated px-4 py-3 hover:bg-app-overlay transition-colors"
+                            >
+                              <div className="flex items-center gap-3">
+                                <FileText className="h-5 w-5 text-app-accent" />
+                                <div>
+                                  <div className="text-sm font-medium text-app-textPrimary">{attachment.name}</div>
+                                  {attachment.size && (
+                                    <div className="text-xs text-app-textMuted">
+                                      {(attachment.size / 1024).toFixed(2)} KB
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              {attachment.url ? (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  asChild
+                                  className="border-app-border text-app-textSecondary hover:text-app-textPrimary"
+                                >
+                                  <a href={attachment.url} target="_blank" rel="noreferrer">
+                                    <ExternalLink className="mr-2 h-3 w-3" />
+                                    Download
+                                  </a>
+                                </Button>
+                              ) : null}
                             </div>
-                            {attachment.url ? (
-                              <a
-                                href={attachment.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs text-white/80 underline hover:text-white"
-                              >
-                                Download
-                              </a>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <EmptyState label="No attachments" />
-                    )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
+                          ))}
+                        </div>
+                      ) : (
+                        <EmptyState label="No attachments" />
+                      )}
+                    </>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-            <CopilotPanel
-              email={email}
-              orgId={orgId}
-            />
-          </div>
+            {/* AI Copilot Tab */}
+            <TabsContent value="copilot" className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
+                <Card className="bg-app-surface border-app-border">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-app-textPrimary flex items-center gap-2">
+                      <Bot className="h-5 w-5 text-app-accent" />
+                      AI-Powered Investigation Assistant
+                    </CardTitle>
+                    <CardDescription className="text-app-textSecondary">
+                      Ask questions about this email, analyze threats, and get AI-powered recommendations
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <div className="h-[600px]">
+                      <SecurityCopilotEnhanced
+                        emailData={email}
+                        messageId={messageId}
+                        className="border-0 h-full"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="space-y-4">
+                  <Card className="bg-app-surface border-app-border">
+                    <CardHeader>
+                      <CardTitle className="text-base text-app-textPrimary">Quick Analysis</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <InfoItem label="Email Source">
+                        {email?.sender || "Unknown"}
+                      </InfoItem>
+                      <InfoItem label="Recipients">
+                        {email?.recipients?.length || 0} recipient(s)
+                      </InfoItem>
+                      <InfoItem label="Attachments">
+                        {email?.attachments?.length || 0} file(s)
+                      </InfoItem>
+                      <InfoItem label="Analysis Status">
+                        <Badge className="bg-blue-500/10 text-blue-400">
+                          {investigation?.status || "In Progress"}
+                        </Badge>
+                      </InfoItem>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-app-surface border-app-border">
+                    <CardHeader>
+                      <CardTitle className="text-base text-app-textPrimary">Suggested Questions</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      <p className="text-xs text-app-textMuted mb-3">Try asking the AI copilot:</p>
+                      <div className="space-y-1">
+                        {[
+                          "Is this email a phishing attempt?",
+                          "Analyze the sender's reputation",
+                          "Check for malicious URLs or attachments",
+                          "What actions should I take?",
+                        ].map((question, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-xs text-app-textSecondary p-2 rounded bg-app-elevated">
+                            <ChevronRight className="h-3 w-3 mt-0.5 flex-shrink-0 text-app-accent" />
+                            <span>{question}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Investigation Notes Tab */}
+            <TabsContent value="notes" className="space-y-6">
+              <Card className="bg-app-surface border-app-border">
+                <CardHeader>
+                  <CardTitle className="text-lg text-app-textPrimary">Investigation Timeline</CardTitle>
+                  <CardDescription className="text-app-textSecondary">
+                    Track all actions, notes, and changes related to this investigation
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {investigation?.notes && investigation.notes.length > 0 ? (
+                    <div className="space-y-4">
+                      {investigation.notes.map((note) => (
+                        <div key={note.id} className="border-l-2 border-app-accent pl-4 py-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-sm font-medium text-app-textPrimary">{note.author}</span>
+                            <span className="text-xs text-app-textMuted">
+                              {new Date(note.timestamp).toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-sm text-app-textSecondary">{note.content}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState label="No investigation notes yet. Add notes to track your progress." />
+                  )}
+
+                  <div className="mt-6">
+                    <Button
+                      onClick={() => setNotesDialogOpen(true)}
+                      className="bg-app-accent hover:bg-app-accentHover text-white"
+                    >
+                      <FileText className="mr-2 h-4 w-4" />
+                      Add Investigation Note
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </div>
       </FadeInSection>
 
+      {/* Dialogs */}
       <Dialog open={notesDialogOpen} onOpenChange={setNotesDialogOpen}>
-        <DialogContent className="max-w-lg border-app-border bg-app-panel text-white">
+        <DialogContent className="border-app-border bg-app-surface text-app-textPrimary">
           <DialogHeader>
-            <DialogTitle>Add notes</DialogTitle>
+            <DialogTitle>Add Investigation Notes</DialogTitle>
           </DialogHeader>
           <Textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            placeholder="Investigation notes (visible to your team)…"
-            className="bg-app-surface text-white"
+            placeholder="Enter your investigation notes here..."
+            className="bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted min-h-[120px]"
           />
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setNotesDialogOpen(false)} className="text-white/70">
+            <Button
+              variant="ghost"
+              onClick={() => setNotesDialogOpen(false)}
+              className="text-app-textSecondary hover:text-app-textPrimary"
+            >
               Cancel
             </Button>
-            <Button onClick={markResolved} disabled={saving} className="pressable">
-              Save &amp; mark resolved
+            <Button
+              onClick={markResolved}
+              disabled={saving}
+              className="bg-app-accent hover:bg-app-accentHover text-white"
+            >
+              {saving ? "Saving..." : "Save & Mark Resolved"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       <Dialog open={escalateDialogOpen} onOpenChange={setEscalateDialogOpen}>
-        <DialogContent className="max-w-md border-app-border bg-app-panel text-white">
+        <DialogContent className="border-app-border bg-app-surface text-app-textPrimary">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-white">
+            <DialogTitle className="flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-yellow-400" />
-              Escalate to admin?
+              Escalate Investigation
             </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-white/70">
-            Provide an optional reason. This will be included in the escalation report.
+          <p className="text-sm text-app-textSecondary">
+            Provide a reason for escalating this investigation to an administrator.
           </p>
           <Textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            placeholder="Reason for escalation"
-            className="bg-app-surface text-white"
+            placeholder="Reason for escalation..."
+            className="bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted min-h-[120px]"
           />
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setEscalateDialogOpen(false)} className="text-white/70">
+            <Button
+              variant="ghost"
+              onClick={() => setEscalateDialogOpen(false)}
+              className="text-app-textSecondary hover:text-app-textPrimary"
+            >
               Cancel
             </Button>
-            <Button onClick={escalate} disabled={saving} className="pressable">
-              Escalate
+            <Button
+              onClick={escalate}
+              disabled={saving}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {saving ? "Escalating..." : "Escalate to Admin"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -530,7 +779,7 @@ export default function InvestigatePage() {
   )
 }
 
-function Meta({
+function MetaRow({
   label,
   icon,
   children,
@@ -540,93 +789,30 @@ function Meta({
   children: React.ReactNode
 }) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2 text-white/60">
+    <div className="flex items-start gap-3">
+      <div className="flex items-center gap-2 text-app-textSecondary min-w-[120px]">
         {icon}
-        <span className="text-sm">{label}</span>
+        <span className="text-sm font-medium">{label}</span>
       </div>
-      <div className="text-white font-medium">{children}</div>
+      <div className="flex-1 text-app-textPrimary text-sm font-medium">{children}</div>
+    </div>
+  )
+}
+
+function InfoItem({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-app-border last:border-0">
+      <span className="text-xs text-app-textSecondary">{label}</span>
+      <span className="text-xs text-app-textPrimary font-medium">{children}</span>
     </div>
   )
 }
 
 function EmptyState({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-dashed border-app-border/60 bg-app-surface px-3 py-3 text-sm text-white/60">
-      <Copy className="h-4 w-4" />
-      {label}
+    <div className="flex items-center gap-3 rounded-lg border border-dashed border-app-border bg-app-elevated px-6 py-8 text-center justify-center">
+      <Copy className="h-5 w-5 text-app-textMuted" />
+      <span className="text-app-textMuted">{label}</span>
     </div>
-  )
-}
-
-function CopilotPanel({ email, orgId }: { email: EmailData | null; orgId: string }) {
-  const [busy, setBusy] = useState(false)
-  const [output, setOutput] = useState("")
-
-  const run = async (action: "summarize" | "analyze" | "suggest") => {
-    if (!email) return
-    setBusy(true)
-    setOutput("")
-    try {
-      const response = await fetch("/api/copilot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action,
-          orgId,
-          email: {
-            subject: email.subject,
-            body: email.body,
-            bodyHtml: email.bodyHtml,
-            headers: email.headers,
-            sender: email.sender,
-            recipients: email.recipients,
-            timestamp: email.timestamp,
-          },
-        }),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        setOutput(data.text ?? JSON.stringify(data))
-      } else {
-        setOutput("Copilot endpoint returned an error.")
-      }
-    } catch (error) {
-      console.warn("Copilot request failed", error)
-      setOutput("Copilot endpoint is not available.")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Card className="card">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base text-white">Copilot</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <Button onClick={() => run("summarize")} disabled={!email || busy} className="pressable">
-            Summarize Email
-          </Button>
-          <Button onClick={() => run("analyze")} disabled={!email || busy} className="pressable">
-            Analyze Threat
-          </Button>
-          <Button onClick={() => run("suggest")} disabled={!email || busy} className="pressable">
-            Suggest Action
-          </Button>
-        </div>
-        <div className="min-h-[140px] rounded-xl border border-app-border bg-app-surface p-3 text-sm text-white/80">
-          {busy ? "Thinking…" : output || "Results will appear here."}
-        </div>
-        <a
-          href={`/o/${orgId}/admin/all-emails?messageId=${encodeURIComponent(email?.messageId || "")}`}
-          className="inline-flex items-center gap-1 text-sm text-white/80 hover:underline"
-        >
-          Open in All Emails <ArrowUpRight className="h-3 w-3" />
-        </a>
-      </CardContent>
-    </Card>
   )
 }
