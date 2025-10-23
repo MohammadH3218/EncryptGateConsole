@@ -13,22 +13,22 @@ interface AutoBlockedEmailsProps {
 
 export function AutoBlockedEmails({ data, total }: AutoBlockedEmailsProps) {
   return (
-    <Card className="card text-white transition-all duration-300">
+    <Card className="transition duration-200 hover:border-app-border hover:shadow-[var(--shadow-md)]">
       <CardHeader>
-        <CardTitle className="text-lg font-semibold text-white">Auto-Blocked Emails</CardTitle>
+        <CardTitle className="text-lg font-semibold text-app-textPrimary">Auto-Blocked Emails</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="mb-2 text-2xl font-bold text-white">{total}</div>
-        <p className="mb-4 text-sm text-white/60">Total blocked</p>
+        <div className="mb-2 text-2xl font-bold text-app-textPrimary">{total}</div>
+        <p className="mb-4 text-sm text-app-textSecondary">Total blocked</p>
 
         <div className="space-y-2">
           {data.slice(0, 3).map((email, index) => (
             <div
               key={index}
-              className="rounded-2xl border border-white/5 bg-white/5 px-3 py-2 transition duration-200 hover:border-blue-400/40"
+              className="rounded-2xl border border-white/5 bg-white/[0.04] px-3 py-2 transition duration-200 hover:border-app-ring/60"
             >
-              <p className="truncate text-sm font-medium text-white">{email.sender}</p>
-              <p className="text-xs text-white/60">{email.reason}</p>
+              <p className="truncate text-sm font-medium text-app-textPrimary">{email.sender}</p>
+              <p className="text-xs text-app-textSecondary">{email.reason}</p>
             </div>
           ))}
         </div>

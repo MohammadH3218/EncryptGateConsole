@@ -14,28 +14,28 @@ interface InteractiveLineChartProps {
   color?: string
 }
 
-export function InteractiveLineChart({ title, data, color = "#3b82f6" }: InteractiveLineChartProps) {
+export function InteractiveLineChart({ title, data, color = "#3B82F6" }: InteractiveLineChartProps) {
   return (
-    <Card className="card text-white transition-all duration-300">
+    <Card className="transition duration-200 hover:border-app-border hover:shadow-[var(--shadow-md)]">
       <CardHeader>
-        <CardTitle className="text-lg font-semibold text-white">{title}</CardTitle>
+        <CardTitle className="text-lg font-semibold text-app-textPrimary">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-              <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#9ca3af", fontSize: 12 }} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fill: "#9ca3af", fontSize: 12 }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#2C2C2C" opacity={0.4} />
+              <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: "#B0B0B0", fontSize: 12 }} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fill: "#B0B0B0", fontSize: 12 }} />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "#1f1f1f",
-                  border: "none",
-                  borderRadius: "8px",
-                  color: "#ffffff",
-                  boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                  backgroundColor: "#1E1E1E",
+                  border: "1px solid #2C2C2C",
+                  borderRadius: "12px",
+                  color: "#E0E0E0",
+                  boxShadow: "var(--shadow-md)",
                 }}
-                labelStyle={{ color: "#9ca3af" }}
+                labelStyle={{ color: "#B0B0B0" }}
               />
               <Line
                 type="monotone"

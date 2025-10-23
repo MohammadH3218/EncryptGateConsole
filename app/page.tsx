@@ -19,7 +19,7 @@ export default function LandingPage() {
   // Landing page always renders - no loading state needed
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-app p-4 relative overflow-hidden">
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
         <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/5 rounded-full blur-3xl animate-pulse delay-1000"></div>
@@ -29,7 +29,7 @@ export default function LandingPage() {
       <div className="w-full max-w-4xl relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
           {/* Left side - Hero content */}
-          <div className="text-white space-y-8">
+          <div className="text-app-textPrimary space-y-8">
             <div className="flex items-center gap-3 group">
               <div className="transition-transform duration-300 group-hover:scale-110">
                 <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
@@ -40,14 +40,14 @@ export default function LandingPage() {
                 <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent">
                   EncryptGate
                 </h1>
-                <p className="text-gray-400 text-sm">Email Security Platform</p>
+                <p className="text-app-textSecondary text-sm">Email Security Platform</p>
               </div>
             </div>
 
             <div className="space-y-6">
               <h2 className="text-3xl font-bold">Secure Your Organization's Email</h2>
-              <p className="text-xl text-gray-300 leading-relaxed">
-                Protect your team with advanced email security monitoring, threat detection, 
+              <p className="text-xl text-app-textSecondary leading-relaxed">
+                Protect your team with advanced email security monitoring, threat detection,
                 and comprehensive security analytics.
               </p>
               
@@ -56,36 +56,36 @@ export default function LandingPage() {
                   <div className="w-8 h-8 bg-blue-500/20 rounded-lg flex items-center justify-center">
                     <Mail className="w-4 h-4 text-blue-400" />
                   </div>
-                  <span className="text-gray-300">Email Monitoring</span>
+                  <span className="text-app-textSecondary">Email Monitoring</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-purple-500/20 rounded-lg flex items-center justify-center">
                     <Shield className="w-4 h-4 text-purple-400" />
                   </div>
-                  <span className="text-gray-300">Threat Detection</span>
+                  <span className="text-app-textSecondary">Threat Detection</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-green-500/20 rounded-lg flex items-center justify-center">
                     <Users className="w-4 h-4 text-green-400" />
                   </div>
-                  <span className="text-gray-300">Team Management</span>
+                  <span className="text-app-textSecondary">Team Management</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-orange-500/20 rounded-lg flex items-center justify-center">
                     <Lock className="w-4 h-4 text-orange-400" />
                   </div>
-                  <span className="text-gray-300">Security Analytics</span>
+                  <span className="text-app-textSecondary">Security Analytics</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Right side - Get Started */}
-          <Card className="w-full bg-[#0f0f0f] border-[#1f1f1f] shadow-2xl backdrop-blur-sm transition-all duration-300 hover:shadow-3xl hover:border-[#2f2f2f]">
+          <Card className="w-full bg-app-surface border-app-border shadow-2xl backdrop-blur-sm transition-all duration-300 hover:shadow-3xl hover:border-app-border/80">
             <CardHeader className="space-y-4 pb-6">
               <div className="text-center">
-                <CardTitle className="text-2xl font-bold text-white">Ready to Get Started?</CardTitle>
-                <CardDescription className="text-gray-400">
+                <CardTitle className="text-2xl font-bold text-app-textPrimary">Ready to Get Started?</CardTitle>
+                <CardDescription className="text-app-textSecondary">
                   Set up EncryptGate for your organization in just a few steps
                 </CardDescription>
               </div>
@@ -97,8 +97,8 @@ export default function LandingPage() {
                   <Building className="w-10 h-10 text-white" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-white mb-2">Quick Setup Process</h3>
-                  <ul className="text-sm text-gray-400 space-y-1">
+                  <h3 className="text-lg font-semibold text-app-textPrimary mb-2">Quick Setup Process</h3>
+                  <ul className="text-sm text-app-textSecondary space-y-1">
                     <li>• Enter your organization details</li>
                     <li>• Connect your AWS services</li>
                     <li>• Select your admin user</li>
@@ -107,7 +107,7 @@ export default function LandingPage() {
                 </div>
               </div>
 
-              <div className="text-center text-xs text-gray-500 bg-[#1a1a1a] p-3 rounded-lg">
+              <div className="text-center text-xs text-app-textMuted bg-app-elevated p-3 rounded-lg">
                 Setup takes less than 5 minutes. You'll need your AWS credentials ready.
               </div>
             </CardContent>
@@ -123,10 +123,10 @@ export default function LandingPage() {
 
               <div className="relative w-full">
                 <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-[#2f2f2f]"></div>
+                  <div className="w-full border-t border-app-border"></div>
                 </div>
                 <div className="relative flex justify-center text-sm">
-                  <span className="bg-[#0f0f0f] px-3 text-gray-400">or</span>
+                  <span className="bg-app-surface px-3 text-app-textSecondary">or</span>
                 </div>
               </div>
 
@@ -134,12 +134,12 @@ export default function LandingPage() {
                 type="button"
                 variant="outline"
                 onClick={handleExistingLogin}
-                className="w-full bg-transparent border-[#2f2f2f] text-white hover:bg-[#1f1f1f] hover:border-[#3f3f3f]"
+                className="w-full bg-transparent border-app-border text-app-textPrimary hover:bg-app-elevated hover:border-app-border/80"
               >
                 Sign In to Existing Organization
               </Button>
 
-              <p className="text-center text-xs text-gray-500">
+              <p className="text-center text-xs text-app-textMuted">
                 By continuing, you agree to our Terms of Service and Privacy Policy
               </p>
             </CardFooter>

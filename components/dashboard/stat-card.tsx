@@ -15,25 +15,20 @@ export function StatCard({ title, value, description, previousValue, icon }: Sta
   const isNegative = percentageChange < 0
 
   return (
-    <Card className="rounded-3xl border border-white/10 bg-black/40 text-white transition-all duration-300 hover:border-blue-400/40 hover:shadow-[0_0_35px_rgba(37,99,235,0.15)]">
+    <Card className="transition duration-200 hover:border-app-border hover:shadow-[var(--shadow-md)]">
       <CardContent className="p-6 lg:p-7">
         <div className="text-center">
-          {icon && <div className="flex justify-center mb-3 text-white/70">{icon}</div>}
+          {icon && <div className="mb-3 flex justify-center text-app-textSecondary">{icon}</div>}
 
-          <h3 className="text-white/70 text-sm font-medium mb-2 uppercase tracking-wider">{title}</h3>
+          <h3 className="mb-2 text-sm font-medium uppercase tracking-wider text-app-textSecondary">{title}</h3>
 
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <div className="text-3xl font-bold text-white">{value.toLocaleString()}</div>
+          <div className="mb-2 flex items-center justify-center gap-2">
+            <div className="text-3xl font-bold text-app-textPrimary">{value.toLocaleString()}</div>
 
             {previousValue && (
               <div
-                className={`text-sm font-medium px-2 py-1 rounded ${
-                  isPositive
-                    ? "text-green-400 bg-green-400/10"
-                    : isNegative
-                      ? "text-red-400 bg-red-400/10"
-                      : "text-white/60"
-                }`}
+                className={
+ounded px-2 py-1 text-sm font-medium }
               >
                 {isPositive ? "+" : ""}
                 {percentageChange.toFixed(0)}%
@@ -41,10 +36,10 @@ export function StatCard({ title, value, description, previousValue, icon }: Sta
             )}
           </div>
 
-          <p className="text-white/60 text-sm">{description}</p>
+          <p className="text-sm text-app-textSecondary">{description}</p>
 
           {previousValue && (
-            <p className="text-white/40 text-xs mt-1">Previous week: {previousValue.toLocaleString()}</p>
+            <p className="mt-1 text-xs text-app-textMuted">Previous week: {previousValue.toLocaleString()}</p>
           )}
         </div>
       </CardContent>

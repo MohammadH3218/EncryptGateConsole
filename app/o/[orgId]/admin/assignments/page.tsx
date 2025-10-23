@@ -86,17 +86,17 @@ export default function AssignmentsPage() {
   return (
     <AppLayout notificationsCount={1}>
       <FadeInSection>
-        <h2 className="text-2xl font-bold mb-4 text-white">Assignments</h2>
+        <h2 className="text-2xl font-bold mb-4 text-app-textPrimary">Assignments</h2>
 
         <Tabs defaultValue={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-4 bg-[#1f1f1f] border-[#1f1f1f]">
-            <TabsTrigger value="continue" className="relative text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">
+          <TabsList className="grid w-full grid-cols-2 mb-4 bg-app-elevated border-app-border">
+            <TabsTrigger value="continue" className="relative text-app-textPrimary data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary">
               Continue Investigations
               {inProgressInvestigations.length > 0 && (
                 <Badge className="ml-2 bg-blue-600 text-white">{inProgressInvestigations.length}</Badge>
               )}
             </TabsTrigger>
-            <TabsTrigger value="new" className="relative text-white data-[state=active]:bg-[#0f0f0f] data-[state=active]:text-white">
+            <TabsTrigger value="new" className="relative text-app-textPrimary data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary">
               New Assignments
               {assignments.length > 0 && (
                 <Badge className="ml-2 bg-blue-600 text-white">{assignments.length}</Badge>
@@ -105,7 +105,7 @@ export default function AssignmentsPage() {
           </TabsList>
 
           <TabsContent value="continue">
-            <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
+            <Card className="bg-app-surface border-none text-app-textPrimary hover:bg-app-elevated transition-all duration-300">
               <CardHeader>
                 <CardTitle className="text-white">In-Progress Investigations</CardTitle>
               </CardHeader>
@@ -115,7 +115,7 @@ export default function AssignmentsPage() {
                     {inProgressInvestigations.map((investigation) => (
                       <div
                         key={investigation.id}
-                        className="flex items-center justify-between p-4 rounded-lg border border-[#1f1f1f] bg-[#1f1f1f] hover:bg-[#2a2a2a] transition-colors"
+                        className="flex items-center justify-between p-4 rounded-lg border border-app-border bg-app-elevated hover:bg-app-overlay transition-colors"
                       >
                         <div className="flex items-start gap-4">
                           <div className="bg-[#2a2a2a] rounded-full p-2">
@@ -134,7 +134,7 @@ export default function AssignmentsPage() {
                             </p>
                           </div>
                         </div>
-                        <Button onClick={() => handleContinueInvestigation(investigation.id)} className="ml-4 bg-[#1f1f1f] border-[#1f1f1f] text-white hover:bg-[#2a2a2a] hover:border-[#2a2a2a]">
+                        <Button onClick={() => handleContinueInvestigation(investigation.id)} className="ml-4 bg-app-elevated border-app-border text-app-textPrimary hover:bg-app-overlay hover:border-app-border/60">
                           Continue
                         </Button>
                       </div>

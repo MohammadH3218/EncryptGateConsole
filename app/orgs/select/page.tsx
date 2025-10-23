@@ -40,7 +40,7 @@ export default function OrgSelectPage() {
       console.log("[OrgSelect] starting search", { query: debouncedQuery })
       try {
         const response = await fetch(
-          `/api/orgs/search?q=${encodeURIComponent(debouncedQuery)}`,
+          /api/orgs/search?q=,
           {
             headers: {
               "x-skip-rewrite": "1",
@@ -90,19 +90,19 @@ export default function OrgSelectPage() {
   }, [debouncedQuery])
 
   const handleSelectOrg = (orgId: string) => {
-    router.push(`/o/${orgId}/login`)
+    router.push(/o//login)
   }
 
   return (
-    <div className="min-h-screen bg-[#171717] flex items-center justify-center px-6 py-12">
-      <Card className="w-full max-w-3xl bg-[#0f0f0f] border-[#1f1f1f] shadow-2xl">
+    <div className="min-h-screen bg-app flex items-center justify-center px-6 py-12">
+      <Card className="w-full max-w-3xl border border-app-border/80 shadow-[var(--shadow-lg)]">
         <CardHeader>
-          <div className="flex flex-col gap-2 text-white">
-            <CardTitle className="text-2xl font-semibold flex items-center gap-2">
-              <ShieldCheck className="h-6 w-6 text-blue-400" />
+          <div className="flex flex-col gap-2 text-app-textPrimary">
+            <CardTitle className="flex items-center gap-2 text-2xl font-semibold">
+              <ShieldCheck className="h-6 w-6 text-app-accent" />
               Sign in to your organization
             </CardTitle>
-            <p className="text-sm text-gray-400">
+            <p className="text-sm text-app-textSecondary">
               Search by organization name or the short code you received during onboarding.
             </p>
           </div>
@@ -110,21 +110,21 @@ export default function OrgSelectPage() {
 
         <CardContent className="space-y-6">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-app-textMuted" />
             <Input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search and type your org here"
-              className="bg-[#1a1a1a] border-[#2a2a2a] text-white pl-9"
+              className="pl-9"
             />
           </div>
 
           <div className="space-y-3">
             {isSearching && (
-              <div className="flex items-center gap-2 text-sm text-gray-400">
-                <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
-                Searchingâ€¦
+              <div className="flex items-center gap-2 text-sm text-app-textSecondary">
+                <Loader2 className="h-4 w-4 animate-spin text-app-accent" />
+                Searching…
               </div>
             )}
 
@@ -134,42 +134,40 @@ export default function OrgSelectPage() {
                   <button
                     key={org.organizationId}
                     onClick={() => handleSelectOrg(org.organizationId)}
-                    className="w-full text-left bg-[#161616] border border-transparent hover:border-[#2f2f2f] transition rounded-lg px-4 py-4 flex items-center justify-between gap-4"
+                    className="flex w-full items-center justify-between gap-4 rounded-xl border border-app-border/60 bg-app-surface px-4 py-4 text-left transition duration-200 hover:border-app-ring"
                   >
                     <div>
-                      <div className="flex items-center gap-2 text-white font-medium">
-                        <Building2 className="h-4 w-4 text-blue-300" />
+                      <div className="flex items-center gap-2 text-app-textPrimary font-medium">
+                        <Building2 className="h-4 w-4 text-app-accent" />
                         <span>{org.name ?? org.organizationId}</span>
                       </div>
-                      <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-gray-500">
-                        <Badge variant="outline" className="border-[#2f2f2f] bg-transparent text-gray-400">
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-app-textSecondary">
+                        <Badge variant="outline" className="border-app-border/80 text-app-textSecondary">
                           {org.orgCode ?? "Code pending"}
                         </Badge>
                         {org.region && (
-                          <Badge variant="secondary" className="bg-blue-500/10 text-blue-300 border-0">
+                          <Badge variant="secondary" className="border-0 bg-app-accent/15 text-app-accent">
                             {org.region}
                           </Badge>
                         )}
                       </div>
                     </div>
-                    <Button variant="secondary" className="bg-blue-600 hover:bg-blue-700 text-white">
-                      Continue
-                    </Button>
+                    <Button>Continue</Button>
                   </button>
                 ))}
               </div>
             )}
 
             {!isSearching && errorMessage && (
-              <p className="text-sm text-red-400">{errorMessage}</p>
+              <p className="text-sm text-app-danger">{errorMessage}</p>
             )}
           </div>
 
-          <div className="text-xs text-gray-500 border-t border-[#1f1f1f] pt-4">
+          <div className="border-t border-app-border/60 pt-4 text-xs text-app-textSecondary">
             Need to set up a new organization instead?{" "}
             <button
               onClick={() => router.push("/setup-organization")}
-              className="text-blue-400 hover:text-blue-300 underline"
+              className="text-app-accent hover:text-app-accentHover underline"
             >
               Start EncryptGate setup
             </button>

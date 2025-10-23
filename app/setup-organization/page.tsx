@@ -275,17 +275,17 @@ export default function SetupOrganizationPage() {
 
   if (checkingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4">
+      <div className="min-h-screen flex items-center justify-center bg-app p-4">
         <div className="text-center space-y-4">
-          <Loader2 className="w-8 h-8 text-white animate-spin mx-auto" />
-          <div className="text-white text-lg font-medium">Loading...</div>
+          <Loader2 className="w-8 h-8 text-app-textPrimary animate-spin mx-auto" />
+          <div className="text-app-textPrimary text-lg font-medium">Loading...</div>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-app p-4 relative overflow-hidden">
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
         <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/5 rounded-full blur-3xl animate-pulse delay-1000"></div>
@@ -309,34 +309,34 @@ export default function SetupOrganizationPage() {
             return (
               <div key={step} className="flex items-center">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
-                  isCompleted 
-                    ? 'bg-green-600 text-white' 
-                    : isActive 
-                      ? 'bg-blue-600 text-white' 
-                      : 'bg-gray-600 text-gray-300'
+                  isCompleted
+                    ? 'bg-green-600 text-white'
+                    : isActive
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-app-elevated text-app-textSecondary'
                 }`}>
                   {isCompleted ? <CheckCircle className="w-4 h-4" /> : index + 1}
                 </div>
                 <span className={`ml-2 text-sm ${
-                  isActive || isCompleted ? 'text-white' : 'text-gray-400'
+                  isActive || isCompleted ? 'text-app-textPrimary' : 'text-app-textSecondary'
                 }`}>
                   {stepNames[step]}
                 </span>
-                {index < 3 && <ArrowRight className="w-4 h-4 text-gray-600 mx-4" />}
+                {index < 3 && <ArrowRight className="w-4 h-4 text-app-textMuted mx-4" />}
               </div>
             )
           })}
         </div>
 
-        <Card className="bg-[#0f0f0f] border-[#1f1f1f] shadow-2xl">
+        <Card className="bg-app-surface border-app-border shadow-2xl">
           <CardHeader className="text-center pb-6">
             <div className="flex items-center justify-center gap-3 mb-4">
               <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
               </div>
               <div>
-                <CardTitle className="text-2xl text-white">Setup Your Organization</CardTitle>
-                <CardDescription className="text-gray-400">
+                <CardTitle className="text-2xl text-app-textPrimary">Setup Your Organization</CardTitle>
+                <CardDescription className="text-app-textSecondary">
                   Step {['org-info', 'aws-config', 'cognito-users', 'complete'].indexOf(currentStep) + 1} of 4
                 </CardDescription>
               </div>
@@ -413,10 +413,10 @@ export default function SetupOrganizationPage() {
               </Button>
             ) : (
               <>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   onClick={() => router.push('/')}
-                  className="bg-transparent border-[#2f2f2f] text-white hover:bg-[#1f1f1f]"
+                  className="bg-transparent border-app-border text-app-textPrimary hover:bg-app-elevated"
                 >
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Back
@@ -459,42 +459,42 @@ function OrganizationInfoStep({
     <div className="space-y-4">
       <div className="text-center mb-6">
         <Building className="w-12 h-12 text-blue-500 mx-auto mb-3" />
-        <h3 className="text-xl font-semibold text-white">Organization Details</h3>
-        <p className="text-gray-400">Tell us about your organization</p>
+        <h3 className="text-xl font-semibold text-app-textPrimary">Organization Details</h3>
+        <p className="text-app-textSecondary">Tell us about your organization</p>
       </div>
-      
+
       <div className="space-y-4">
         <div>
-          <Label htmlFor="org-name" className="text-white">Organization Name</Label>
+          <Label htmlFor="org-name" className="text-app-textPrimary">Organization Name</Label>
           <Input
             id="org-name"
             value={orgData.name}
             onChange={(e) => setOrgData({ ...orgData, name: e.target.value })}
             placeholder="Acme Corporation"
-            className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+            className="bg-app-elevated border-app-border text-app-textPrimary"
           />
         </div>
-        
+
         <div>
-          <Label htmlFor="admin-name" className="text-white">Your Name</Label>
+          <Label htmlFor="admin-name" className="text-app-textPrimary">Your Name</Label>
           <Input
             id="admin-name"
             value={orgData.adminName}
             onChange={(e) => setOrgData({ ...orgData, adminName: e.target.value })}
             placeholder="John Doe"
-            className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+            className="bg-app-elevated border-app-border text-app-textPrimary"
           />
         </div>
-        
+
         <div>
-          <Label htmlFor="admin-email" className="text-white">Your Email</Label>
+          <Label htmlFor="admin-email" className="text-app-textPrimary">Your Email</Label>
           <Input
             id="admin-email"
             type="email"
             value={orgData.adminEmail}
             onChange={(e) => setOrgData({ ...orgData, adminEmail: e.target.value })}
             placeholder="admin@company.com"
-            className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+            className="bg-app-elevated border-app-border text-app-textPrimary"
           />
         </div>
       </div>
@@ -517,8 +517,8 @@ function AWSConfigStep({
     <div className="space-y-4">
       <div className="text-center mb-6">
         <Cloud className="w-12 h-12 text-green-500 mx-auto mb-3" />
-        <h3 className="text-xl font-semibold text-white">AWS Configuration</h3>
-        <p className="text-gray-400">Connect your AWS Cognito user pool</p>
+        <h3 className="text-xl font-semibold text-app-textPrimary">AWS Configuration</h3>
+        <p className="text-app-textSecondary">Connect your AWS Cognito user pool</p>
       </div>
 
       {/* AWS Permissions Required */}
@@ -539,47 +539,47 @@ function AWSConfigStep({
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <Label className="text-white">User Pool ID</Label>
+          <Label className="text-app-textPrimary">User Pool ID</Label>
           <Input
             value={config.userPoolId}
             onChange={(e) => setConfig({ ...config, userPoolId: e.target.value })}
             placeholder="us-east-1_xxxxxxxxx"
-            className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+            className="bg-app-elevated border-app-border text-app-textPrimary"
           />
         </div>
         
         <div>
-          <Label className="text-white">Client ID</Label>
+          <Label className="text-app-textPrimary">Client ID</Label>
           <Input
             value={config.clientId}
             onChange={(e) => setConfig({ ...config, clientId: e.target.value })}
             placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxx"
-            className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+            className="bg-app-elevated border-app-border text-app-textPrimary"
           />
         </div>
       </div>
 
       
       <div>
-        <Label className="text-white">Client Secret (Optional)</Label>
+        <Label className="text-app-textPrimary">Client Secret (Optional)</Label>
         <Input
           type="password"
           value={config.clientSecret}
           onChange={(e) => setConfig({ ...config, clientSecret: e.target.value })}
           placeholder="Keep blank if using public client"
-          className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+          className="bg-app-elevated border-app-border text-app-textPrimary"
         />
       </div>
       
       <div>
-        <Label className="text-white">AWS Region</Label>
+        <Label className="text-app-textPrimary">AWS Region</Label>
         <Select value={config.region} onValueChange={(value) => setConfig({ ...config, region: value })}>
-          <SelectTrigger className="bg-[#1f1f1f] border-[#2f2f2f] text-white">
+          <SelectTrigger className="bg-app-elevated border-app-border text-app-textPrimary">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent className="bg-[#1f1f1f] border-[#2f2f2f]">
+          <SelectContent className="bg-app-surface border-app-border">
             {AWS_REGIONS.map((region) => (
-              <SelectItem key={region.value} value={region.value} className="text-white">
+              <SelectItem key={region.value} value={region.value} className="text-app-textPrimary">
                 {region.label}
               </SelectItem>
             ))}
@@ -589,24 +589,24 @@ function AWSConfigStep({
       
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <Label className="text-white">AWS Access Key ID</Label>
+          <Label className="text-app-textPrimary">AWS Access Key ID</Label>
           <Input
             type="password"
             value={config.accessKey}
             onChange={(e) => setConfig({ ...config, accessKey: e.target.value })}
             placeholder="AKIA..."
-            className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+            className="bg-app-elevated border-app-border text-app-textPrimary"
           />
         </div>
         
         <div>
-          <Label className="text-white">AWS Secret Access Key</Label>
+          <Label className="text-app-textPrimary">AWS Secret Access Key</Label>
           <Input
             type="password"
             value={config.secretKey}
             onChange={(e) => setConfig({ ...config, secretKey: e.target.value })}
             placeholder="..."
-            className="bg-[#1f1f1f] border-[#2f2f2f] text-white"
+            className="bg-app-elevated border-app-border text-app-textPrimary"
           />
         </div>
       </div>
@@ -642,12 +642,12 @@ function CognitoUsersStep({
     <div className="space-y-4">
       <div className="text-center mb-6">
         <UserPlus className="w-12 h-12 text-purple-500 mx-auto mb-3" />
-        <h3 className="text-xl font-semibold text-white">Select Admin User</h3>
-        <p className="text-gray-400">Choose who will be the admin for {orgData.name}</p>
+        <h3 className="text-xl font-semibold text-app-textPrimary">Select Admin User</h3>
+        <p className="text-app-textSecondary">Choose who will be the admin for {orgData.name}</p>
       </div>
       
       <div className="flex justify-between items-center mb-4">
-        <p className="text-sm text-gray-500">Found {users.length} user(s) in your Cognito pool</p>
+        <p className="text-sm text-app-textMuted">Found {users.length} user(s) in your Cognito pool</p>
         <Button
           variant="outline"
           size="sm"
@@ -668,13 +668,13 @@ function CognitoUsersStep({
             className={`p-3 rounded-lg border cursor-pointer transition-colors ${
               selectedUser === user.username
                 ? 'border-blue-500 bg-blue-500/10'
-                : 'border-[#2f2f2f] bg-[#1a1a1a] hover:bg-[#2a2a2a]'
+                : 'border-app-border bg-app-elevated hover:bg-app-overlay'
             }`}
           >
             <div className="flex items-center justify-between">
               <div>
-                <div className="text-white font-medium">{user.email}</div>
-                <div className="text-sm text-gray-400">
+                <div className="text-app-textPrimary font-medium">{user.email}</div>
+                <div className="text-sm text-app-textSecondary">
                   Status: <Badge variant={user.enabled ? "default" : "secondary"} className="ml-1">
                     {user.userStatus}
                   </Badge>
@@ -691,8 +691,8 @@ function CognitoUsersStep({
       {users.length === 0 && (
         <div className="text-center py-8">
           <Users className="w-12 h-12 text-gray-500 mx-auto mb-3" />
-          <p className="text-gray-400 mb-2">No users found in your Cognito user pool</p>
-          <p className="text-sm text-gray-500">Create users in your AWS Cognito console, then click "Refresh Users" above</p>
+          <p className="text-app-textSecondary mb-2">No users found in your Cognito user pool</p>
+          <p className="text-sm text-app-textMuted">Create users in your AWS Cognito console, then click "Refresh Users" above</p>
         </div>
       )}
     </div>
@@ -703,12 +703,12 @@ function CompleteStep({ orgData }: { orgData: OrganizationData }) {
   return (
     <div className="text-center space-y-4">
       <CheckCircle className="w-16 h-16 text-green-500 mx-auto" />
-      <h3 className="text-2xl font-semibold text-white">Organization Created!</h3>
-      <p className="text-gray-400">
+      <h3 className="text-2xl font-semibold text-app-textPrimary">Organization Created!</h3>
+      <p className="text-app-textSecondary">
         {orgData.name} has been successfully set up with AWS integration.
       </p>
-      <div className="bg-[#1a1a1a] p-4 rounded-lg mt-6">
-        <p className="text-sm text-gray-300">
+      <div className="bg-app-elevated p-4 rounded-lg mt-6">
+        <p className="text-sm text-app-textSecondary">
           Your organization is now ready. You can log in using your AWS Cognito credentials.
         </p>
       </div>
