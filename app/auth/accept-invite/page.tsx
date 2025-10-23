@@ -127,11 +127,11 @@ function AcceptInviteContent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
-        <Card className="w-full max-w-md bg-[#0f0f0f] border-[#2a2a2a]">
+      <div className="min-h-screen bg-app flex items-center justify-center">
+        <Card className="w-full max-w-md bg-app-surface border-app-border">
           <CardContent className="pt-6 flex items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
-            <span className="ml-2 text-white">Validating invitation...</span>
+            <span className="ml-2 text-app-textPrimary">Validating invitation...</span>
           </CardContent>
         </Card>
       </div>
@@ -140,14 +140,14 @@ function AcceptInviteContent() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
-        <Card className="w-full max-w-md bg-[#0f0f0f] border-[#2a2a2a]">
+      <div className="min-h-screen bg-app flex items-center justify-center">
+        <Card className="w-full max-w-md bg-app-surface border-app-border">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
               <XCircle className="h-6 w-6 text-red-500" />
             </div>
-            <CardTitle className="text-white">Invitation Invalid</CardTitle>
-            <CardDescription className="text-gray-400">
+            <CardTitle className="text-app-textPrimary">Invitation Invalid</CardTitle>
+            <CardDescription className="text-app-textSecondary">
               {error}
             </CardDescription>
           </CardHeader>
@@ -166,14 +166,14 @@ function AcceptInviteContent() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
-        <Card className="w-full max-w-md bg-[#0f0f0f] border-[#2a2a2a]">
+      <div className="min-h-screen bg-app flex items-center justify-center">
+        <Card className="w-full max-w-md bg-app-surface border-app-border">
           <CardHeader className="text-center">
             <div className="mx-auto w-12 h-12 bg-green-500/10 rounded-full flex items-center justify-center mb-4">
               <CheckCircle className="h-6 w-6 text-green-500" />
             </div>
-            <CardTitle className="text-white">Account Created!</CardTitle>
-            <CardDescription className="text-gray-400">
+            <CardTitle className="text-app-textPrimary">Account Created!</CardTitle>
+            <CardDescription className="text-app-textSecondary">
               Welcome to EncryptGate Security Console. You'll be redirected to the login page shortly.
             </CardDescription>
           </CardHeader>
@@ -206,7 +206,7 @@ function AcceptInviteContent() {
         <CardContent>
           {invitation && (
             <div className="mb-6 p-4 bg-blue-500/10 rounded-lg border border-blue-500/20">
-              <div className="text-sm text-gray-300">
+              <div className="text-sm text-app-textSecondary">
                 <div><strong>Email:</strong> {invitation.email}</div>
                 <div><strong>Invited by:</strong> {invitation.invitedBy}</div>
                 <div><strong>Expires:</strong> {new Date(invitation.expiresAt).toLocaleDateString()}</div>
@@ -216,7 +216,7 @@ function AcceptInviteContent() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name" className="text-white">Full Name</Label>
+              <Label htmlFor="name" className="text-app-textPrimary">Full Name</Label>
               <Input
                 id="name"
                 type="text"
@@ -224,12 +224,12 @@ function AcceptInviteContent() {
                 onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                 placeholder="Enter your full name"
                 required
-                className="bg-[#1f1f1f] border-[#2a2a2a] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-blue-500"
+                className="bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted focus:bg-app-overlay focus:border-app-accent"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-white">Password</Label>
+              <Label htmlFor="password" className="text-app-textPrimary">Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -238,7 +238,7 @@ function AcceptInviteContent() {
                 placeholder="Choose a strong password"
                 required
                 minLength={8}
-                className="bg-[#1f1f1f] border-[#2a2a2a] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-blue-500"
+                className="bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted focus:bg-app-overlay focus:border-app-accent"
               />
             </div>
 
@@ -252,7 +252,7 @@ function AcceptInviteContent() {
                 placeholder="Confirm your password"
                 required
                 minLength={8}
-                className="bg-[#1f1f1f] border-[#2a2a2a] text-white placeholder:text-gray-400 focus:bg-[#2a2a2a] focus:border-blue-500"
+                className="bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted focus:bg-app-overlay focus:border-app-accent"
               />
             </div>
 
@@ -287,11 +287,11 @@ export default function AcceptInvitePage() {
   return (
     <Suspense 
       fallback={
-        <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
-          <Card className="w-full max-w-md bg-[#0f0f0f] border-[#2a2a2a]">
+        <div className="min-h-screen bg-app flex items-center justify-center">
+          <Card className="w-full max-w-md bg-app-surface border-app-border">
             <CardContent className="pt-6 flex items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
-              <span className="ml-2 text-white">Loading...</span>
+              <span className="ml-2 text-app-textPrimary">Loading...</span>
             </CardContent>
           </Card>
         </div>

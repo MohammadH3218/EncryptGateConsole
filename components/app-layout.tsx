@@ -54,7 +54,6 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
-  // Keep heartbeat + team members fetch even if not yet surfaced in UI
   const [, setTeamMembers] = useState<any[]>([])
 
   const getOrgId = () => {
@@ -133,7 +132,7 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
     return null
   }
 
-  const getOrgPath = (path: string) => (orgId ? `/o/${orgId}${path}` : path)
+  const getOrgPath = (path: string) => (orgId ? /o/ : path)
 
   const allMainNavItems: NavItem[] = [
     { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["dashboard.read"] },
@@ -171,10 +170,7 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
 
   const mainNavItems = allMainNavItems.filter((item) => hasPermission(item.permissions))
   const companySettingsItems = allCompanySettingsItems.filter((item) => {
-    if (item.label === "Manage Employees") {
-      return isAdmin || isSrAdmin || isOwner
-    }
-    if (item.label === "Allow & Block List") {
+    if (["Company Settings", "Allow & Block List"].includes(item.label)) {
       return isAdmin || isSrAdmin || isOwner
     }
     return hasPermission(item.permissions)
@@ -206,19 +202,15 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
     } catch (error) {
       console.warn("Failed clearing local storage", error)
     }
-    const logoutUrl = orgId ? `/logout?orgId=${orgId}` : "/logout"
+    const logoutUrl = orgId ? /logout?orgId= : "/logout"
     router.push(logoutUrl)
   }
 
   const NavigationContent = ({ onNavigate }: { onNavigate: (href: string) => void }) => (
     <div className="flex h-full flex-col">
       <div className="px-4 pb-6 pt-5">
-        <div className="text-xs font-semibold uppercase tracking-widest text-white/40">
-          EncryptGate
-        </div>
-        <div className="mt-2 text-lg font-semibold text-white">
-          {session.org?.name || "Security Console"}
-        </div>
+        <div className="text-xs font-semibold uppercase tracking-[0.2em] text-white/40">EncryptGate</div>
+        <div className="mt-2 text-lg font-semibold text-white">{session.org?.name || "Security Console"}</div>
       </div>
       <div className="flex-1 space-y-6 overflow-y-auto px-2 pb-6">
         {sections.map((section) => (
@@ -226,22 +218,18 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
             <div className="px-2 text-xs font-semibold uppercase tracking-wide text-white/40">
               {section.title}
             </div>
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {section.items.map((item) => {
                 const active = pathname === item.href
-                const Icon = item.icon
+                const ItemIcon = item.icon
                 return (
                   <button
                     key={item.href}
                     onClick={() => onNavigate(item.href)}
-                    className={cn(
-                      "pressable flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
-                      active
-                        ? "bg-white/10 text-white"
-                        : "text-white/70 hover:bg-white/5 hover:text-white focus-visible:outline-none focus-ring",
-                    )}
+                    className={cn("sidebar-item pressable", active && "shadow-inner")}
+                    aria-current={active ? "page" : undefined}
                   >
-                    <Icon className="h-4 w-4" />
+                    <ItemIcon className="h-5 w-5 text-white/80" />
                     <span className="truncate">{item.label}</span>
                   </button>
                 )
@@ -253,7 +241,7 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
       <div className="px-4 pb-6">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="pressable flex w-full items-center gap-3 rounded-xl border border-app-border bg-app-panel px-3 py-3 text-left transition-colors hover:bg-white/5 focus-visible:outline-none focus-ring">
+            <button className="sidebar-item w-full justify-start bg-white/5">
               <Avatar className="h-9 w-9">
                 <AvatarFallback className="bg-white/10 text-sm text-white">
                   {(session.user?.name || session.user?.email || "EG")
@@ -263,7 +251,7 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
                     .toUpperCase()}
                 </AvatarFallback>
               </Avatar>
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-white">
                   {session.user?.name || session.user?.email}
                 </p>
@@ -279,18 +267,18 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-56 rounded-xl border border-app-border bg-app-panel p-1 text-white shadow-card"
+            className="w-56 rounded-xl border border-app-border bg-app-surface p-1 text-white shadow-lg"
           >
             <DropdownMenuItem
               onClick={() => onNavigate(getOrgPath("/admin/user-settings/profile"))}
-              className="cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-white/5 focus:bg-white/5"
+              className="cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-white/10 focus:bg-white/10"
             >
-              <User className="mr-2 h-4 w-4 text-blue-400" />
+              <User className="mr-2 h-4 w-4 text-app-ring" />
               Profile settings
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={handleLogout}
-              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-red-900/20 focus:bg-red-900/20"
+              className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-red-500/10 focus:bg-red-500/10"
             >
               <LogOut className="mr-2 h-4 w-4 text-red-400" />
               Sign out
@@ -302,39 +290,34 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
   )
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#0b0b0d] text-white">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-64 -left-40 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl" />
-        <div className="absolute top-1/3 -right-32 h-[420px] w-[420px] rounded-full bg-purple-500/10 blur-3xl" />
-        <div className="absolute bottom-0 left-1/2 h-[520px] w-[520px] -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
-      </div>
+    <div className="min-h-screen bg-app text-app-textPrimary">
       <CommandMenu />
-      <div className="relative grid min-h-screen lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_340px]">
-        <aside className="hidden border-r border-app-border/60 bg-[#101017]/80 backdrop-blur lg:flex">
-          <div className="sticky top-0 h-screen w-full overflow-y-auto px-2 py-4">
+      <div className="grid min-h-screen lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_320px]">
+        <aside className="hidden border-r border-app-border bg-app-sidebar lg:block">
+          <div className="custom-scrollbar sticky top-0 h-screen overflow-y-auto border-r border-app-border">
             <NavigationContent onNavigate={handleNavigation} />
           </div>
         </aside>
 
-        <div className="flex min-h-screen flex-col bg-transparent">
-          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-white/5 bg-black/30 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-black/30 lg:px-6">
+        <div className="flex min-h-screen flex-col bg-app">
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-app-border bg-app-surface/95 px-4 py-4 backdrop-blur lg:px-6">
             <div className="flex items-center gap-3">
               <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
                 <SheetTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="lg:hidden text-white/70 hover:text-white hover:bg-white/5 focus-visible:outline-none focus-ring"
+                    className="text-app-textSecondary lg:hidden hover:bg-white/10"
                   >
                     <Menu className="h-5 w-5" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-72 border-app-border bg-app px-0 pb-0 pt-0 text-white">
+                <SheetContent side="left" className="w-72 border-app-border bg-app-sidebar p-0 text-white">
                   <NavigationContent onNavigate={handleNavigation} />
                 </SheetContent>
               </Sheet>
               <div>
-                <div className="text-xs uppercase tracking-widest text-white/40">Active organization</div>
+                <div className="text-xs uppercase tracking-[0.3em] text-white/40">Active organization</div>
                 <div className="text-sm font-semibold text-white">
                   {session.org?.name || "EncryptGate"}
                 </div>
@@ -344,18 +327,18 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
               <Button
                 variant="ghost"
                 size="icon"
-                className="relative text-white/70 hover:text-white hover:bg-white/5 focus-visible:outline-none focus-ring"
+                className="relative text-app-textSecondary hover:text-white hover:bg-white/10"
               >
                 <Bell className="h-5 w-5" />
                 {notificationsCount > 0 ? (
-                  <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 rounded-full bg-blue-400" />
+                  <span className="absolute right-1 top-1 inline-flex h-2.5 w-2.5 rounded-full bg-app-ring" />
                 ) : null}
               </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
-                    className="hidden items-center gap-2 rounded-full px-3 py-1.5 text-white/80 hover:text-white hover:bg-white/5 focus-visible:outline-none focus-ring sm:flex"
+                    className="hidden items-center gap-2 rounded-full px-3 py-1.5 text-app-textSecondary hover:text-white hover:bg-white/10 sm:flex"
                   >
                     <Avatar className="h-7 w-7">
                       <AvatarFallback className="bg-white/10 text-xs text-white">
@@ -367,7 +350,7 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col items-start">
-                      <span className="text-xs leading-tight text-white/60">Signed in as</span>
+                      <span className="text-xs leading-tight text-white/50">Signed in as</span>
                       <span className="text-sm leading-tight text-white">
                         {session.user?.name || session.user?.email}
                       </span>
@@ -376,18 +359,18 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align="end"
-                  className="w-56 rounded-xl border border-app-border bg-app-panel p-1 text-white shadow-card"
+                  className="w-56 rounded-xl border border-app-border bg-app-surface p-1 text-white shadow-lg"
                 >
                   <DropdownMenuItem
                     onClick={() => handleNavigation(getOrgPath("/admin/user-settings/profile"))}
-                    className="cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-white/5 focus:bg-white/5"
+                    className="cursor-pointer rounded-lg px-3 py-2 text-sm hover:bg-white/10 focus:bg-white/10"
                   >
-                    <User className="mr-2 h-4 w-4 text-blue-400" />
+                    <User className="mr-2 h-4 w-4 text-app-ring" />
                     Profile settings
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={handleLogout}
-                    className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-red-900/20 focus:bg-red-900/20"
+                    className="cursor-pointer rounded-lg px-3 py-2 text-sm text-red-300 hover:bg-red-500/10 focus:bg-red-500/10"
                   >
                     <LogOut className="mr-2 h-4 w-4 text-red-400" />
                     Sign out
@@ -397,15 +380,15 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
             </div>
           </header>
 
-          <main className="flex-1 overflow-y-auto px-4 pb-12 pt-8 lg:px-8">
-            <div className="mx-auto w-full max-w-[1200px] space-y-6 rounded-[32px] border border-white/5 bg-black/40 p-6 shadow-[0_20px_60px_-40px_rgba(0,0,0,0.9)] backdrop-blur-2xl lg:p-8">
+          <main className="custom-scrollbar flex-1 overflow-y-auto bg-app px-4 pb-12 pt-8 lg:px-8">
+            <div className="mx-auto w-full max-w-[1200px] space-y-8">
               {children}
             </div>
           </main>
         </div>
 
-        <aside className="hidden border-l border-app-border/60 bg-[#101017]/80 backdrop-blur xl:block">
-          <div className="sticky top-0 h-screen overflow-y-auto px-3 py-4">
+        <aside className="hidden border-l border-app-border bg-app-sidebar xl:block">
+          <div className="custom-scrollbar sticky top-0 h-screen overflow-y-auto border-l border-app-border">
             <RightRail />
           </div>
         </aside>

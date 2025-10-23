@@ -613,14 +613,14 @@ export default function OrgAwareLoginPage() {
   const errorMessage = getErrorMessage(error, details)
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#171717] p-4 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-app p-4 relative overflow-hidden">
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl animate-pulse"></div>
         <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-purple-500/5 rounded-full blur-3xl animate-pulse delay-1000"></div>
         <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/3 rounded-full blur-3xl animate-pulse delay-500"></div>
       </div>
 
-      <Card className="w-full max-w-md bg-[#0f0f0f] border-[#1f1f1f] shadow-2xl backdrop-blur-sm relative z-10 transition-all duration-300 hover:shadow-3xl hover:border-[#2f2f2f]">
+      <Card className="w-full max-w-md bg-app-surface border-app-border shadow-2xl backdrop-blur-sm relative z-10 transition-all duration-300 hover:shadow-3xl hover:border-app-border/80">
         <CardHeader className="space-y-6 pb-8">
           <div className="flex justify-center items-center gap-3 group">
             <div className="transition-transform duration-300 group-hover:scale-110">
@@ -631,14 +631,14 @@ export default function OrgAwareLoginPage() {
           </div>
 
           <div className="text-center space-y-2">
-            <CardTitle className="text-2xl font-bold text-white">
+            <CardTitle className="text-2xl font-bold text-app-textPrimary">
               {displayOrgName ? `Welcome to ${displayOrgName}` : 'Organization Login'}
             </CardTitle>
-            <CardDescription className="text-gray-400">
+            <CardDescription className="text-app-textSecondary">
               Enter your credentials to access your organization
             </CardDescription>
             {orgId && (
-              <div className="text-xs text-gray-500 font-mono bg-[#1a1a1a] px-2 py-1 rounded">
+              <div className="text-xs text-app-textMuted font-mono bg-app-elevated px-2 py-1 rounded">
                 Org: {orgId}
               </div>
             )}
@@ -660,7 +660,7 @@ export default function OrgAwareLoginPage() {
 
           <form onSubmit={handleSignIn} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-white">
+              <Label htmlFor="email" className="text-app-textPrimary">
                 Email
               </Label>
               <Input
@@ -669,14 +669,14 @@ export default function OrgAwareLoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@company.com"
-                className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder:text-gray-400"
+                className="bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted"
                 disabled={isLoading}
                 required
               />
             </div>
-            
+
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-white">
+              <Label htmlFor="password" className="text-app-textPrimary">
                 Password
               </Label>
               <div className="relative">
@@ -686,14 +686,14 @@ export default function OrgAwareLoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder:text-gray-400 pr-10"
+                  className="bg-app-elevated border-app-border text-app-textPrimary placeholder:text-app-textMuted pr-10"
                   disabled={isLoading}
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-300 transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-app-textSecondary hover:text-app-textPrimary transition-colors"
                   disabled={isLoading}
                 >
                   {showPassword ? (
@@ -731,16 +731,16 @@ export default function OrgAwareLoginPage() {
             <button
               type="button"
               onClick={() => setShowForgotPassword(true)}
-              className="text-sm text-blue-400 hover:text-blue-300 transition-colors"
+              className="text-sm text-app-accent hover:text-app-accent/80 transition-colors"
             >
               Forgot your password?
             </button>
-            <p className="text-center text-xs text-gray-500">
+            <p className="text-center text-xs text-app-textMuted">
               Secure access to your organization dashboard
             </p>
             <button
               onClick={() => router.push('/setup-organization')}
-              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+              className="text-xs text-app-accent hover:text-app-accent/80 transition-colors"
             >
               Need to set up a new organization?
             </button>
@@ -750,7 +750,7 @@ export default function OrgAwareLoginPage() {
 
       {/* Password Change Dialog */}
       <Dialog open={showPasswordChange} onOpenChange={setShowPasswordChange}>
-        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+        <DialogContent className="bg-app-surface border-app-border text-app-textPrimary">
           <button
             onClick={() => setShowPasswordChange(false)}
             className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
@@ -759,57 +759,57 @@ export default function OrgAwareLoginPage() {
             <span className="sr-only">Close</span>
           </button>
           <DialogHeader>
-            <DialogTitle className="text-white">Password Change Required</DialogTitle>
-            <DialogDescription className="text-gray-400">
+            <DialogTitle className="text-app-textPrimary">Password Change Required</DialogTitle>
+            <DialogDescription className="text-app-textSecondary">
               Your account requires a password change. Please create a new password.
             </DialogDescription>
           </DialogHeader>
-          
+
           <form onSubmit={handlePasswordChange}>
             <div className="grid gap-4 py-4">
               <div className="space-y-2">
-                <Label className="text-white">Account</Label>
-                <div className="bg-[#1f1f1f] border border-[#2f2f2f] rounded px-3 py-2 text-gray-300">
+                <Label className="text-app-textPrimary">Account</Label>
+                <div className="bg-app-elevated border border-app-border rounded px-3 py-2 text-app-textSecondary">
                   {email || "Your account"}
                 </div>
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="display-name" className="text-white">Display Name</Label>
+                <Label htmlFor="display-name" className="text-app-textPrimary">Display Name</Label>
                 <Input
                   id="display-name"
                   type="text"
                   placeholder="Enter your display name"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                  className="bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted focus:border-app-accent focus:ring-app-accent/20"
                   disabled={isLoading}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="new-password" className="text-white">New Password</Label>
+                <Label htmlFor="new-password" className="text-app-textPrimary">New Password</Label>
                 <Input
                   id="new-password"
                   type="password"
                   placeholder="Enter new password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                  className="bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted focus:border-app-accent focus:ring-app-accent/20"
                   disabled={isLoading}
                   required
                 />
               </div>
-              
+
               <div className="space-y-2">
-                <Label htmlFor="confirm-password" className="text-white">Confirm Password</Label>
+                <Label htmlFor="confirm-password" className="text-app-textPrimary">Confirm Password</Label>
                 <Input
                   id="confirm-password"
                   type="password"
                   placeholder="Confirm new password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                  className="bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted focus:border-app-accent focus:ring-app-accent/20"
                   disabled={isLoading}
                   required
                 />
@@ -851,7 +851,7 @@ export default function OrgAwareLoginPage() {
 
       {/* MFA Setup Dialog */}
       <Dialog open={showMFASetup} onOpenChange={setShowMFASetup}>
-        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="bg-app-surface border-app-border text-app-textPrimary max-w-2xl max-h-[90vh] overflow-y-auto">
           <button
             onClick={() => setShowMFASetup(false)}
             className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
@@ -860,8 +860,8 @@ export default function OrgAwareLoginPage() {
             <span className="sr-only">Close</span>
           </button>
           <DialogHeader>
-            <DialogTitle className="text-white">Setup Two-Factor Authentication</DialogTitle>
-            <DialogDescription className="text-gray-400">
+            <DialogTitle className="text-app-textPrimary">Setup Two-Factor Authentication</DialogTitle>
+            <DialogDescription className="text-app-textSecondary">
               For additional security, please set up Google Authenticator.
             </DialogDescription>
           </DialogHeader>
@@ -876,26 +876,26 @@ export default function OrgAwareLoginPage() {
                 </ol>
               </AlertDescription>
             </Alert>
-            
+
             {qrCodeUrl && (
               <div className="flex flex-col items-center space-y-3">
-                <Label className="text-white font-medium">Scan QR Code</Label>
+                <Label className="text-app-textPrimary font-medium">Scan QR Code</Label>
                 <div className="bg-white p-4 rounded-lg">
                   <img src={qrCodeUrl} alt="MFA QR" className="w-48 h-48" />
                 </div>
               </div>
             )}
-            
+
             {mfaSecretCode && (
               <div className="space-y-3">
-                <Label className="text-white font-medium">Manual Entry Secret Key</Label>
+                <Label className="text-app-textPrimary font-medium">Manual Entry Secret Key</Label>
                 <div className="relative">
-                  <div className="font-mono text-sm text-gray-300 bg-[#1f1f1f] p-3 pr-12 rounded border-[#2f2f2f] border break-all">
+                  <div className="font-mono text-sm text-app-textSecondary bg-app-elevated p-3 pr-12 rounded border-app-border border break-all">
                     {mfaSecretCode}
                   </div>
                   <button
                     onClick={copySecret}
-                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 text-gray-400 hover:text-white transition-colors rounded hover:bg-[#2f2f2f]"
+                    className="absolute right-2 top-1/2 transform -translate-y-1/2 p-2 text-app-textSecondary hover:text-app-textPrimary transition-colors rounded hover:bg-app-overlay"
                     title="Copy secret key"
                   >
                     {copiedSecret ? (
@@ -907,16 +907,16 @@ export default function OrgAwareLoginPage() {
                 </div>
               </div>
             )}
-            
+
             <div className="space-y-3">
-              <Label htmlFor="setup-mfa-code" className="text-white font-medium">Enter Verification Code</Label>
+              <Label htmlFor="setup-mfa-code" className="text-app-textPrimary font-medium">Enter Verification Code</Label>
               <Input
                 id="setup-mfa-code"
                 placeholder="Enter 6-digit code"
                 value={setupMfaCode}
                 onChange={(e) => setSetupMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                 maxLength={6}
-                className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 h-12 focus:border-blue-500 focus:ring-blue-500/20"
+                className="text-center text-2xl tracking-widest bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted h-12 focus:border-app-accent focus:ring-app-accent/20"
                 disabled={isLoading}
               />
             </div>
@@ -945,7 +945,7 @@ export default function OrgAwareLoginPage() {
 
       {/* MFA Verify Dialog */}
       <Dialog open={showMFA} onOpenChange={setShowMFA}>
-        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+        <DialogContent className="bg-app-surface border-app-border text-app-textPrimary">
           <button
             onClick={() => setShowMFA(false)}
             className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
@@ -954,18 +954,18 @@ export default function OrgAwareLoginPage() {
             <span className="sr-only">Close</span>
           </button>
           <DialogHeader>
-            <DialogTitle className="text-white">Enter Authentication Code</DialogTitle>
-            <DialogDescription className="text-gray-400">Enter the 6-digit code from your authenticator app</DialogDescription>
+            <DialogTitle className="text-app-textPrimary">Enter Authentication Code</DialogTitle>
+            <DialogDescription className="text-app-textSecondary">Enter the 6-digit code from your authenticator app</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <Label htmlFor="mfa-code" className="text-white">Code</Label>
+            <Label htmlFor="mfa-code" className="text-app-textPrimary">Code</Label>
             <Input
               id="mfa-code"
               placeholder="6-digit"
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
               maxLength={6}
-              className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white focus:border-blue-500 focus:ring-blue-500/20"
+              className="text-center text-2xl tracking-widest bg-app-elevated border-app-border text-app-textPrimary focus:border-app-accent focus:ring-app-accent/20"
               disabled={isLoading}
             />
             {authError && (
@@ -992,7 +992,7 @@ export default function OrgAwareLoginPage() {
 
       {/* Forgot Password Dialog */}
       <Dialog open={showForgotPassword} onOpenChange={(open) => !open && resetForgotPasswordDialog()}>
-        <DialogContent className="bg-[#0f0f0f] border-[#1f1f1f] text-white">
+        <DialogContent className="bg-app-surface border-app-border text-app-textPrimary">
           <button
             onClick={resetForgotPasswordDialog}
             className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
@@ -1001,8 +1001,8 @@ export default function OrgAwareLoginPage() {
             <span className="sr-only">Close</span>
           </button>
           <DialogHeader>
-            <DialogTitle className="text-white">Reset Password</DialogTitle>
-            <DialogDescription className="text-gray-400">
+            <DialogTitle className="text-app-textPrimary">Reset Password</DialogTitle>
+            <DialogDescription className="text-app-textSecondary">
               {forgotPasswordStep === 1 && "Enter your email address and we'll send you a verification code."}
               {forgotPasswordStep === 2 && "Enter the verification code sent to your email."}
               {forgotPasswordStep === 3 && "Enter your new password."}
@@ -1012,18 +1012,18 @@ export default function OrgAwareLoginPage() {
           {forgotPasswordStep === 1 ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="forgot-email" className="text-white text-sm font-medium">
+                <Label htmlFor="forgot-email" className="text-app-textPrimary text-sm font-medium">
                   Email Address
                 </Label>
                 <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-app-textSecondary" />
                   <Input
                     id="forgot-email"
                     type="email"
                     placeholder="name@company.com"
                     value={forgotPasswordEmail}
                     onChange={(e) => setForgotPasswordEmail(e.target.value)}
-                    className="pl-10 bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                    className="pl-10 bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted focus:border-app-accent focus:ring-app-accent/20"
                     disabled={isForgotPasswordLoading}
                   />
                 </div>
@@ -1054,31 +1054,31 @@ export default function OrgAwareLoginPage() {
           ) : forgotPasswordStep === 2 ? (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="reset-code" className="text-white">Verification Code</Label>
+                <Label htmlFor="reset-code" className="text-app-textPrimary">Verification Code</Label>
                 <Input
                   id="reset-code"
                   placeholder="Enter 6-digit code"
                   value={forgotPasswordCode}
                   onChange={(e) => setForgotPasswordCode(e.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
                   maxLength={6}
-                  className="text-center text-2xl tracking-widest bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                  className="text-center text-2xl tracking-widest bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted focus:border-app-accent focus:ring-app-accent/20"
                   disabled={isForgotPasswordLoading}
                 />
               </div>
-              
+
               {forgotPasswordError && (
                 <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription className="text-red-200">{forgotPasswordError}</AlertDescription>
                 </Alert>
               )}
-              
+
               <div className="flex gap-3">
                 <Button
                   variant="outline"
                   onClick={() => setForgotPasswordStep(1)}
                   disabled={isForgotPasswordLoading}
-                  className="flex-1 border-[#2f2f2f] text-white hover:bg-[#1f1f1f]"
+                  className="flex-1 border-app-border text-app-textPrimary hover:bg-app-elevated"
                 >
                   Back
                 </Button>
@@ -1101,43 +1101,43 @@ export default function OrgAwareLoginPage() {
           ) : (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="new-forgot-password" className="text-white">New Password</Label>
+                <Label htmlFor="new-forgot-password" className="text-app-textPrimary">New Password</Label>
                 <Input
                   id="new-forgot-password"
                   type="password"
                   placeholder="Enter new password"
                   value={newForgotPassword}
                   onChange={(e) => setNewForgotPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                  className="bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted focus:border-app-accent focus:ring-app-accent/20"
                   disabled={isForgotPasswordLoading}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="confirm-forgot-password" className="text-white">Confirm New Password</Label>
+                <Label htmlFor="confirm-forgot-password" className="text-app-textPrimary">Confirm New Password</Label>
                 <Input
                   id="confirm-forgot-password"
                   type="password"
                   placeholder="Confirm password"
                   value={confirmForgotPassword}
                   onChange={(e) => setConfirmForgotPassword(e.target.value)}
-                  className="bg-[#1f1f1f] border-[#2f2f2f] text-white placeholder-gray-500 focus:border-blue-500 focus:ring-blue-500/20"
+                  className="bg-app-elevated border-app-border text-app-textPrimary placeholder-app-textMuted focus:border-app-accent focus:ring-app-accent/20"
                   disabled={isForgotPasswordLoading}
                 />
               </div>
-              
+
               {forgotPasswordError && (
                 <Alert variant="destructive" className="bg-red-500/10 border-red-500/20">
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription className="text-red-200">{forgotPasswordError}</AlertDescription>
                 </Alert>
               )}
-              
+
               <div className="flex gap-3">
                 <Button
                   variant="outline"
                   onClick={() => setForgotPasswordStep(2)}
                   disabled={isForgotPasswordLoading}
-                  className="flex-1 border-[#2f2f2f] text-white hover:bg-[#1f1f1f]"
+                  className="flex-1 border-app-border text-app-textPrimary hover:bg-app-elevated"
                 >
                   Back
                 </Button>
