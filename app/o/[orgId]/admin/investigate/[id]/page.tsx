@@ -1,7 +1,7 @@
-"use client"
+"use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   AlertTriangle,
@@ -17,86 +17,107 @@ import {
   MessageSquare,
   Bot,
   ChevronRight,
-} from "lucide-react"
+} from "lucide-react";
 
-import { AppLayout } from "@/components/app-layout"
-import { FadeInSection } from "@/components/fade-in-section"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Textarea } from "@/components/ui/textarea"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot"
-import { cn } from "@/lib/utils"
+import { AppLayout } from "@/components/app-layout";
+import { FadeInSection } from "@/components/fade-in-section";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SecurityCopilotEnhanced } from "@/components/security-copilot/security-copilot";
+import { cn } from "@/lib/utils";
 
 type Investigation = {
-  id?: string
-  emailMessageId: string
-  detectionId?: string
-  priority?: "low" | "medium" | "high" | "critical"
-  severity?: "low" | "medium" | "high" | "critical"
-  status?: "new" | "in_progress" | "resolved" | "escalated"
-  createdAt?: string
-  description?: string
-  assigneeName?: string
+  id?: string;
+  emailMessageId: string;
+  detectionId?: string;
+  priority?: "low" | "medium" | "high" | "critical";
+  severity?: "low" | "medium" | "high" | "critical";
+  status?: "new" | "in_progress" | "resolved" | "escalated";
+  createdAt?: string;
+  description?: string;
+  assigneeName?: string;
   notes?: Array<{
-    id: string
-    content: string
-    author: string
-    timestamp: string
-  }>
-}
+    id: string;
+    content: string;
+    author: string;
+    timestamp: string;
+  }>;
+};
 
 type EmailData = {
-  messageId: string
-  subject: string
-  sender: string
-  recipients: string[]
-  timestamp?: string
-  body?: string
-  bodyHtml?: string
-  headers?: Record<string, string>
-  attachments?: { name: string; size?: number; url?: string }[]
-}
+  messageId: string;
+  subject: string;
+  sender: string;
+  recipients: string[];
+  timestamp?: string;
+  body?: string;
+  bodyHtml?: string;
+  headers?: Record<string, string>;
+  attachments?: { name: string; size?: number; url?: string }[];
+};
 
 export default function InvestigatePage() {
-  const router = useRouter()
-  const params = useParams()
+  const router = useRouter();
+  const params = useParams();
 
-  const orgId = params.orgId as string
-  const encodedId = params.id as string
-  const messageId = decodeURIComponent(encodedId)
+  const orgId = params.orgId as string;
+  const encodedId = params.id as string;
+  const messageId = decodeURIComponent(encodedId);
 
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [investigation, setInvestigation] = useState<Investigation | null>(null)
-  const [email, setEmail] = useState<EmailData | null>(null)
+  const [investigation, setInvestigation] = useState<Investigation | null>(
+    null,
+  );
+  const [email, setEmail] = useState<EmailData | null>(null);
 
-  const [notesDialogOpen, setNotesDialogOpen] = useState(false)
-  const [escalateDialogOpen, setEscalateDialogOpen] = useState(false)
-  const [notes, setNotes] = useState("")
+  const [notesDialogOpen, setNotesDialogOpen] = useState(false);
+  const [escalateDialogOpen, setEscalateDialogOpen] = useState(false);
+  const [notes, setNotes] = useState("");
 
-  const [activeMainTab, setActiveMainTab] = useState<"overview" | "email" | "notes">("overview")
-  const [activeEmailTab, setActiveEmailTab] = useState<"content" | "html" | "headers" | "attachments">("content")
-  const [copilotOpen, setCopilotOpen] = useState(false)
+  const [activeMainTab, setActiveMainTab] = useState<
+    "overview" | "email" | "notes"
+  >("overview");
+  const [activeEmailTab, setActiveEmailTab] = useState<
+    "content" | "html" | "headers" | "attachments"
+  >("content");
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   const fetchInvestigation = useCallback(async () => {
     try {
-      const request = await fetch(`/api/investigations/${encodeURIComponent(messageId)}`, { cache: "no-store" })
+      const request = await fetch(
+        `/api/investigations/${encodeURIComponent(messageId)}`,
+        { cache: "no-store" },
+      );
       if (request.ok) {
-        const data = await request.json()
+        const data = await request.json();
         setInvestigation({
           emailMessageId: messageId,
           ...data,
-        })
-        return
+        });
+        return;
       }
     } catch (err) {
-      console.warn("Investigation fetch failed", err)
+      console.warn("Investigation fetch failed", err);
     }
 
     setInvestigation({
@@ -104,8 +125,8 @@ export default function InvestigatePage() {
       severity: "medium",
       status: "in_progress",
       description: "Investigation details unavailable (using fallback data).",
-    })
-  }, [messageId])
+    });
+  }, [messageId]);
 
   const fetchEmail = useCallback(async () => {
     const attemptSingle = async (url: string) => {
@@ -113,59 +134,63 @@ export default function InvestigatePage() {
         const res = await fetch(url, {
           cache: "no-store",
           headers: {
-            'x-org-id': orgId
-          }
-        })
+            "x-org-id": orgId,
+          },
+        });
         if (res.ok) {
-          const payload = await res.json()
-          console.log('📧 Email fetch response:', payload)
-          return payload?.email ?? payload
+          const payload = await res.json();
+          console.log("📧 Email fetch response:", payload);
+          return payload?.email ?? payload;
         }
       } catch (error) {
-        console.warn(`Failed fetching ${url}`, error)
+        console.warn(`Failed fetching ${url}`, error);
       }
-      return null
-    }
+      return null;
+    };
 
     const direct =
       (await attemptSingle(`/api/email/${encodeURIComponent(messageId)}`)) ??
-      (await attemptSingle(`/api/email?messageId=${encodeURIComponent(messageId)}`))
+      (await attemptSingle(
+        `/api/email?messageId=${encodeURIComponent(messageId)}`,
+      ));
 
     if (direct) {
-      console.log('✅ Found email directly:', direct)
-      return direct
+      console.log("✅ Found email directly:", direct);
+      return direct;
     }
 
     try {
       const res = await fetch("/api/email?limit=1000", {
         cache: "no-store",
         headers: {
-          'x-org-id': orgId
-        }
-      })
+          "x-org-id": orgId,
+        },
+      });
       if (res.ok) {
-        const payload = await res.json()
-        const found = (payload.emails || []).find((item: any) => item.messageId === messageId)
-        console.log('📧 Found email in list:', found)
-        return found ?? null
+        const payload = await res.json();
+        const found = (payload.emails || []).find(
+          (item: any) => item.messageId === messageId,
+        );
+        console.log("📧 Found email in list:", found);
+        return found ?? null;
       }
     } catch (error) {
-      console.warn("Failed fetching fallback email list", error)
+      console.warn("Failed fetching fallback email list", error);
     }
-    return null
-  }, [messageId, orgId])
+    return null;
+  }, [messageId, orgId]);
 
   useEffect(() => {
-    let mounted = true
+    let mounted = true;
     const run = async () => {
-      setLoading(true)
-      setError(null)
+      setLoading(true);
+      setError(null);
       try {
         await Promise.all([
           fetchInvestigation(),
           (async () => {
-            const rawEmail = await fetchEmail()
-            if (!mounted) return
+            const rawEmail = await fetchEmail();
+            if (!mounted) return;
             if (rawEmail) {
               setEmail({
                 messageId,
@@ -176,82 +201,129 @@ export default function InvestigatePage() {
                 body: rawEmail.body,
                 bodyHtml: rawEmail.bodyHtml,
                 headers: rawEmail.headers,
-                attachments: (rawEmail.attachments || []).map((attachment: any) =>
-                  typeof attachment === "string" ? { name: attachment } : attachment,
+                attachments: (rawEmail.attachments || []).map(
+                  (attachment: any) =>
+                    typeof attachment === "string"
+                      ? { name: attachment }
+                      : attachment,
                 ),
-              })
+              });
             }
           })(),
-        ])
+        ]);
       } catch (err: any) {
         if (mounted) {
-          setError(err?.message || "Failed to load investigation")
+          setError(err?.message || "Failed to load investigation");
         }
       } finally {
         if (mounted) {
-          setLoading(false)
+          setLoading(false);
         }
       }
-    }
-    run()
+    };
+    run();
     return () => {
-      mounted = false
-    }
-  }, [fetchEmail, fetchInvestigation, messageId])
+      mounted = false;
+    };
+  }, [fetchEmail, fetchInvestigation, messageId]);
 
   const markResolved = async () => {
     try {
-      setSaving(true)
-      await fetch(`/api/investigations/${encodeURIComponent(messageId)}/status`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "resolved", notes }),
-      }).catch(() => null)
-      setInvestigation((prev) => (prev ? { ...prev, status: "resolved" } : prev))
-      setNotesDialogOpen(false)
+      setSaving(true);
+      await fetch(
+        `/api/investigations/${encodeURIComponent(messageId)}/status`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "resolved", notes }),
+        },
+      ).catch(() => null);
+      setInvestigation((prev) =>
+        prev ? { ...prev, status: "resolved" } : prev,
+      );
+      setNotesDialogOpen(false);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const escalate = async () => {
     try {
-      setSaving(true)
-      await fetch(`/api/investigations/${encodeURIComponent(messageId)}/escalate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: notes || "Escalated from investigator view" }),
-      }).catch(() => null)
-      setInvestigation((prev) => (prev ? { ...prev, status: "escalated" } : prev))
-      setEscalateDialogOpen(false)
+      setSaving(true);
+      await fetch(
+        `/api/investigations/${encodeURIComponent(messageId)}/escalate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reason: notes || "Escalated from investigator view",
+          }),
+        },
+      ).catch(() => null);
+      setInvestigation((prev) =>
+        prev ? { ...prev, status: "escalated" } : prev,
+      );
+      setEscalateDialogOpen(false);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const severityConfig = useMemo(() => {
-    const severity = (investigation?.severity || "medium").toLowerCase()
+    const severity = (investigation?.severity || "medium").toLowerCase();
     const configs = {
-      critical: { text: "Critical", color: "text-red-400", bg: "bg-red-500/10", border: "border-red-500/50" },
-      high: { text: "High", color: "text-orange-400", bg: "bg-orange-500/10", border: "border-orange-500/50" },
-      medium: { text: "Medium", color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/50" },
-      low: { text: "Low", color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/50" },
-    }
-    return configs[severity as keyof typeof configs] || configs.medium
-  }, [investigation?.severity])
+      critical: {
+        text: "Critical",
+        color: "text-red-400",
+        bg: "bg-red-500/10",
+        border: "border-red-500/50",
+      },
+      high: {
+        text: "High",
+        color: "text-orange-400",
+        bg: "bg-orange-500/10",
+        border: "border-orange-500/50",
+      },
+      medium: {
+        text: "Medium",
+        color: "text-amber-400",
+        bg: "bg-amber-500/10",
+        border: "border-amber-500/50",
+      },
+      low: {
+        text: "Low",
+        color: "text-blue-400",
+        bg: "bg-blue-500/10",
+        border: "border-blue-500/50",
+      },
+    };
+    return configs[severity as keyof typeof configs] || configs.medium;
+  }, [investigation?.severity]);
 
   const statusConfig = useMemo(() => {
-    const status = (investigation?.status || "in_progress").toLowerCase()
+    const status = (investigation?.status || "in_progress").toLowerCase();
     const configs = {
       new: { text: "New", color: "text-blue-400", bg: "bg-blue-500/10" },
-      in_progress: { text: "In Progress", color: "text-yellow-400", bg: "bg-yellow-500/10" },
-      resolved: { text: "Resolved", color: "text-green-400", bg: "bg-green-500/10" },
-      escalated: { text: "Escalated", color: "text-red-400", bg: "bg-red-500/10" },
-    }
-    return configs[status as keyof typeof configs] || configs.in_progress
-  }, [investigation?.status])
+      in_progress: {
+        text: "In Progress",
+        color: "text-yellow-400",
+        bg: "bg-yellow-500/10",
+      },
+      resolved: {
+        text: "Resolved",
+        color: "text-green-400",
+        bg: "bg-green-500/10",
+      },
+      escalated: {
+        text: "Escalated",
+        color: "text-red-400",
+        bg: "bg-red-500/10",
+      },
+    };
+    return configs[status as keyof typeof configs] || configs.in_progress;
+  }, [investigation?.status]);
 
-  const backToAssignments = () => router.push(`/o/${orgId}/admin/assignments`)
+  const backToAssignments = () => router.push(`/o/${orgId}/admin/assignments`);
 
   if (loading) {
     return (
@@ -274,7 +346,7 @@ export default function InvestigatePage() {
           </div>
         </FadeInSection>
       </AppLayout>
-    )
+    );
   }
 
   return (
@@ -295,7 +367,9 @@ export default function InvestigatePage() {
               </Button>
             </div>
             <div className="flex items-center gap-2">
-              <Badge className={`${severityConfig.bg} ${severityConfig.color} border ${severityConfig.border}`}>
+              <Badge
+                className={`${severityConfig.bg} ${severityConfig.color} border ${severityConfig.border}`}
+              >
                 <Flag className="mr-1 h-3 w-3" />
                 {severityConfig.text} Priority
               </Badge>
@@ -322,7 +396,12 @@ export default function InvestigatePage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => window.open(`/investigate/${encodeURIComponent(messageId)}`, '_blank')}
+                    onClick={() =>
+                      window.open(
+                        `/o/${orgId}/admin/investigate/${encodeURIComponent(messageId)}`,
+                        "_blank",
+                      )
+                    }
                     className="border-app-border bg-app-elevated text-app-textSecondary hover:bg-app-overlay hover:text-app-textPrimary"
                   >
                     <ExternalLink className="mr-2 h-4 w-4" />
@@ -347,7 +426,9 @@ export default function InvestigatePage() {
               <CardContent className="p-6">
                 <div className="flex items-center gap-2 text-red-400">
                   <AlertTriangle className="h-5 w-5" />
-                  <span className="font-medium">Error loading investigation</span>
+                  <span className="font-medium">
+                    Error loading investigation
+                  </span>
                 </div>
                 <p className="mt-2 text-red-300">{error}</p>
               </CardContent>
@@ -355,7 +436,11 @@ export default function InvestigatePage() {
           ) : null}
 
           {/* Main Tabs */}
-          <Tabs value={activeMainTab} onValueChange={(v) => setActiveMainTab(v as any)} className="space-y-6">
+          <Tabs
+            value={activeMainTab}
+            onValueChange={(v) => setActiveMainTab(v as any)}
+            className="space-y-6"
+          >
             <div className="flex items-center justify-between">
               <TabsList className="inline-flex h-12 items-center justify-start gap-1 rounded-xl bg-app-elevated p-1 border border-app-border">
                 <TabsTrigger
@@ -397,35 +482,54 @@ export default function InvestigatePage() {
                 {/* Investigation Details */}
                 <Card className="bg-app-surface border-app-border">
                   <CardHeader>
-                    <CardTitle className="text-lg text-app-textPrimary">Investigation Details</CardTitle>
+                    <CardTitle className="text-lg text-app-textPrimary">
+                      Investigation Details
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <MetaRow label="Status" icon={<Flag className="h-4 w-4" />}>
-                      <Badge className={`${statusConfig.bg} ${statusConfig.color}`}>
+                      <Badge
+                        className={`${statusConfig.bg} ${statusConfig.color}`}
+                      >
                         {statusConfig.text}
                       </Badge>
                     </MetaRow>
-                    <MetaRow label="Priority" icon={<AlertTriangle className="h-4 w-4" />}>
-                      <Badge className={`${severityConfig.bg} ${severityConfig.color}`}>
+                    <MetaRow
+                      label="Priority"
+                      icon={<AlertTriangle className="h-4 w-4" />}
+                    >
+                      <Badge
+                        className={`${severityConfig.bg} ${severityConfig.color}`}
+                      >
                         {severityConfig.text}
                       </Badge>
                     </MetaRow>
-                    <MetaRow label="Created" icon={<Clock className="h-4 w-4" />}>
+                    <MetaRow
+                      label="Created"
+                      icon={<Clock className="h-4 w-4" />}
+                    >
                       {investigation?.createdAt
                         ? new Date(investigation.createdAt).toLocaleString()
                         : email?.timestamp
-                        ? new Date(email.timestamp).toLocaleString()
-                        : "—"}
+                          ? new Date(email.timestamp).toLocaleString()
+                          : "—"}
                     </MetaRow>
                     {investigation?.assigneeName && (
-                      <MetaRow label="Assigned To" icon={<User className="h-4 w-4" />}>
+                      <MetaRow
+                        label="Assigned To"
+                        icon={<User className="h-4 w-4" />}
+                      >
                         {investigation.assigneeName}
                       </MetaRow>
                     )}
                     {investigation?.description && (
                       <div className="pt-2 border-t border-app-border">
-                        <div className="text-sm font-medium text-app-textSecondary mb-2">Description</div>
-                        <p className="text-app-textPrimary text-sm">{investigation.description}</p>
+                        <div className="text-sm font-medium text-app-textSecondary mb-2">
+                          Description
+                        </div>
+                        <p className="text-app-textPrimary text-sm">
+                          {investigation.description}
+                        </p>
                       </div>
                     )}
                   </CardContent>
@@ -434,10 +538,15 @@ export default function InvestigatePage() {
                 {/* Email Metadata */}
                 <Card className="bg-app-surface border-app-border">
                   <CardHeader>
-                    <CardTitle className="text-lg text-app-textPrimary">Email Metadata</CardTitle>
+                    <CardTitle className="text-lg text-app-textPrimary">
+                      Email Metadata
+                    </CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <MetaRow label="Subject" icon={<Mail className="h-4 w-4" />}>
+                    <MetaRow
+                      label="Subject"
+                      icon={<Mail className="h-4 w-4" />}
+                    >
                       {email?.subject || "(No subject)"}
                     </MetaRow>
                     <MetaRow label="From" icon={<User className="h-4 w-4" />}>
@@ -446,12 +555,22 @@ export default function InvestigatePage() {
                     <MetaRow label="To" icon={<User className="h-4 w-4" />}>
                       {email?.recipients?.join(", ") || "—"}
                     </MetaRow>
-                    <MetaRow label="Timestamp" icon={<Clock className="h-4 w-4" />}>
-                      {email?.timestamp ? new Date(email.timestamp).toLocaleString() : "—"}
+                    <MetaRow
+                      label="Timestamp"
+                      icon={<Clock className="h-4 w-4" />}
+                    >
+                      {email?.timestamp
+                        ? new Date(email.timestamp).toLocaleString()
+                        : "—"}
                     </MetaRow>
-                    <MetaRow label="Message ID" icon={<Network className="h-4 w-4" />}>
+                    <MetaRow
+                      label="Message ID"
+                      icon={<Network className="h-4 w-4" />}
+                    >
                       <code className="text-xs bg-app-elevated px-2 py-1 rounded">
-                        {messageId.length > 40 ? `${messageId.substring(0, 40)}...` : messageId}
+                        {messageId.length > 40
+                          ? `${messageId.substring(0, 40)}...`
+                          : messageId}
                       </code>
                     </MetaRow>
                   </CardContent>
@@ -461,7 +580,9 @@ export default function InvestigatePage() {
               {/* Quick Actions */}
               <Card className="bg-app-surface border-app-border">
                 <CardHeader>
-                  <CardTitle className="text-lg text-app-textPrimary">Investigation Actions</CardTitle>
+                  <CardTitle className="text-lg text-app-textPrimary">
+                    Investigation Actions
+                  </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-3">
@@ -490,7 +611,12 @@ export default function InvestigatePage() {
                     </Button>
                     <Button
                       variant="outline"
-                      onClick={() => window.open(`/api/email/raw?messageId=${encodeURIComponent(messageId)}`, "_blank")}
+                      onClick={() =>
+                        window.open(
+                          `/api/email/raw?messageId=${encodeURIComponent(messageId)}`,
+                          "_blank",
+                        )
+                      }
                       className="border-app-border bg-app-elevated text-app-textPrimary hover:bg-app-overlay"
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
@@ -506,19 +632,36 @@ export default function InvestigatePage() {
               <Card className="bg-app-surface border-app-border">
                 <CardHeader>
                   <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg text-app-textPrimary">Email Content</CardTitle>
-                    <Tabs value={activeEmailTab} onValueChange={(v) => setActiveEmailTab(v as any)}>
+                    <CardTitle className="text-lg text-app-textPrimary">
+                      Email Content
+                    </CardTitle>
+                    <Tabs
+                      value={activeEmailTab}
+                      onValueChange={(v) => setActiveEmailTab(v as any)}
+                    >
                       <TabsList className="h-10 bg-app-elevated border border-app-border">
-                        <TabsTrigger value="content" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                        <TabsTrigger
+                          value="content"
+                          className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary"
+                        >
                           Content
                         </TabsTrigger>
-                        <TabsTrigger value="html" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                        <TabsTrigger
+                          value="html"
+                          className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary"
+                        >
                           HTML
                         </TabsTrigger>
-                        <TabsTrigger value="headers" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                        <TabsTrigger
+                          value="headers"
+                          className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary"
+                        >
                           Headers
                         </TabsTrigger>
-                        <TabsTrigger value="attachments" className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary">
+                        <TabsTrigger
+                          value="attachments"
+                          className="data-[state=active]:bg-app-surface data-[state=active]:text-app-textPrimary text-app-textSecondary"
+                        >
                           Attachments
                         </TabsTrigger>
                       </TabsList>
@@ -562,12 +705,21 @@ export default function InvestigatePage() {
                         <div className="overflow-x-auto rounded-lg border border-app-border">
                           <table className="w-full text-sm">
                             <tbody className="divide-y divide-app-border">
-                              {Object.entries(email.headers).map(([key, value]) => (
-                                <tr key={key} className="hover:bg-app-elevated transition-colors">
-                                  <td className="w-48 px-4 py-3 font-mono text-xs text-app-textSecondary">{key}</td>
-                                  <td className="px-4 py-3 text-app-textPrimary font-mono text-xs break-all">{String(value)}</td>
-                                </tr>
-                              ))}
+                              {Object.entries(email.headers).map(
+                                ([key, value]) => (
+                                  <tr
+                                    key={key}
+                                    className="hover:bg-app-elevated transition-colors"
+                                  >
+                                    <td className="w-48 px-4 py-3 font-mono text-xs text-app-textSecondary">
+                                      {key}
+                                    </td>
+                                    <td className="px-4 py-3 text-app-textPrimary font-mono text-xs break-all">
+                                      {String(value)}
+                                    </td>
+                                  </tr>
+                                ),
+                              )}
                             </tbody>
                           </table>
                         </div>
@@ -589,7 +741,9 @@ export default function InvestigatePage() {
                               <div className="flex items-center gap-3">
                                 <FileText className="h-5 w-5 text-app-accent" />
                                 <div>
-                                  <div className="text-sm font-medium text-app-textPrimary">{attachment.name}</div>
+                                  <div className="text-sm font-medium text-app-textPrimary">
+                                    {attachment.name}
+                                  </div>
                                   {attachment.size && (
                                     <div className="text-xs text-app-textMuted">
                                       {(attachment.size / 1024).toFixed(2)} KB
@@ -604,7 +758,11 @@ export default function InvestigatePage() {
                                   asChild
                                   className="border-app-border text-app-textSecondary hover:text-app-textPrimary"
                                 >
-                                  <a href={attachment.url} target="_blank" rel="noreferrer">
+                                  <a
+                                    href={attachment.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
                                     <ExternalLink className="mr-2 h-3 w-3" />
                                     Download
                                   </a>
@@ -626,23 +784,33 @@ export default function InvestigatePage() {
             <TabsContent value="notes" className="space-y-6">
               <Card className="bg-app-surface border-app-border">
                 <CardHeader>
-                  <CardTitle className="text-lg text-app-textPrimary">Investigation Timeline</CardTitle>
+                  <CardTitle className="text-lg text-app-textPrimary">
+                    Investigation Timeline
+                  </CardTitle>
                   <CardDescription className="text-app-textSecondary">
-                    Track all actions, notes, and changes related to this investigation
+                    Track all actions, notes, and changes related to this
+                    investigation
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
                   {investigation?.notes && investigation.notes.length > 0 ? (
                     <div className="space-y-4">
                       {investigation.notes.map((note) => (
-                        <div key={note.id} className="border-l-2 border-app-accent pl-4 py-2">
+                        <div
+                          key={note.id}
+                          className="border-l-2 border-app-accent pl-4 py-2"
+                        >
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-sm font-medium text-app-textPrimary">{note.author}</span>
+                            <span className="text-sm font-medium text-app-textPrimary">
+                              {note.author}
+                            </span>
                             <span className="text-xs text-app-textMuted">
                               {new Date(note.timestamp).toLocaleString()}
                             </span>
                           </div>
-                          <p className="text-sm text-app-textSecondary">{note.content}</p>
+                          <p className="text-sm text-app-textSecondary">
+                            {note.content}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -706,7 +874,8 @@ export default function InvestigatePage() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-app-textSecondary">
-            Provide a reason for escalating this investigation to an administrator.
+            Provide a reason for escalating this investigation to an
+            administrator.
           </p>
           <Textarea
             value={notes}
@@ -740,7 +909,9 @@ export default function InvestigatePage() {
           <div className="flex items-center justify-between p-4 border-b border-app-border bg-app-elevated">
             <div className="flex items-center gap-2">
               <Bot className="h-5 w-5 text-blue-400" />
-              <h3 className="text-lg font-semibold text-app-textPrimary">AI Investigation Assistant</h3>
+              <h3 className="text-lg font-semibold text-app-textPrimary">
+                AI Investigation Assistant
+              </h3>
             </div>
             <Button
               variant="ghost"
@@ -771,7 +942,7 @@ export default function InvestigatePage() {
         />
       )}
     </AppLayout>
-  )
+  );
 }
 
 function MetaRow({
@@ -779,9 +950,9 @@ function MetaRow({
   icon,
   children,
 }: {
-  label: string
-  icon: React.ReactNode
-  children: React.ReactNode
+  label: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
 }) {
   return (
     <div className="flex items-start gap-3">
@@ -789,18 +960,28 @@ function MetaRow({
         {icon}
         <span className="text-sm font-medium">{label}</span>
       </div>
-      <div className="flex-1 text-app-textPrimary text-sm font-medium">{children}</div>
+      <div className="flex-1 text-app-textPrimary text-sm font-medium">
+        {children}
+      </div>
     </div>
-  )
+  );
 }
 
-function InfoItem({ label, children }: { label: string; children: React.ReactNode }) {
+function InfoItem({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-center justify-between py-2 border-b border-app-border last:border-0">
       <span className="text-xs text-app-textSecondary">{label}</span>
-      <span className="text-xs text-app-textPrimary font-medium">{children}</span>
+      <span className="text-xs text-app-textPrimary font-medium">
+        {children}
+      </span>
     </div>
-  )
+  );
 }
 
 function EmptyState({ label }: { label: string }) {
@@ -809,5 +990,5 @@ function EmptyState({ label }: { label: string }) {
       <Copy className="h-5 w-5 text-app-textMuted" />
       <span className="text-app-textMuted">{label}</span>
     </div>
-  )
+  );
 }

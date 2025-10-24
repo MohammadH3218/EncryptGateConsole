@@ -1,43 +1,43 @@
-"use client"
+"use client";
 
-import { useEffect, useMemo, useState } from "react"
-import { useRouter } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Loader2, Building2, Search, ShieldCheck } from "lucide-react"
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, Building2, Search, ShieldCheck } from "lucide-react";
 
 interface OrgSearchResult {
-  organizationId: string
-  name?: string
-  region?: string
-  orgCode?: string
+  organizationId: string;
+  name?: string;
+  region?: string;
+  orgCode?: string;
 }
 
-const SEARCH_DELAY_MS = 250
+const SEARCH_DELAY_MS = 250;
 
 export default function OrgSelectPage() {
-  const router = useRouter()
-  const [query, setQuery] = useState("")
-  const [isSearching, setIsSearching] = useState(false)
-  const [results, setResults] = useState<OrgSearchResult[]>([])
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const router = useRouter();
+  const [query, setQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [results, setResults] = useState<OrgSearchResult[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const debouncedQuery = useMemo(() => query.trim(), [query])
+  const debouncedQuery = useMemo(() => query.trim(), [query]);
 
   useEffect(() => {
     if (!debouncedQuery) {
-      setResults([])
-      setErrorMessage(null)
-      return
+      setResults([]);
+      setErrorMessage(null);
+      return;
     }
 
-    const controller = new AbortController()
+    const controller = new AbortController();
     const timeout = setTimeout(async () => {
-      setIsSearching(true)
-      setErrorMessage(null)
-      console.log("[OrgSelect] starting search", { query: debouncedQuery })
+      setIsSearching(true);
+      setErrorMessage(null);
+      console.log("[OrgSelect] starting search", { query: debouncedQuery });
       try {
         const response = await fetch(
           `/api/orgs/search?q=${encodeURIComponent(debouncedQuery)}`,
@@ -48,50 +48,50 @@ export default function OrgSelectPage() {
             signal: controller.signal,
             cache: "no-store",
           },
-        )
+        );
 
-        const status = response.status
-        let payload: any = null
+        const status = response.status;
+        let payload: any = null;
 
         try {
-          payload = await response.json()
+          payload = await response.json();
         } catch (jsonError) {
-          console.error("[OrgSelect] failed to parse response JSON", jsonError)
-          throw jsonError
+          console.error("[OrgSelect] failed to parse response JSON", jsonError);
+          throw jsonError;
         }
 
-        console.log("[OrgSelect] response payload", { status, payload })
+        console.log("[OrgSelect] response payload", { status, payload });
 
         if (!response.ok || payload?.error) {
-          console.warn("[OrgSelect] search returned error", payload?.error)
-          setResults([])
-          setErrorMessage("We couldn't complete that search. Try again later.")
+          console.warn("[OrgSelect] search returned error", payload?.error);
+          setResults([]);
+          setErrorMessage("We couldn't complete that search. Try again later.");
         } else {
-          const items = Array.isArray(payload.items) ? payload.items : []
-          console.log("[OrgSelect] items returned", items.length)
-          setResults(items)
+          const items = Array.isArray(payload.items) ? payload.items : [];
+          console.log("[OrgSelect] items returned", items.length);
+          setResults(items);
           if (!items.length) {
-            setErrorMessage("No organizations matched that search.")
+            setErrorMessage("No organizations matched that search.");
           }
         }
       } catch (error) {
-        if (controller.signal.aborted) return
-        console.error("[OrgSelect] organization search failed", error)
-        setErrorMessage("We couldn't complete that search. Try again.")
+        if (controller.signal.aborted) return;
+        console.error("[OrgSelect] organization search failed", error);
+        setErrorMessage("We couldn't complete that search. Try again.");
       } finally {
-        setIsSearching(false)
+        setIsSearching(false);
       }
-    }, SEARCH_DELAY_MS)
+    }, SEARCH_DELAY_MS);
 
     return () => {
-      clearTimeout(timeout)
-      controller.abort()
-    }
-  }, [debouncedQuery])
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [debouncedQuery]);
 
   const handleSelectOrg = (orgId: string) => {
-    router.push(`/o/${orgId}/login`)
-  }
+    router.push(`/o/${orgId}/login`);
+  };
 
   return (
     <div className="min-h-screen bg-app flex items-center justify-center px-6 py-12">
@@ -103,7 +103,8 @@ export default function OrgSelectPage() {
               Sign in to your organization
             </CardTitle>
             <p className="text-sm text-app-textSecondary">
-              Search by organization name or the short code you received during onboarding.
+              Search by organization name or the short code you received during
+              onboarding.
             </p>
           </div>
         </CardHeader>
@@ -142,11 +143,17 @@ export default function OrgSelectPage() {
                         <span>{org.name ?? org.organizationId}</span>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-app-textSecondary">
-                        <Badge variant="outline" className="border-app-border/80 text-app-textSecondary">
+                        <Badge
+                          variant="outline"
+                          className="border-app-border/80 text-app-textSecondary"
+                        >
                           {org.orgCode ?? "Code pending"}
                         </Badge>
                         {org.region && (
-                          <Badge variant="secondary" className="border-0 bg-app-accent/15 text-app-accent">
+                          <Badge
+                            variant="secondary"
+                            className="border-0 bg-app-accent/15 text-app-accent"
+                          >
                             {org.region}
                           </Badge>
                         )}
@@ -175,5 +182,5 @@ export default function OrgSelectPage() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
