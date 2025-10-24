@@ -16,8 +16,8 @@ import {
 
 // Environment variables - Made optional for org-aware deployment
 const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
-const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 
-                 process.env.CLOUDSERVICES_TABLE || 
+const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME ||
+                 process.env.CLOUDSERVICES_TABLE ||
                  "CloudServices";
 const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 
@@ -28,29 +28,29 @@ console.log("🔧 Users [id] API starting with:", { DEFAULT_ORG_ID, CS_TABLE, US
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
-async function getCognitoConfig() {
-  console.log(`🔍 Fetching Cognito config for org ${DEFAULT_ORG_ID} from table ${CS_TABLE}`);
-  
+async function getCognitoConfig(orgId: string) {
+  console.log(`🔍 Fetching Cognito config for org ${orgId} from table ${CS_TABLE}`);
+
   const resp = await ddb.send(
     new GetItemCommand({
       TableName: CS_TABLE,
       Key: {
-        orgId:       { S: DEFAULT_ORG_ID },
+        orgId:       { S: orgId },
         serviceType: { S: "aws-cognito" },
       },
     })
   );
-  
+
   if (!resp.Item) {
     console.error("❌ No AWS Cognito configuration found in Dynamo");
     throw new Error("No AWS Cognito configuration found. Please connect AWS Cognito first.");
   }
-  
+
   const config = {
     userPoolId: resp.Item.userPoolId?.S!,
     region:     resp.Item.region?.S!,
   };
-  
+
   console.log(`✅ Found Cognito config: UserPoolId=${config.userPoolId}, Region=${config.region}`);
   return config;
 }
@@ -61,24 +61,27 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id') || DEFAULT_ORG_ID;
+
     const email = decodeURIComponent(params.id);
     const { roleIds } = await req.json();
     const newRole = Array.isArray(roleIds) && roleIds.length > 0 ? roleIds[0] : undefined;
-    
+
     if (!newRole) {
       return NextResponse.json(
         { error: "roleIds must contain at least one role ID" },
         { status: 400 }
       );
     }
-    
+
     console.log(`🔄 Updating user role: ${email} -> ${newRole}`);
-    
+
     // Get current user info
     const userResp = await ddb.send(new GetItemCommand({
       TableName: USERS_TABLE,
       Key: {
-        orgId: { S: DEFAULT_ORG_ID },
+        orgId: { S: orgId },
         email: { S: email },
       },
     }));
@@ -93,8 +96,8 @@ export async function PATCH(
 
     const currentRole = userResp.Item.role?.S;
     console.log(`👤 Current role: ${currentRole}, New role: ${newRole}`);
-    
-    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
+
+    const { userPoolId, region: cognitoRegion } = await getCognitoConfig(orgId);
 
     // Create Cognito client
     const cognito = new CognitoIdentityProviderClient({
@@ -133,7 +136,7 @@ export async function PATCH(
     await ddb.send(new UpdateItemCommand({
       TableName: USERS_TABLE,
       Key: {
-        orgId: { S: DEFAULT_ORG_ID },
+        orgId: { S: orgId },
         email: { S: email },
       },
       UpdateExpression: "SET #role = :role, updatedAt = :updatedAt",
@@ -150,10 +153,10 @@ export async function PATCH(
     return NextResponse.json({ success: true, role: newRole });
   } catch (err: any) {
     console.error("❌ [users:PATCH]", err);
-    
+
     let statusCode = 500;
     let errorMessage = "Failed to update user role";
-    
+
     if (err.name === "ResourceNotFoundException") {
       statusCode = 404;
       errorMessage = "User not found";
@@ -164,10 +167,10 @@ export async function PATCH(
       statusCode = 403;
       errorMessage = "Not authorized to access Cognito";
     }
-    
+
     return NextResponse.json(
-      { 
-        error: errorMessage, 
+      {
+        error: errorMessage,
         message: err.message,
         code: err.code || err.name
       },
@@ -182,14 +185,17 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id') || DEFAULT_ORG_ID;
+
     const email = decodeURIComponent(params.id);
     console.log(`🗑️ Removing user from security team: ${email}`);
-    
+
     // Get user info first to know their role
     const userResp = await ddb.send(new GetItemCommand({
       TableName: USERS_TABLE,
       Key: {
-        orgId: { S: DEFAULT_ORG_ID },
+        orgId: { S: orgId },
         email: { S: email },
       },
     }));
@@ -204,8 +210,8 @@ export async function DELETE(
 
     const userRole = userResp.Item.role?.S;
     console.log(`👤 Found user with role: ${userRole}`);
-    
-    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
+
+    const { userPoolId, region: cognitoRegion } = await getCognitoConfig(orgId);
 
     // Create Cognito client
     const cognito = new CognitoIdentityProviderClient({
@@ -231,7 +237,7 @@ export async function DELETE(
     await ddb.send(new DeleteItemCommand({
       TableName: USERS_TABLE,
       Key: {
-        orgId: { S: DEFAULT_ORG_ID },
+        orgId: { S: orgId },
         email: { S: email },
       },
     }));
@@ -240,10 +246,10 @@ export async function DELETE(
     return NextResponse.json({ success: true });
   } catch (err: any) {
     console.error("❌ [users:DELETE]", err);
-    
+
     let statusCode = 500;
     let errorMessage = "Failed to remove user from security team";
-    
+
     if (err.name === "ResourceNotFoundException") {
       statusCode = 404;
       errorMessage = "User not found in security team";
@@ -254,10 +260,10 @@ export async function DELETE(
       statusCode = 403;
       errorMessage = "Not authorized to access Cognito";
     }
-    
+
     return NextResponse.json(
-      { 
-        error: errorMessage, 
+      {
+        error: errorMessage,
         message: err.message,
         code: err.code || err.name
       },
