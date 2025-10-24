@@ -1,4 +1,4 @@
-// app/api/email/[messageId]/route.ts - FIXED VERSION
+﻿// app/api/email/[messageId]/route.ts - FIXED VERSION
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
@@ -6,15 +6,54 @@ import {
   DynamoDBClient,
   UpdateItemCommand,
   ScanCommand,
+  GetItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const ORG_ID = process.env.ORGANIZATION_ID || '';
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
-console.log('📧 Email [messageId] API initialized with:', { REGION, ORG_ID, EMAILS_TABLE });
+console.log('ðŸ“§ Email [messageId] API initialized with:', { REGION, ORG_ID, EMAILS_TABLE });
 
 const ddb = new DynamoDBClient({ region: REGION });
+
+function extractStringArray(attribute: any): string[] {
+  if (!attribute) return []
+  if (Array.isArray(attribute.SS)) return attribute.SS
+  if (attribute.S) return [attribute.S]
+  if (Array.isArray(attribute.L)) {
+    return attribute.L.map((item: any) => item.S || '').filter(Boolean)
+  }
+  return []
+}
+
+function extractHeaders(attribute: any): Record<string, string> | undefined {
+  if (!attribute?.M) return undefined
+  const entries = Object.entries(attribute.M)
+  const headers: Record<string, string> = {}
+  for (const [key, value] of entries) {
+    if (typeof value === 'object') {
+      const str = value.S ?? value.N ?? undefined
+      if (str !== undefined) {
+        headers[key] = String(str)
+      }
+    }
+  }
+  return headers
+}
+
+function extractAttachments(attribute: any): Array<{ filename: string; size?: number }> | undefined {
+  if (!attribute?.L) return undefined
+  const attachments: Array<{ filename: string; size?: number }> = []
+  for (const entry of attribute.L) {
+    const data = entry.M || {}
+    const filename = data.filename?.S || data.name?.S
+    if (!filename) continue
+    const size = data.size?.N ? Number(data.size.N) : undefined
+    attachments.push({ filename, size })
+  }
+  return attachments.length ? attachments : undefined
+}
 
 // Helper function to find email by messageId
 async function findEmailByMessageId(messageId: string): Promise<{userId: string, receivedAt: string} | null> {
@@ -40,29 +79,86 @@ async function findEmailByMessageId(messageId: string): Promise<{userId: string,
     
     return null;
   } catch (error) {
-    console.error('❌ Error finding email by messageId:', error);
+    console.error('âŒ Error finding email by messageId:', error);
     return null;
   }
 }
 
+// GET: retrieve email detail by messageId
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ messageId: string }> }
+) {
+  try {
+    const { messageId } = await params
+
+    if (!messageId) {
+      return NextResponse.json({ error: 'Message ID is required' }, { status: 400 })
+    }
+
+    const emailKey = await findEmailByMessageId(messageId)
+    if (!emailKey) {
+      return NextResponse.json({ error: 'Email not found', messageId }, { status: 404 })
+    }
+
+    const getCommand = new GetItemCommand({
+      TableName: EMAILS_TABLE,
+      Key: {
+        userId: { S: emailKey.userId },
+        receivedAt: { S: emailKey.receivedAt },
+      },
+    })
+
+    const result = await ddb.send(getCommand)
+    const item = result.Item
+
+    if (!item) {
+      return NextResponse.json({ error: 'Email not found', messageId }, { status: 404 })
+    }
+
+    const email = {
+      messageId: item.messageId?.S || messageId,
+      subject: item.subject?.S || '',
+      sender: item.sender?.S || '',
+      recipients: extractStringArray(item.recipients),
+      timestamp: item.receivedAt?.S || '',
+      body: item.body?.S || item.bodyText?.S || '',
+      htmlBody: item.htmlBody?.S,
+      headers: extractHeaders(item.headers),
+      attachments: extractAttachments(item.attachments),
+      flaggedCategory: item.flaggedCategory?.S,
+      flaggedSeverity: item.flaggedSeverity?.S,
+      investigationStatus: item.investigationStatus?.S,
+      flagged: ['ai', 'manual'].includes(item.flaggedCategory?.S || ''),
+    }
+
+    return NextResponse.json({ ok: true, email })
+  } catch (err: any) {
+    console.error('Error fetching email by messageId:', err)
+    return NextResponse.json(
+      { error: 'Failed to fetch email', details: err.message },
+      { status: 500 }
+    )
+  }
+}
 // PATCH: update email flagged status and attributes
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ messageId: string }> }
 ) {
   try {
-    console.log('📧 PATCH /api/email/[messageId] - Updating email status...');
+    console.log('ðŸ“§ PATCH /api/email/[messageId] - Updating email status...');
     
     // Note: ORG_ID might not be required in all environments
     if (!ORG_ID) {
-      console.warn('⚠️ ORGANIZATION_ID not set, proceeding without org validation');
+      console.warn('âš ï¸ ORGANIZATION_ID not set, proceeding without org validation');
     }
 
     const { messageId } = await params;
-    console.log('📧 Processing messageId:', messageId);
+    console.log('ðŸ“§ Processing messageId:', messageId);
     
     const body = await request.json();
-    console.log('📧 Request body:', body);
+    console.log('ðŸ“§ Request body:', body);
     const { 
       flaggedCategory, 
       flaggedSeverity, 
@@ -72,7 +168,7 @@ export async function PATCH(
       investigationNotes
     } = body;
     
-    console.log('📝 Updating email status:', { 
+    console.log('ðŸ“ Updating email status:', { 
       messageId, 
       flaggedCategory, 
       flaggedSeverity, 
@@ -105,16 +201,16 @@ export async function PATCH(
     }
 
     // Find the email by messageId
-    console.log('🔍 Searching for email with messageId:', messageId);
+    console.log('ðŸ” Searching for email with messageId:', messageId);
     const emailKey = await findEmailByMessageId(messageId);
     if (!emailKey) {
-      console.log('❌ Email not found with messageId:', messageId);
+      console.log('âŒ Email not found with messageId:', messageId);
       return NextResponse.json(
         { error: 'Email not found', messageId },
         { status: 404 }
       );
     }
-    console.log('✅ Found email key:', emailKey);
+    console.log('âœ… Found email key:', emailKey);
 
     // Build update expression dynamically
     const updateExpressions: string[] = [];
@@ -181,7 +277,7 @@ export async function PATCH(
       attributeNames['#flaggedAt'] = 'flaggedAt';
     }
 
-    console.log('📝 Building DynamoDB update command:', {
+    console.log('ðŸ“ Building DynamoDB update command:', {
       updateExpressions,
       attributeNames,
       attributeValues
@@ -199,9 +295,9 @@ export async function PATCH(
       ReturnValues: 'ALL_NEW'
     });
 
-    console.log('🔄 Sending DynamoDB update command...');
+    console.log('ðŸ”„ Sending DynamoDB update command...');
     const result = await ddb.send(updateCommand);
-    console.log('✅ Email status updated successfully');
+    console.log('âœ… Email status updated successfully');
 
     return NextResponse.json({
       success: true,
@@ -219,7 +315,7 @@ export async function PATCH(
     });
 
   } catch (err: any) {
-    console.error('❌ [PATCH /api/email/[messageId]] error:', {
+    console.error('âŒ [PATCH /api/email/[messageId]] error:', {
       message: err.message,
       code: err.code,
       name: err.name,
@@ -236,3 +332,6 @@ export async function PATCH(
     );
   }
 }
+
+
+

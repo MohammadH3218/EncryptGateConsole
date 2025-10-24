@@ -1,6 +1,6 @@
-"use client"
+﻿"use client"
 
-// app/investigate/[id]/page-enhanced.tsx - Enhanced full-screen investigation
+// app/investigate/[id]/page.tsx - Enhanced full-screen investigation
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Loader2, Send, Sparkles, AlertTriangle, Shield, Users, History, Bot, ChevronDown, ChevronRight, Terminal, CheckCircle2, XCircle, Clock, Mail } from 'lucide-react'
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { EmailPreviewDialog } from '@/components/email-preview-dialog'
-import { parseEmailReferences, formatMarkdown, formatSecurityContent } from '@/lib/copilot-formatting'
+import { formatMarkdown, formatSecurityContent, getEmailReferencesData } from '@/lib/copilot-formatting'
 
 // Types
 interface Investigation {
@@ -307,59 +307,59 @@ export default function EnhancedInvestigationPage() {
     textareaRef.current?.focus()
   }
 
-  function renderFormattedContent(content: string) {
-    const references = parseEmailReferences(content)
+    function renderFormattedContent(content: string) {
+    const { hasReferences, textParts } = getEmailReferencesData(content)
 
-    if (references.length === 0) {
-      // No email references, just format markdown
-      const formatted = formatSecurityContent(formatMarkdown(content))
-      return <div dangerouslySetInnerHTML={{ __html: formatted }} className="prose prose-invert prose-sm max-w-none" />
-    }
-
-    // Has email references - create clickable links
-    const parts: React.ReactNode[] = []
-    let lastIndex = 0
-
-    references.forEach((ref, index) => {
-      // Add text before reference
-      if (ref.startIndex > lastIndex) {
-        const textBefore = content.substring(lastIndex, ref.startIndex)
-        const formatted = formatSecurityContent(formatMarkdown(textBefore))
-        parts.push(
-          <span key={`text-${index}`} dangerouslySetInnerHTML={{ __html: formatted }} />
-        )
-      }
-
-      // Add clickable reference
-      parts.push(
-        <button
-          key={`email-ref-${index}`}
-          onClick={() => handleEmailClick(ref.emailId)}
-          onContextMenu={(e) => handleEmailRightClick(ref.emailId, e)}
-          className="inline-flex items-center gap-1.5 px-2 py-1 mx-0.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/50 rounded-md text-blue-300 hover:text-blue-200 transition-all font-mono text-xs cursor-pointer hover:scale-105 active:scale-95"
-          title="Left click to preview • Right click to reference in chat"
-        >
-          <Mail className="w-3 h-3" />
-          {ref.emailId.length > 30 ? ref.emailId.substring(0, 30) + '...' : ref.emailId}
-        </button>
-      )
-
-      lastIndex = ref.endIndex
-    })
-
-    // Add remaining text
-    if (lastIndex < content.length) {
-      const textAfter = content.substring(lastIndex)
-      const formatted = formatSecurityContent(formatMarkdown(textAfter))
-      parts.push(
-        <span key="text-end" dangerouslySetInnerHTML={{ __html: formatted }} />
+    const renderSegment = (segment: string, key: string) => {
+      const formatted = formatSecurityContent(formatMarkdown(segment))
+      return (
+        <span
+          key={key}
+          dangerouslySetInnerHTML={{ __html: formatted }}
+        />
       )
     }
 
-    return <div className="prose prose-invert prose-sm max-w-none">{parts}</div>
-  }
+    if (!hasReferences) {
+      return (
+        <div
+          className="prose prose-invert prose-sm max-w-none leading-relaxed"
+          dangerouslySetInnerHTML={{
+            __html: formatSecurityContent(formatMarkdown(content)),
+          }}
+        />
+      )
+    }
 
-  if (loading) {
+    return (
+      <div className="prose prose-invert prose-sm max-w-none leading-relaxed flex flex-wrap items-start gap-1">
+        {textParts.map((part) => {
+          if (part.type === "text") {
+            return renderSegment(part.content, `text-${part.index}`)
+          }
+
+          const ref = part.reference!
+          const display =
+            ref.emailId.length > 36
+              ? `${ref.emailId.slice(0, 32)}…`
+              : ref.emailId
+
+          return (
+            <button
+              key={`email-ref-${part.index}`}
+              onClick={() => handleEmailClick(ref.emailId)}
+              onContextMenu={(e) => handleEmailRightClick(ref.emailId, e)}
+              className="inline-flex items-center gap-1 rounded-md border border-app-ring/60 bg-app-accent/15 px-2 py-1 font-mono text-[11px] text-app-accent transition-all hover:bg-app-accent/25 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent/50"
+              title="Left click to preview • Right click to reference in chat"
+            >
+              <Mail className="h-3 w-3" />
+              {display}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-neutral-950">
         <div className="text-center">
@@ -386,7 +386,7 @@ export default function EnhancedInvestigationPage() {
                   <Mail className="w-4 h-4" />
                   <span className="font-semibold">{emailData?.subject || 'No subject'}</span>
                 </p>
-                <p className="text-neutral-500">•</p>
+                <p className="text-neutral-500">â€¢</p>
                 <p className="text-neutral-400 font-mono text-xs">{emailData?.sender || 'Unknown sender'}</p>
               </div>
             </div>
@@ -624,7 +624,7 @@ export default function EnhancedInvestigationPage() {
                       {msg.duration && (
                         <div className="mt-3 pt-3 border-t border-neutral-700/50 text-[10px] text-neutral-400 flex items-center gap-3">
                           <span>{msg.duration}ms</span>
-                          <span>•</span>
+                          <span>â€¢</span>
                           <span>{msg.tokensUsed || 0} tokens</span>
                         </div>
                       )}
@@ -677,7 +677,7 @@ export default function EnhancedInvestigationPage() {
                                   </pre>
                                   {result && (
                                     <div className="mt-1.5 text-neutral-500 text-xs">
-                                      → {result.success ? <span className="text-green-500">Success</span> : <span className="text-red-500">Failed</span>}
+                                      â†’ {result.success ? <span className="text-green-500">Success</span> : <span className="text-red-500">Failed</span>}
                                       {result.result?.rowCount && <span className="ml-1">({result.result.rowCount} rows)</span>}
                                     </div>
                                   )}
@@ -725,7 +725,7 @@ export default function EnhancedInvestigationPage() {
                               </div>
                               {result && (
                                 <div className="mt-1 text-neutral-500 text-xs">
-                                  → {result.success ? <span className="text-green-500">Success</span> : <span className="text-red-500">Failed</span>}
+                                  â†’ {result.success ? <span className="text-green-500">Success</span> : <span className="text-red-500">Failed</span>}
                                   {result.result?.rowCount && <span className="ml-1">({result.result.rowCount} rows)</span>}
                                 </div>
                               )}
@@ -773,7 +773,7 @@ export default function EnhancedInvestigationPage() {
               </Button>
             </div>
             <p className="text-[10px] text-neutral-500 mt-2">
-              Press <kbd className="px-1 py-0.5 bg-neutral-800 rounded text-neutral-400">Enter</kbd> to send • <kbd className="px-1 py-0.5 bg-neutral-800 rounded text-neutral-400">Shift+Enter</kbd> for new line
+              Press <kbd className="px-1 py-0.5 bg-neutral-800 rounded text-neutral-400">Enter</kbd> to send â€¢ <kbd className="px-1 py-0.5 bg-neutral-800 rounded text-neutral-400">Shift+Enter</kbd> for new line
             </p>
           </div>
         </div>
@@ -791,3 +791,5 @@ export default function EnhancedInvestigationPage() {
     </div>
   )
 }
+
+
