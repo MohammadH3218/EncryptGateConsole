@@ -754,7 +754,7 @@ export default function AdminDetectionsPage() {
   const updateDetectionStatus = async (detectionId: string, status: string) => {
     try {
       setUpdatingStatus(detectionId);
-      const response = await fetch(`/api/detections/${detectionId}/status`, {
+      const response = await fetch(`/api/detections/${encodeURIComponent(detectionId)}/status`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
@@ -886,7 +886,7 @@ export default function AdminDetectionsPage() {
     try {
       console.log("🚩 Unflagging detection:", detection.detectionId);
 
-      const response = await fetch(`/api/detections/${detection.detectionId}`, {
+      const response = await fetch(`/api/detections/${encodeURIComponent(detection.detectionId)}`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",
@@ -894,12 +894,19 @@ export default function AdminDetectionsPage() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(
-          errorData.message ||
-            errorData.error ||
-            `Failed to unflag detection: ${response.status}`,
-        );
+        let errorMessage = 'Unknown error';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorData.error || errorData.details || errorMessage;
+        } catch (e) {
+          // If response is not JSON, try to get text
+          try {
+            errorMessage = await response.text() || `HTTP ${response.status}`;
+          } catch {
+            errorMessage = `HTTP ${response.status}`;
+          }
+        }
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();

@@ -563,7 +563,7 @@ export default function AdminAllEmailsPage() {
         flaggedBy: 'Security Analyst'
       };
 
-      const emailUpdateResponse = await fetch(`/api/email/${email.messageId}`, {
+      const emailUpdateResponse = await fetch(`/api/email/${encodeURIComponent(email.messageId)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -572,8 +572,19 @@ export default function AdminAllEmailsPage() {
       });
 
       if (!emailUpdateResponse.ok) {
-        const errorData = await emailUpdateResponse.json();
-        console.warn('⚠️ Failed to update email status in database:', errorData);
+        let errorMessage = 'Unknown error';
+        try {
+          const errorData = await emailUpdateResponse.json();
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch (e) {
+          // If response is not JSON, try to get text
+          try {
+            errorMessage = await emailUpdateResponse.text() || `HTTP ${emailUpdateResponse.status}`;
+          } catch {
+            errorMessage = `HTTP ${emailUpdateResponse.status}`;
+          }
+        }
+        console.warn('⚠️ Failed to update email status in database:', errorMessage);
         setSuccessMessage('Email flagged successfully! Detection has been created. Note: Email status update in database failed.');
       } else {
         console.log('✅ Email status updated in database');
@@ -627,7 +638,7 @@ export default function AdminAllEmailsPage() {
         flaggedBy: 'Security Analyst'
       };
 
-      const emailUpdateResponse = await fetch(`/api/email/${email.messageId}`, {
+      const emailUpdateResponse = await fetch(`/api/email/${encodeURIComponent(email.messageId)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
@@ -636,8 +647,19 @@ export default function AdminAllEmailsPage() {
       });
 
       if (!emailUpdateResponse.ok) {
-        const errorData = await emailUpdateResponse.json();
-        console.warn('⚠️ Failed to update email status in database:', errorData);
+        let errorMessage = 'Unknown error';
+        try {
+          const errorData = await emailUpdateResponse.json();
+          errorMessage = errorData.error || errorData.details || errorMessage;
+        } catch (e) {
+          // If response is not JSON, try to get text
+          try {
+            errorMessage = await emailUpdateResponse.text() || `HTTP ${emailUpdateResponse.status}`;
+          } catch {
+            errorMessage = `HTTP ${emailUpdateResponse.status}`;
+          }
+        }
+        console.warn('⚠️ Failed to update email status in database:', errorMessage);
         setSuccessMessage('Email unflagged successfully. Note: Email status update in database failed, but detection was removed.');
       } else {
         console.log('✅ Email status updated in database');
