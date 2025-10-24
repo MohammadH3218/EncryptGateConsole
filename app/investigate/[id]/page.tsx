@@ -188,10 +188,10 @@ export default function EnhancedInvestigationPage() {
         }
       }
 
-      const emailRes = await fetch(`/api/email/${emailId}`);
+      const emailRes = await fetch(`/api/email/${encodeURIComponent(emailId)}`);
       if (emailRes.ok) {
         const email = await emailRes.json();
-        setEmailData(email);
+        setEmailData(email?.email ?? email);
       }
 
       setLoading(false);
@@ -441,7 +441,7 @@ export default function EnhancedInvestigationPage() {
       <div className="border-b border-neutral-800 bg-gradient-to-r from-neutral-900 via-neutral-900/95 to-neutral-900/90 backdrop-blur-sm shadow-lg">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex-1">
+            <div className="flex-1 min-h-0">
               <h1 className="text-xl font-semibold flex items-center gap-2 mb-1">
                 <Shield className="w-5 h-5 text-blue-500" />
                 Email Security Investigation
@@ -487,13 +487,13 @@ export default function EnhancedInvestigationPage() {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 grid grid-cols-12 gap-0 overflow-hidden">
+      <div className="flex-1 min-h-0 grid grid-cols-12 gap-0 overflow-hidden">
         {/* Left Panel - Email Data */}
         <div className="col-span-7 border-r border-neutral-800 flex flex-col overflow-hidden bg-neutral-950">
           <Tabs
             value={selectedTab}
             onValueChange={setSelectedTab}
-            className="flex-1 flex flex-col"
+            className="flex min-h-0 flex-col"
           >
             <div className="border-b border-neutral-800 px-6 py-3 bg-neutral-900/50">
               <TabsList className="bg-neutral-800/50">
@@ -515,7 +515,7 @@ export default function EnhancedInvestigationPage() {
               </TabsList>
             </div>
 
-            <ScrollArea className="flex-1">
+            <ScrollArea className="flex-1 min-h-0">
               <div className="p-6">
                 <TabsContent value="overview" className="mt-0">
                   <div className="space-y-4">
@@ -678,7 +678,7 @@ export default function EnhancedInvestigationPage() {
         </div>
 
         {/* Right Panel - AI Copilot */}
-        <div className="col-span-5 flex flex-col bg-gradient-to-b from-neutral-900/50 to-neutral-950">
+        <div className="col-span-5 flex min-h-0 flex-col bg-gradient-to-b from-neutral-900/50 to-neutral-950">
           {/* Copilot Header */}
           <div className="border-b border-neutral-800 px-6 py-4 bg-neutral-900/50">
             <div className="flex items-center justify-between">
