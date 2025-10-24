@@ -318,15 +318,26 @@ export default function InvestigatePage() {
                     {email?.subject || "(No subject)"}
                   </CardDescription>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => navigator.clipboard.writeText(messageId)}
-                  className="border-app-border bg-app-elevated text-app-textSecondary hover:bg-app-overlay hover:text-app-textPrimary"
-                >
-                  <Copy className="mr-2 h-4 w-4" />
-                  Copy ID
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => window.open(`/investigate/${encodeURIComponent(messageId)}`, '_blank')}
+                    className="border-app-border bg-app-elevated text-app-textSecondary hover:bg-app-overlay hover:text-app-textPrimary"
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Open AI Copilot
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigator.clipboard.writeText(messageId)}
+                    className="border-app-border bg-app-elevated text-app-textSecondary hover:bg-app-overlay hover:text-app-textPrimary"
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy ID
+                  </Button>
+                </div>
               </div>
             </CardHeader>
           </Card>
