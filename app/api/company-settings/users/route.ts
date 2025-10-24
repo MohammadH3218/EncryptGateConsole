@@ -30,30 +30,30 @@ const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 // DynamoDB client with default credential provider chain
 const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 
-async function getCognitoConfig() {
-  console.log(`🔍 Fetching Cognito config for org ${DEFAULT_ORG_ID} from table ${CS_TABLE}`);
-  
+async function getCognitoConfig(orgId: string) {
+  console.log(`🔍 Fetching Cognito config for org ${orgId} from table ${CS_TABLE}`);
+
   try {
     const resp = await ddb.send(
       new GetItemCommand({
         TableName: CS_TABLE,
         Key: {
-          orgId:       { S: DEFAULT_ORG_ID },
+          orgId:       { S: orgId },
           serviceType: { S: "aws-cognito" },
         },
       })
     );
-    
+
     if (!resp.Item) {
       console.error("❌ No AWS Cognito configuration found in Dynamo");
       throw new Error("No AWS Cognito configuration found. Please connect AWS Cognito first.");
     }
-    
+
     const config = {
       userPoolId: resp.Item.userPoolId?.S!,
       region:     resp.Item.region?.S!,
     };
-    
+
     console.log(`✅ Found Cognito config: UserPoolId=${config.userPoolId}, Region=${config.region}`);
     return config;
   } catch (err) {
@@ -65,15 +65,18 @@ async function getCognitoConfig() {
 // GET - list security team users (not all Cognito users)
 export async function GET(req: Request) {
   console.log("🔍 GET /api/company-settings/users - Getting security team users");
-  
+
   try {
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id') || DEFAULT_ORG_ID;
+
     // Query our SecurityTeamUsers table instead of listing all Cognito users
     const resp = await ddb.send(
       new QueryCommand({
         TableName: USERS_TABLE,
         KeyConditionExpression: "orgId = :orgId",
         ExpressionAttributeValues: {
-          ":orgId": { S: DEFAULT_ORG_ID },
+          ":orgId": { S: orgId },
         },
       })
     );
@@ -81,7 +84,7 @@ export async function GET(req: Request) {
     const users = (resp.Items || []).map((item) => {
       console.log(`Processing security team user: ${item.email?.S}`);
       return {
-        id:        item.email?.S!, // Use email as ID for consistency
+        username:  item.email?.S?.split('@')[0] || "", // Username from email
         name:      item.name?.S || "",
         email:     item.email?.S || "",
         role:      item.role?.S || "",
@@ -99,18 +102,18 @@ export async function GET(req: Request) {
       code: err.code,
       stack: err.stack,
     });
-    
+
     let statusCode = 500;
     let errorMessage = "Failed to list security team users";
-    
+
     if (err.message.includes("No AWS Cognito configuration found")) {
       statusCode = 404;
       errorMessage = "AWS Cognito not configured. Please connect a Cognito service first.";
     }
-    
+
     return NextResponse.json(
-      { 
-        error: errorMessage, 
+      {
+        error: errorMessage,
         message: err.message,
         code: err.code || err.name,
       },
@@ -125,6 +128,9 @@ export async function POST(req: Request) {
   let email: string | undefined;
   let role: string | undefined;
   try {
+    // Extract orgId from request headers
+    const orgId = req.headers.get('x-org-id') || DEFAULT_ORG_ID;
+
     ({ name, email, role } = await req.json());
     if (!name || !email) {
       return NextResponse.json(
@@ -139,14 +145,14 @@ export async function POST(req: Request) {
         TableName: USERS_TABLE,
         KeyConditionExpression: "orgId = :orgId",
         ExpressionAttributeValues: {
-          ":orgId": { S: DEFAULT_ORG_ID },
+          ":orgId": { S: orgId },
         },
         Select: "COUNT"
       })
     );
 
     const isFirstUser = (existingUsersResp.Count || 0) === 0;
-    
+
     // Set default role: Owner for first user, Viewer for others
     if (!role) {
       role = isFirstUser ? "Owner" : "Viewer";
@@ -155,7 +161,7 @@ export async function POST(req: Request) {
 
     console.log(`👤 Adding user to security team: ${email} with role ${role}`);
 
-    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
+    const { userPoolId, region: cognitoRegion } = await getCognitoConfig(orgId);
     
     // Create Cognito client
     const cognito = new CognitoIdentityProviderClient({
@@ -216,7 +222,7 @@ export async function POST(req: Request) {
     await ddb.send(new PutItemCommand({
       TableName: USERS_TABLE,
       Item: {
-        orgId:     { S: DEFAULT_ORG_ID },
+        orgId:     { S: orgId },
         email:     { S: email },
         name:      { S: name },
         role:      { S: role },
@@ -228,7 +234,7 @@ export async function POST(req: Request) {
 
     console.log(`✅ User added to security team successfully: ${email}`);
     return NextResponse.json({
-      id:        email,
+      username:  email.split('@')[0],
       name,
       email,
       role,
@@ -263,68 +269,5 @@ export async function POST(req: Request) {
   }
 }
 
-// DELETE - remove a user from security team
-export async function DELETE(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
-  try {
-    const email = decodeURIComponent(params.id);
-    console.log(`🗑️ Removing user from security team: ${email}`);
-    
-    const { userPoolId, region: cognitoRegion } = await getCognitoConfig();
-
-    // Create Cognito client
-    const cognito = new CognitoIdentityProviderClient({
-      region: cognitoRegion,
-    });
-
-    // Note: We're not deleting the user from Cognito, just removing from security team
-    // If you want to delete from Cognito too, uncomment the following:
-    /*
-    try {
-      await cognito.send(new AdminDeleteUserCommand({
-        UserPoolId: userPoolId,
-        Username: email,
-      }));
-      console.log(`✅ User deleted from Cognito: ${email}`);
-    } catch (cognitoError: any) {
-      console.warn(`⚠️ Could not delete user from Cognito: ${cognitoError.message}`);
-    }
-    */
-
-    // Remove from our SecurityTeamUsers table
-    await ddb.send(new DeleteItemCommand({
-      TableName: USERS_TABLE,
-      Key: {
-        orgId: { S: DEFAULT_ORG_ID },
-        email: { S: email },
-      },
-    }));
-
-    console.log(`✅ User removed from security team successfully: ${email}`);
-    return NextResponse.json({ success: true });
-  } catch (err: any) {
-    console.error("❌ [users:DELETE]", err);
-    
-    let statusCode = 500;
-    let errorMessage = "Failed to remove user from security team";
-    
-    if (err.name === "ResourceNotFoundException") {
-      statusCode = 404;
-      errorMessage = "User not found in security team";
-    } else if (err.message.includes("No AWS Cognito configuration found")) {
-      statusCode = 404;
-      errorMessage = "AWS Cognito not configured";
-    }
-    
-    return NextResponse.json(
-      { 
-        error: errorMessage, 
-        message: err.message,
-        code: err.code || err.name
-      },
-      { status: statusCode }
-    );
-  }
-}
+// Note: DELETE is handled in the [id]/route.ts file
+// This export is just for consistency with the API structure
