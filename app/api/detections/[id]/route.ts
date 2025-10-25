@@ -63,23 +63,45 @@ async function findDetectionByDetectionId(detectionId: string): Promise<any> {
   }
 }
 
-// DELETE: remove a detection (unflag) - CORRECTED VERSION
+// DELETE: remove a detection (unflag) - IMPROVED WITH BETTER ERROR HANDLING
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    console.log('🚩 DELETE /api/detections/[id] - Unflagging detection...');
-    
-    const { id: detectionId } = await params;
-    console.log('🗑️ Attempting to delete detection:', detectionId);
+  let detectionId: string = '';
 
-    // Find the detection using the correct table structure
-    const detectionInfo = await findDetectionByDetectionId(detectionId);
-    
+  try {
+    console.log('🚩 [START] DELETE /api/detections/[id]');
+
+    // Step 1: Extract detection ID from params
+    try {
+      const resolvedParams = await params;
+      detectionId = resolvedParams.id;
+      console.log('✅ Step 1: Extracted detectionId:', detectionId);
+    } catch (paramError: any) {
+      console.error('❌ Step 1 FAILED: Error extracting params:', paramError);
+      return NextResponse.json(
+        { error: 'Invalid request parameters', details: paramError.message },
+        { status: 400 }
+      );
+    }
+
+    // Step 2: Find the detection
+    console.log('🔍 Step 2: Searching for detection...');
+    let detectionInfo;
+    try {
+      detectionInfo = await findDetectionByDetectionId(detectionId);
+      console.log('✅ Step 2: Search completed, result:', detectionInfo ? 'found' : 'not found');
+    } catch (findError: any) {
+      console.error('❌ Step 2 FAILED: Error finding detection:', findError);
+      return NextResponse.json(
+        { error: 'Error searching for detection', details: findError.message },
+        { status: 500 }
+      );
+    }
+
     if (!detectionInfo) {
-      console.warn('⚠️ Detection not found:', detectionId);
-      // Return success since it's already gone
+      console.warn('⚠️ Detection not found, returning success (idempotent delete)');
       return NextResponse.json({
         success: true,
         message: 'Detection not found (may already be deleted)',
@@ -89,44 +111,46 @@ export async function DELETE(
     }
 
     const { item: detectionItem, deleteKey } = detectionInfo;
-    
-    // Extract email information
     const emailMessageId = detectionItem.emailMessageId?.S;
-    const detectionData = {
-      emailMessageId: emailMessageId,
-      severity: detectionItem.severity?.S,
-      name: detectionItem.name?.S,
-      manualFlag: detectionItem.manualFlag?.BOOL
-    };
-    
-    console.log('📧 Detection details:', detectionData);
-    console.log('🔑 Delete key:', deleteKey);
 
-    // Delete from DynamoDB using the correct key structure
+    console.log('📧 Detection info:', {
+      detectionId,
+      emailMessageId,
+      deleteKey
+    });
+
+    // Step 3: Delete from DynamoDB
+    console.log('🗑️ Step 3: Deleting detection from DynamoDB...');
     try {
       const deleteCommand = new DeleteItemCommand({
         TableName: DETECTIONS_TABLE,
         Key: deleteKey
       });
 
-      console.log('💾 Deleting detection from DynamoDB...');
       await ddb.send(deleteCommand);
-      console.log('✅ Detection deleted successfully from DynamoDB:', detectionId);
-      
+      console.log('✅ Step 3: Detection deleted successfully');
+
     } catch (dynamoError: any) {
-      console.error('❌ DynamoDB delete failed:', dynamoError);
+      console.error('❌ Step 3 FAILED: DynamoDB delete error:', {
+        message: dynamoError.message,
+        code: dynamoError.code,
+        name: dynamoError.name
+      });
       return NextResponse.json(
-        { error: 'Failed to delete detection from database', details: dynamoError.message },
+        {
+          error: 'Failed to delete detection from database',
+          details: dynamoError.message,
+          code: dynamoError.code
+        },
         { status: 500 }
       );
     }
 
-    // Update the email's status to 'clean' when unflagged
+    // Step 4: Update email status to 'clean'
     if (emailMessageId) {
+      console.log('📧 Step 4: Updating email status for:', emailMessageId);
       try {
-        console.log('📧 Updating email status to clean for:', emailMessageId);
-
-        // Find the email first
+        // Find the email
         const findEmailCommand = new ScanCommand({
           TableName: EMAILS_TABLE,
           FilterExpression: 'messageId = :messageId',
@@ -168,37 +192,42 @@ export async function DELETE(
           });
 
           await ddb.send(updateEmailCommand);
-          console.log('✅ Email status updated to clean');
+          console.log('✅ Step 4: Email status updated to clean');
         } else {
-          console.warn('⚠️ Email not found for update:', emailMessageId);
+          console.warn('⚠️ Step 4: Email not found:', emailMessageId);
         }
       } catch (emailUpdateError: any) {
-        console.warn('⚠️ Error updating email status:', emailUpdateError.message);
+        console.error('⚠️ Step 4 WARNING: Error updating email:', emailUpdateError.message);
         // Continue anyway - detection removal succeeded
       }
+    } else {
+      console.log('ℹ️ Step 4: Skipped (no emailMessageId)');
     }
 
+    console.log('✅ [SUCCESS] DELETE completed successfully');
     return NextResponse.json({
       success: true,
       message: 'Detection unflagged successfully',
       detectionId: detectionId,
       emailMessageId: emailMessageId,
-      action: 'unflagged',
-      tableStructure: 'detectionId+receivedAt' // For debugging
+      action: 'unflagged'
     });
 
   } catch (err: any) {
-    console.error('❌ [DELETE /api/detections/[id]] error:', {
+    console.error('❌ [FATAL ERROR] DELETE /api/detections/[id]:', {
+      detectionId,
       message: err.message,
       code: err.code,
-      name: err.name
+      name: err.name,
+      stack: err.stack
     });
-    
+
     return NextResponse.json(
-      { 
-        error: 'Failed to unflag detection', 
+      {
+        error: 'Failed to unflag detection',
         details: err.message,
-        code: err.code || err.name
+        code: err.code || err.name,
+        detectionId
       },
       { status: 500 }
     );
