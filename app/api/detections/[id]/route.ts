@@ -3,20 +3,16 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import {
-  DynamoDBClient,
   DeleteItemCommand,
   ScanCommand,
   UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
+import { ddb, TABLES } from '@/lib/aws';
 
-const REGION = process.env.AWS_REGION || 'us-east-1';
-const ORG_ID = process.env.ORGANIZATION_ID!;
-const DETECTIONS_TABLE = process.env.DETECTIONS_TABLE_NAME || 'Detections';
-const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
+const DETECTIONS_TABLE = TABLES.DETECTIONS;
+const EMAILS_TABLE = TABLES.EMAILS;
 
-console.log('🚨 Detection [id] API initialized with:', { REGION, ORG_ID, DETECTIONS_TABLE, EMAILS_TABLE });
-
-const ddb = new DynamoDBClient({ region: REGION });
+console.log('🚨 Detection [id] API initialized with tables:', { DETECTIONS_TABLE, EMAILS_TABLE });
 
 // Helper function to find detection - CORRECTED for your table structure
 async function findDetectionByDetectionId(detectionId: string): Promise<any> {
