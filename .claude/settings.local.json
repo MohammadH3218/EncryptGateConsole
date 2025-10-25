@@ -23,7 +23,9 @@
       "Bash(aws configure:*)",
       "Bash(aws dynamodb describe-table:*)",
       "Bash(aws dynamodb scan:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(findstr:*)",
+      "Bash(tasklist:*)"
     ],
     "deny": [],
     "ask": []

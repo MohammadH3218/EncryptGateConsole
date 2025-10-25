@@ -3,23 +3,15 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import {
-  DynamoDBClient,
   UpdateItemCommand,
   ScanCommand,
   GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
+import { ddb, TABLES } from "@/lib/aws";
 
-const REGION = process.env.AWS_REGION || "us-east-1";
-const ORG_ID = process.env.ORGANIZATION_ID || "";
-const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || "Emails";
+const EMAILS_TABLE = TABLES.EMAILS;
 
-console.log("📧 Email [messageId] API initialized with:", {
-  REGION,
-  ORG_ID,
-  EMAILS_TABLE,
-});
-
-const ddb = new DynamoDBClient({ region: REGION });
+console.log("📧 Email [messageId] API initialized with table:", EMAILS_TABLE);
 
 function extractStringArray(attribute: any): string[] {
   if (!attribute) return [];
