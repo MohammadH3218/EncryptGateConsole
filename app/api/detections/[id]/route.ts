@@ -6,13 +6,15 @@ import {
   DynamoDBClient,
   DeleteItemCommand,
   ScanCommand,
+  UpdateItemCommand,
 } from '@aws-sdk/client-dynamodb';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const ORG_ID = process.env.ORGANIZATION_ID!;
 const DETECTIONS_TABLE = process.env.DETECTIONS_TABLE_NAME || 'Detections';
+const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
-console.log('🚨 Detection [id] API initialized with:', { REGION, ORG_ID, DETECTIONS_TABLE });
+console.log('🚨 Detection [id] API initialized with:', { REGION, ORG_ID, DETECTIONS_TABLE, EMAILS_TABLE });
 
 const ddb = new DynamoDBClient({ region: REGION });
 
@@ -123,22 +125,52 @@ export async function DELETE(
     if (emailMessageId) {
       try {
         console.log('📧 Updating email status to clean for:', emailMessageId);
-        
-        // Use internal helper function instead of HTTP call
-        const { updateEmailAttributes } = await import('@/lib/email-helpers');
-        
-        const success = await updateEmailAttributes(emailMessageId, {
-          flaggedCategory: 'clean',
-          investigationStatus: 'resolved',
-          detectionId: undefined,
-          flaggedBy: 'Security Analyst',
-          investigationNotes: `Detection "${detectionData?.name}" was unflagged and marked as clean by analyst.`
+
+        // Find the email first
+        const findEmailCommand = new ScanCommand({
+          TableName: EMAILS_TABLE,
+          FilterExpression: 'messageId = :messageId',
+          ExpressionAttributeValues: {
+            ':messageId': { S: emailMessageId }
+          },
+          ProjectionExpression: 'userId, receivedAt',
+          Limit: 1
         });
-        
-        if (success) {
+
+        const findResult = await ddb.send(findEmailCommand);
+
+        if (findResult.Items && findResult.Items.length > 0) {
+          const emailKey = findResult.Items[0];
+
+          // Update the email
+          const updateEmailCommand = new UpdateItemCommand({
+            TableName: EMAILS_TABLE,
+            Key: {
+              userId: { S: emailKey.userId?.S || '' },
+              receivedAt: { S: emailKey.receivedAt?.S || '' }
+            },
+            UpdateExpression: 'SET #flaggedCategory = :flaggedCategory, #investigationStatus = :investigationStatus, #detectionId = :null, #flaggedBy = :flaggedBy, #flaggedAt = :null, #updatedAt = :updatedAt',
+            ExpressionAttributeNames: {
+              '#flaggedCategory': 'flaggedCategory',
+              '#investigationStatus': 'investigationStatus',
+              '#detectionId': 'detectionId',
+              '#flaggedBy': 'flaggedBy',
+              '#flaggedAt': 'flaggedAt',
+              '#updatedAt': 'updatedAt'
+            },
+            ExpressionAttributeValues: {
+              ':flaggedCategory': { S: 'clean' },
+              ':investigationStatus': { S: 'resolved' },
+              ':null': { NULL: true },
+              ':flaggedBy': { S: 'Security Analyst' },
+              ':updatedAt': { S: new Date().toISOString() }
+            }
+          });
+
+          await ddb.send(updateEmailCommand);
           console.log('✅ Email status updated to clean');
         } else {
-          console.warn('⚠️ Failed to update email status');
+          console.warn('⚠️ Email not found for update:', emailMessageId);
         }
       } catch (emailUpdateError: any) {
         console.warn('⚠️ Error updating email status:', emailUpdateError.message);
