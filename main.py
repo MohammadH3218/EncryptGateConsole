@@ -43,13 +43,26 @@ CORS(app,
      supports_credentials=True)
 
 # Configure logging
+# Only add file handler if not in development mode and directory exists
+log_handlers = [logging.StreamHandler(sys.stdout)]
+
+# Only add file logging in production (not local dev)
+if os.getenv("FLASK_ENV") != "development":
+    log_file_path = '/var/log/encryptgate/application.log'
+    try:
+        # Try to create the directory if it doesn't exist
+        log_dir = os.path.dirname(log_file_path)
+        if log_dir and not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        log_handlers.append(logging.FileHandler(log_file_path, mode='a'))
+    except (PermissionError, OSError) as e:
+        # If we can't write to the log file (e.g., local dev), just use console
+        logger.warning(f"Could not set up file logging: {e}. Using console only.")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('/var/log/encryptgate/application.log', mode='a')
-    ]
+    handlers=log_handlers
 )
 
 # Import and register blueprints

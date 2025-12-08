@@ -16,7 +16,21 @@ const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
 const ROLES_TABLE = process.env.ROLES_TABLE_NAME || 'SecurityRoles';
 const USER_ROLES_TABLE = process.env.USER_ROLES_TABLE_NAME || 'SecurityUserRoles';
 
-const ddb = new DynamoDBClient({ region: REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region: REGION,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region: REGION });
+}
+
+const ddb = getDynamoDBClient();
 
 // Helper to convert DynamoDB item to Role
 function itemToRole(item: any): Role {

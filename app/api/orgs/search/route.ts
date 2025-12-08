@@ -12,9 +12,23 @@ let cachedClient: DynamoDBDocumentClient | null = null
 
 function getClient() {
   if (cachedClient) return cachedClient
+  
+  // Use explicit credentials if available (for local dev), otherwise use provider chain
+  let credentials
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    console.log('[OrgSearch] Using explicit AWS credentials from environment')
+    credentials = {
+      accessKeyId: process.env.ACCESS_KEY_ID,
+      secretAccessKey: process.env.SECRET_ACCESS_KEY,
+    }
+  } else {
+    console.log('[OrgSearch] Using AWS credential provider chain')
+    credentials = fromNodeProviderChain()
+  }
+  
   const baseClient = new DynamoDBClient({
     region: REGION,
-    credentials: fromNodeProviderChain(),
+    credentials,
   })
   cachedClient = DynamoDBDocumentClient.from(baseClient, {
     marshallOptions: { removeUndefinedValues: true },
@@ -29,6 +43,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    console.log(`[OrgSearch] Searching for: "${query}" in table: ${ORGANIZATIONS_TABLE}, region: ${REGION}`)
     const ddb = getClient()
     const lowercaseQuery = query.toLowerCase()
     const items: Array<Record<string, any>> = []
@@ -49,6 +64,7 @@ export async function GET(request: NextRequest) {
       })
 
       const result = await ddb.send(scanCommand)
+      console.log(`[OrgSearch] Scan page ${page + 1}: Found ${result.Items?.length || 0} items`)
       if (result.Items) {
         items.push(...result.Items)
       }
@@ -56,6 +72,8 @@ export async function GET(request: NextRequest) {
       lastEvaluatedKey = result.LastEvaluatedKey as Record<string, any> | undefined
       page += 1
     } while (lastEvaluatedKey && page < MAX_SCAN_PAGES && items.length < 200)
+    
+    console.log(`[OrgSearch] Total items scanned: ${items.length}`)
 
     const matches = items
       .map((item) => ({
@@ -72,9 +90,19 @@ export async function GET(request: NextRequest) {
       })
       .slice(0, MAX_RESULTS)
 
+    console.log(`[OrgSearch] Found ${matches.length} matching organizations`)
     return NextResponse.json({ items: matches })
   } catch (error: any) {
-    console.error("Org search failed:", error)
+    console.error("[OrgSearch] Organization search failed:", error)
+    console.error("[OrgSearch] Error details:", {
+      message: error?.message,
+      code: error?.code,
+      name: error?.name,
+      table: ORGANIZATIONS_TABLE,
+      region: REGION,
+      hasAccessKey: !!process.env.ACCESS_KEY_ID,
+      hasSecretKey: !!process.env.SECRET_ACCESS_KEY,
+    })
 
     // Gracefully degrade when credentials or table access are unavailable.
     return NextResponse.json({

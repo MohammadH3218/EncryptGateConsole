@@ -48,24 +48,69 @@ const nextConfig = {
   // 4) Inline your env vars at build time
   env: {
     REGION: process.env.REGION,
+    AWS_REGION: process.env.AWS_REGION,
     ORGANIZATION_ID: process.env.ORGANIZATION_ID,
     ACCESS_KEY_ID: process.env.ACCESS_KEY_ID,
     SECRET_ACCESS_KEY: process.env.SECRET_ACCESS_KEY,
     CLOUDSERVICES_TABLE_NAME:
       process.env.CLOUDSERVICES_TABLE_NAME ||
       process.env.CLOUDSERVICES_TABLE,
+    DETECTIONS_TABLE_NAME: process.env.DETECTIONS_TABLE_NAME,
+    EMAILS_TABLE_NAME: process.env.EMAILS_TABLE_NAME,
+    EMPLOYEES_TABLE_NAME: process.env.EMPLOYEES_TABLE_NAME,
+    USERS_TABLE_NAME: process.env.USERS_TABLE_NAME,
+    ORGANIZATIONS_TABLE_NAME: process.env.ORGANIZATIONS_TABLE_NAME,
     COGNITO_USERPOOL_ID: process.env.COGNITO_USERPOOL_ID,
     COGNITO_CLIENT_ID: process.env.COGNITO_CLIENT_ID,
     COGNITO_CLIENT_SECRET: process.env.COGNITO_CLIENT_SECRET,
     COGNITO_REDIRECT_URI: process.env.COGNITO_REDIRECT_URI,
     COGNITO_LOGOUT_URI: process.env.COGNITO_LOGOUT_URI,
     CORS_ORIGINS: process.env.CORS_ORIGINS,
+    FRONTEND_URL: process.env.FRONTEND_URL,
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+    OPENAI_MODEL: process.env.OPENAI_MODEL,
+    OPENAI_URL: process.env.OPENAI_URL,
+    NEO4J_URI: process.env.NEO4J_URI,
+    NEO4J_USER: process.env.NEO4J_USER,
+    NEO4J_PASSWORD: process.env.NEO4J_PASSWORD,
+    NEO4J_ENCRYPTED: process.env.NEO4J_ENCRYPTED,
   },
 
-  // 5) Route API calls to remote backend by default
-  // Put the specific /api/auth route first so it stays local
+  // 5) Route API calls - support local development mode
+  // In local dev mode (LOCAL_DEV=true), route to local Flask backend
+  // Otherwise, route to remote backend
   async rewrites() {
+    const isLocalDev = process.env.LOCAL_DEV === 'true' || process.env.NODE_ENV === 'development';
+    const localBackendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    
+    // If local dev mode, route most API calls to local Flask backend
+    // But keep Next.js API routes local (orgs, auth, user)
+    if (isLocalDev) {
+      console.log('🔧 Local development mode: Routing API calls to', localBackendUrl);
+      return [
+        // Keep Next.js API routes local (these handle DynamoDB directly)
+        {
+          source: '/api/orgs/:path*',
+          destination: '/api/orgs/:path*',
+        },
+        {
+          source: '/api/auth/:path*',
+          destination: '/api/auth/:path*',
+        },
+        {
+          source: '/api/user/:path*',
+          destination: '/api/user/:path*',
+        },
+        // Route everything else to Flask backend
+        {
+          source: '/api/:path*',
+          destination: `${localBackendUrl}/api/:path*`,
+        },
+      ];
+    }
+    
+    // Production mode: Route to remote backend, but keep some routes local
     return [
       {
         source: '/api/auth/:path*',

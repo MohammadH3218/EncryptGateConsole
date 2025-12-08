@@ -3,8 +3,22 @@ import { cookies } from 'next/headers'
 import jwt from 'jsonwebtoken'
 import { DynamoDBClient, QueryCommand, GetItemCommand } from '@aws-sdk/client-dynamodb'
 
-// DynamoDB setup
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' })
+// DynamoDB setup - use explicit credentials if available
+function getDynamoDBClient() {
+  const region = process.env.AWS_REGION || 'us-east-1';
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region });
+}
+
+const ddb = getDynamoDBClient();
 const CLOUDSERVICES_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 'CloudServices'
 const ORGANIZATIONS_TABLE = process.env.ORGANIZATIONS_TABLE_NAME || 'Organizations'
 const USERS_TABLE = process.env.USERS_TABLE_NAME || 'SecurityTeamUsers'
@@ -149,10 +163,40 @@ export async function GET(request: NextRequest) {
     }
 
     // Decode token (unverified for development)
-    const claims = jwt.decode(token) as any
+    // Try jwt.decode first, fallback to manual base64 decode if needed
+    let claims: any = null
+    try {
+      claims = jwt.decode(token, { complete: false }) as any
+      
+      // If jwt.decode returns null, try manual base64 decode
+      if (!claims && token.includes('.')) {
+        const parts = token.split('.')
+        if (parts.length >= 2) {
+          const payload = parts[1]
+          try {
+            // Add padding if needed for base64 decode
+            const paddedPayload = payload + '='.repeat((4 - payload.length % 4) % 4)
+            claims = JSON.parse(Buffer.from(paddedPayload, 'base64url').toString('utf-8'))
+            console.log('✅ Decoded token using manual base64 decode')
+          } catch (e) {
+            console.error('❌ Failed to manually decode token:', e)
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Error decoding token:', error.message)
+    }
+    
     if (!claims) {
-      console.log('❌ Invalid token format')
+      console.log('❌ Invalid token format - token length:', token?.length)
+      console.log('❌ Token preview:', token?.substring(0, 50) + '...')
       return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 })
+    }
+    
+    // Log token structure for debugging
+    if (!claims.email && !claims['cognito:username'] && !claims.sub) {
+      console.warn('⚠️ Token decoded but appears to have no standard claims')
+      console.warn('⚠️ Token keys:', Object.keys(claims))
     }
 
     // Extract user information from token claims
@@ -221,7 +265,10 @@ export async function GET(request: NextRequest) {
     
     // Try to get stored display name from Users table, fallback to token name
     const userEmail = claims.email || claims['cognito:username']
-    const displayName = await getUserDisplayName(orgId, userEmail, tokenDisplayName)
+    // Only query database if we have a valid email and orgId
+    const displayName = (userEmail && orgId) 
+      ? await getUserDisplayName(orgId, userEmail, tokenDisplayName)
+      : tokenDisplayName
     
     console.log('👤 Profile API: Final display name:', { 
       userEmail, 
@@ -291,8 +338,28 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Decode token
-    const claims = jwt.decode(token) as any
+    // Decode token (with fallback to manual decode)
+    let claims: any = null
+    try {
+      claims = jwt.decode(token, { complete: false }) as any
+      
+      // If jwt.decode returns null, try manual base64 decode
+      if (!claims && token.includes('.')) {
+        const parts = token.split('.')
+        if (parts.length >= 2) {
+          const payload = parts[1]
+          try {
+            const paddedPayload = payload + '='.repeat((4 - payload.length % 4) % 4)
+            claims = JSON.parse(Buffer.from(paddedPayload, 'base64url').toString('utf-8'))
+          } catch (e) {
+            console.error('❌ Failed to manually decode token:', e)
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Error decoding token:', error.message)
+    }
+    
     if (!claims) {
       return NextResponse.json({ ok: false, error: 'Invalid token' }, { status: 401 })
     }

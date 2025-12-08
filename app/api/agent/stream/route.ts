@@ -33,20 +33,23 @@ export async function POST(req: NextRequest) {
     }
 
     // Fetch email context
-    let emailContext: string
+    let emailContext: string = ''
     try {
       emailContext = await fetchEmailContext(emailId)
       if (!emailContext) {
-        return new Response(
-          JSON.stringify({ error: 'Email not found in database', emailId }),
-          { status: 404, headers: { 'Content-Type': 'application/json' } }
-        )
+        console.warn(`⚠️ Email ${emailId} not found in Neo4j database`)
+        // Continue with empty context rather than failing
+        emailContext = `Email ID: ${emailId}\nNote: Email context not available in graph database.`
       }
     } catch (error: any) {
-      return new Response(
-        JSON.stringify({ error: 'Failed to connect to Neo4j', details: error.message }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      )
+      console.error('❌ Failed to fetch email context from Neo4j:', error)
+      // Check if it's a TLS/connection error
+      if (error.message?.includes('TLS') || error.message?.includes('ServerName') || error.code === 'ERR_INVALID_ARG_VALUE') {
+        console.error('💡 Neo4j TLS Error: Using IP address with encrypted connection')
+        console.error('💡 Solution: Set NEO4J_ENCRYPTED=false in .env.local or use a hostname instead of IP')
+      }
+      // Continue with minimal context rather than failing completely
+      emailContext = `Email ID: ${emailId}\nNote: Neo4j connection unavailable. Error: ${error.message}`
     }
 
     // Build initial messages

@@ -1,37 +1,23 @@
 ﻿"use client";
 
 // app/investigate/[id]/page.tsx - Enhanced full-screen investigation
-import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
 import {
   Loader2,
-  Send,
   Sparkles,
   AlertTriangle,
   Shield,
   Users,
   History,
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  Terminal,
-  CheckCircle2,
-  XCircle,
-  Clock,
   Mail,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmailPreviewDialog } from "@/components/email-preview-dialog";
-import {
-  formatMarkdown,
-  formatSecurityContent,
-  getEmailReferencesData,
-} from "@/lib/copilot-formatting";
+import { InvestigationCopilot } from "@/components/investigation-copilot";
 
 // Types
 interface Investigation {
@@ -56,39 +42,6 @@ interface EmailData {
   attachments?: any[];
 }
 
-interface ThinkingStep {
-  step: number;
-  totalSteps: number;
-  action: string;
-}
-
-interface ToolCall {
-  toolName: string;
-  args: any;
-  timestamp: number;
-}
-
-interface ToolResult {
-  toolName: string;
-  result: any;
-  success: boolean;
-  timestamp: number;
-}
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-  isPipeline?: boolean;
-  isError?: boolean;
-  thinking?: {
-    steps: ThinkingStep[];
-    toolCalls: ToolCall[];
-    toolResults: ToolResult[];
-    expanded: boolean;
-  };
-  duration?: number;
-  tokensUsed?: number;
-}
 
 // Quick actions
 const QUICK_ACTIONS = [
@@ -150,29 +103,18 @@ export default function EnhancedInvestigationPage() {
   const [emailData, setEmailData] = useState<EmailData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Chat state
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [currentThinking, setCurrentThinking] = useState<any>(null);
+  // UI state
   const [selectedTab, setSelectedTab] = useState("overview");
 
   // Email preview state
   const [previewEmailId, setPreviewEmailId] = useState<string | null>(null);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
   // Load data
   useEffect(() => {
     loadInvestigationData();
   }, [emailId]);
 
-  // Auto-scroll
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, currentThinking]);
 
   async function loadInvestigationData() {
     try {
@@ -302,6 +244,11 @@ export default function EnhancedInvestigationPage() {
 
               case "done":
                 const duration = Date.now() - startTime;
+                // Extract graph data from tool results
+                const graphData = currentThinking?.toolResults
+                  ? extractGraphFromToolResults(currentThinking.toolResults)
+                  : null;
+                
                 setMessages((prev) => [
                   ...prev,
                   {
@@ -310,6 +257,7 @@ export default function EnhancedInvestigationPage() {
                     thinking: currentThinking,
                     duration,
                     tokensUsed: totalTokens,
+                    graphData: graphData || undefined,
                   },
                 ]);
                 setCurrentThinking(null);
@@ -370,60 +318,6 @@ export default function EnhancedInvestigationPage() {
     setPreviewDialogOpen(true);
   }
 
-  function handleEmailRightClick(emailId: string, event: React.MouseEvent) {
-    event.preventDefault();
-    setInput(`Investigate email: ${emailId}`);
-    textareaRef.current?.focus();
-  }
-
-  function renderFormattedContent(content: string) {
-    const { hasReferences, textParts } = getEmailReferencesData(content);
-
-    const renderSegment = (segment: string, key: string) => {
-      const formatted = formatSecurityContent(formatMarkdown(segment));
-      return <span key={key} dangerouslySetInnerHTML={{ __html: formatted }} />;
-    };
-
-    if (!hasReferences) {
-      return (
-        <div
-          className="prose prose-invert prose-sm max-w-none leading-relaxed"
-          dangerouslySetInnerHTML={{
-            __html: formatSecurityContent(formatMarkdown(content)),
-          }}
-        />
-      );
-    }
-
-    return (
-      <div className="prose prose-invert prose-sm max-w-none leading-relaxed flex flex-wrap items-start gap-1">
-        {textParts.map((part) => {
-          if (part.type === "text") {
-            return renderSegment(part.content, `text-${part.index}`);
-          }
-
-          const ref = part.reference!;
-          const display =
-            ref.emailId.length > 36
-              ? `${ref.emailId.slice(0, 32)}…`
-              : ref.emailId;
-
-          return (
-            <button
-              key={`email-ref-${part.index}`}
-              onClick={() => handleEmailClick(ref.emailId)}
-              onContextMenu={(e) => handleEmailRightClick(ref.emailId, e)}
-              className="inline-flex items-center gap-1 rounded-md border border-app-ring/60 bg-app-accent/15 px-2 py-1 font-mono text-[11px] text-app-accent transition-all hover:bg-app-accent/25 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-app-accent/50"
-              title="Left click to preview • Right click to reference in chat"
-            >
-              <Mail className="h-3 w-3" />
-              {display}
-            </button>
-          );
-        })}
-      </div>
-    );
-  }
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-neutral-950">
@@ -677,330 +571,14 @@ export default function EnhancedInvestigationPage() {
           </Tabs>
         </div>
 
-        {/* Right Panel - AI Copilot */}
-        <div className="col-span-5 flex min-h-0 flex-col bg-gradient-to-b from-neutral-900/50 to-neutral-950">
-          {/* Copilot Header */}
-          <div className="border-b border-neutral-800 px-6 py-4 bg-neutral-900/50">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Bot className="w-5 h-5 text-blue-500" />
-                <h2 className="font-semibold">AI Investigation Assistant</h2>
-              </div>
-              <Badge
-                variant="outline"
-                className="text-xs bg-blue-600/10 border-blue-500/50"
-              >
-                <Sparkles className="w-3 h-3 mr-1" />
-                Streaming
-              </Badge>
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="border-b border-neutral-800 px-6 py-4 bg-neutral-900/30">
-            <p className="text-xs text-neutral-400 mb-3 font-medium">
-              Quick Actions
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {QUICK_ACTIONS.map((action) => {
-                const Icon = action.icon;
-                return (
-                  <Button
-                    key={action.id}
-                    size="sm"
-                    variant="outline"
-                    onClick={() => runPipeline(action.pipeline)}
-                    disabled={streaming}
-                    className="text-xs hover:bg-blue-600/10 hover:border-blue-500/50"
-                    title={action.description}
-                  >
-                    <Icon className="w-3 h-3 mr-1.5" />
-                    {action.label}
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Chat Messages */}
-          <div className="flex-1 overflow-hidden">
-            <ScrollArea className="h-full px-6 py-4">
-              {messages.length === 0 && !streaming ? (
-                <div className="space-y-4">
-                  <div className="text-center py-12">
-                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-blue-600/10 flex items-center justify-center">
-                      <Bot className="w-8 h-8 text-blue-500" />
-                    </div>
-                    <p className="text-sm text-neutral-300 mb-2 font-medium">
-                      Ready to investigate this email
-                    </p>
-                    <p className="text-xs text-neutral-500">
-                      Choose a quick action above or ask a custom question
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-xs text-neutral-500 font-medium">
-                      Suggested questions:
-                    </p>
-                    {SUGGESTED_QUESTIONS.map((q, i) => (
-                      <button
-                        key={i}
-                        onClick={() => setInput(q)}
-                        className="block w-full text-left text-sm px-4 py-2.5 rounded-lg bg-neutral-800/50 hover:bg-neutral-800 transition-all text-neutral-300 hover:text-neutral-100 border border-neutral-700/50 hover:border-neutral-600"
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((msg, i) => (
-                    <div
-                      key={i}
-                      className={msg.role === "user" ? "ml-8" : "mr-8"}
-                    >
-                      {/* Message bubble */}
-                      <div
-                        className={`rounded-lg p-4 shadow-md ${
-                          msg.role === "user"
-                            ? "bg-gradient-to-r from-blue-600 to-blue-500 text-white"
-                            : msg.isError
-                              ? "bg-red-900/20 border border-red-900/50 text-red-300"
-                              : "bg-neutral-800/70 text-neutral-100 border border-neutral-700/50"
-                        }`}
-                      >
-                        {msg.isPipeline && (
-                          <div className="flex items-center gap-2 mb-3 text-xs opacity-90">
-                            <Sparkles className="w-3 h-3" />
-                            <span>Running automated workflow...</span>
-                          </div>
-                        )}
-                        <div className="text-[13px] leading-relaxed">
-                          {renderFormattedContent(msg.content)}
-                        </div>
-                        {msg.duration && (
-                          <div className="mt-3 pt-3 border-t border-neutral-700/50 text-[10px] text-neutral-400 flex items-center gap-3">
-                            <span>{msg.duration}ms</span>
-                            <span>â€¢</span>
-                            <span>{msg.tokensUsed || 0} tokens</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Thinking section */}
-                      {msg.thinking && (
-                        <div className="mt-2">
-                          <button
-                            onClick={() => toggleThinking(i)}
-                            className="flex items-center gap-2 text-xs text-neutral-400 hover:text-neutral-200 transition-colors group"
-                          >
-                            {msg.thinking.expanded ? (
-                              <ChevronDown className="w-3.5 h-3.5 group-hover:text-blue-400" />
-                            ) : (
-                              <ChevronRight className="w-3.5 h-3.5 group-hover:text-blue-400" />
-                            )}
-                            <Terminal className="w-3.5 h-3.5" />
-                            <span className="font-medium">
-                              Thinking ({msg.thinking.steps.length} steps,{" "}
-                              {msg.thinking.toolCalls.length} queries)
-                            </span>
-                          </button>
-
-                          {msg.thinking.expanded && (
-                            <div className="mt-3 ml-6 space-y-2 text-xs bg-neutral-900/50 rounded-lg p-3 border border-neutral-800">
-                              {msg.thinking.steps.map(
-                                (step: ThinkingStep, si: number) => (
-                                  <div
-                                    key={si}
-                                    className="flex items-start gap-2 text-neutral-400"
-                                  >
-                                    <Clock className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-500" />
-                                    <span>
-                                      <span className="text-neutral-500">
-                                        Step {step.step}:
-                                      </span>{" "}
-                                      {step.action}
-                                    </span>
-                                  </div>
-                                ),
-                              )}
-
-                              {msg.thinking.toolCalls.map(
-                                (call: ToolCall, ci: number) => {
-                                  const result =
-                                    msg.thinking?.toolResults?.[ci];
-                                  return (
-                                    <div
-                                      key={ci}
-                                      className="pl-5 border-l-2 border-neutral-700/50 ml-1"
-                                    >
-                                      <div className="flex items-center gap-2 font-mono text-blue-400 mb-1">
-                                        <Terminal className="w-3 h-3" />
-                                        <span className="text-xs">
-                                          {call.toolName}
-                                        </span>
-                                        {result &&
-                                          (result.success ? (
-                                            <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-                                          ) : (
-                                            <XCircle className="w-3.5 h-3.5 text-red-500" />
-                                          ))}
-                                      </div>
-                                      <pre className="mt-1 text-[10px] text-neutral-500 overflow-x-auto bg-neutral-950 p-2 rounded">
-                                        {JSON.stringify(call.args, null, 2)}
-                                      </pre>
-                                      {result && (
-                                        <div className="mt-1.5 text-neutral-500 text-xs">
-                                          â†’{" "}
-                                          {result.success ? (
-                                            <span className="text-green-500">
-                                              Success
-                                            </span>
-                                          ) : (
-                                            <span className="text-red-500">
-                                              Failed
-                                            </span>
-                                          )}
-                                          {result.result?.rowCount && (
-                                            <span className="ml-1">
-                                              ({result.result.rowCount} rows)
-                                            </span>
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                },
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-
-                  {/* Current streaming thinking */}
-                  {streaming && currentThinking && (
-                    <div className="mr-8">
-                      <div className="rounded-lg p-4 bg-neutral-800/50 border border-neutral-700 shadow-md">
-                        <div className="flex items-center gap-2 text-sm text-neutral-300 mb-3">
-                          <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
-                          <span className="font-medium">Thinking...</span>
-                        </div>
-
-                        <div className="space-y-2 text-xs">
-                          {currentThinking.steps.map(
-                            (step: ThinkingStep, i: number) => (
-                              <div
-                                key={i}
-                                className="flex items-start gap-2 text-neutral-400"
-                              >
-                                <Clock className="w-3.5 h-3.5 mt-0.5 shrink-0 text-blue-500" />
-                                <span>
-                                  Step {step.step}: {step.action}
-                                </span>
-                              </div>
-                            ),
-                          )}
-
-                          {currentThinking.toolCalls.map(
-                            (call: ToolCall, i: number) => {
-                              const result = currentThinking.toolResults?.[i];
-                              return (
-                                <div
-                                  key={i}
-                                  className="pl-5 border-l-2 border-neutral-700/50 ml-1"
-                                >
-                                  <div className="flex items-center gap-2 font-mono text-blue-400">
-                                    <Terminal className="w-3 h-3" />
-                                    <span className="text-xs">
-                                      {call.toolName}
-                                    </span>
-                                    {result &&
-                                      (result.success ? (
-                                        <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-                                      ) : (
-                                        <XCircle className="w-3.5 h-3.5 text-red-500" />
-                                      ))}
-                                  </div>
-                                  {result && (
-                                    <div className="mt-1 text-neutral-500 text-xs">
-                                      â†’{" "}
-                                      {result.success ? (
-                                        <span className="text-green-500">
-                                          Success
-                                        </span>
-                                      ) : (
-                                        <span className="text-red-500">
-                                          Failed
-                                        </span>
-                                      )}
-                                      {result.result?.rowCount && (
-                                        <span className="ml-1">
-                                          ({result.result.rowCount} rows)
-                                        </span>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            },
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div ref={chatEndRef} />
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-
-          {/* Input */}
-          <div className="border-t border-neutral-800 p-4 bg-neutral-900/30">
-            <div className="flex gap-2">
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
-                  }
-                }}
-                placeholder="Ask about this email..."
-                className="min-h-[60px] max-h-[120px] bg-neutral-800 border-neutral-700 resize-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50"
-                disabled={streaming}
-              />
-              <Button
-                onClick={sendMessage}
-                disabled={streaming || !input.trim()}
-                size="icon"
-                className="shrink-0 bg-blue-600 hover:bg-blue-700 h-[60px] w-[60px]"
-              >
-                {streaming ? (
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                ) : (
-                  <Send className="w-5 h-5" />
-                )}
-              </Button>
-            </div>
-            <p className="text-[10px] text-neutral-500 mt-2">
-              Press{" "}
-              <kbd className="px-1 py-0.5 bg-neutral-800 rounded text-neutral-400">
-                Enter
-              </kbd>{" "}
-              to send â€¢{" "}
-              <kbd className="px-1 py-0.5 bg-neutral-800 rounded text-neutral-400">
-                Shift+Enter
-              </kbd>{" "}
-              for new line
-            </p>
-          </div>
+        {/* Right Panel - AI Copilot (CopilotKit Style) */}
+        <div className="col-span-5 flex min-h-0 flex-col">
+          <InvestigationCopilot
+            emailId={emailId}
+            onEmailClick={handleEmailClick}
+            quickActions={QUICK_ACTIONS}
+            suggestedQuestions={SUGGESTED_QUESTIONS}
+          />
         </div>
       </div>
 

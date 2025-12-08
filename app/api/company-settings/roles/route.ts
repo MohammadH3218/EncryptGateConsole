@@ -15,11 +15,25 @@ import {
 import { Role, DEFAULT_ROLES, PERMISSIONS } from '@/types/roles';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
-const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID!;
+const DEFAULT_ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const ROLES_TABLE = process.env.ROLES_TABLE_NAME || 'SecurityRoles';
 const USER_ROLES_TABLE = process.env.USER_ROLES_TABLE_NAME || 'SecurityUserRoles';
 
-const ddb = new DynamoDBClient({ region: REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region: REGION,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region: REGION });
+}
+
+const ddb = getDynamoDBClient();
 
 // Ensure required tables exist
 async function ensureTablesExist(): Promise<void> {
@@ -109,7 +123,7 @@ function roleToItem(role: Role, orgId: string) {
 }
 
 // Initialize default roles for a new organization
-async function initializeDefaultRoles(orgId: string): Promise<void> {
+export async function initializeDefaultRoles(orgId: string): Promise<void> {
   console.log('🔧 Initializing default roles for organization:', orgId);
   
   for (const defaultRole of DEFAULT_ROLES) {
@@ -139,9 +153,33 @@ async function initializeDefaultRoles(orgId: string): Promise<void> {
 }
 
 // GET: List all roles for the organization
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    console.log('📋 Fetching roles for organization:', DEFAULT_ORG_ID);
+    // Extract orgId from request headers, referer URL, or use default
+    let orgId = request.headers.get('x-org-id');
+    
+    // Try to extract from referer URL if header is missing
+    if (!orgId) {
+      const referer = request.headers.get('referer') || '';
+      const match = referer.match(/\/o\/([^/]+)\//);
+      if (match) {
+        orgId = match[1];
+      }
+    }
+    
+    // Fallback to default if still not found
+    if (!orgId) {
+      orgId = DEFAULT_ORG_ID;
+    }
+    
+    if (!orgId) {
+      return NextResponse.json(
+        { error: 'Organization ID is required' },
+        { status: 400 }
+      );
+    }
+    
+    console.log('📋 Fetching roles for organization:', orgId);
 
     // Ensure tables exist first
     await ensureTablesExist();
@@ -151,27 +189,14 @@ export async function GET() {
       TableName: ROLES_TABLE,
       KeyConditionExpression: 'orgId = :orgId',
       ExpressionAttributeValues: {
-        ':orgId': { S: DEFAULT_ORG_ID }
+        ':orgId': { S: orgId }
       }
     }));
 
     let roles: Role[] = (response.Items || []).map(itemToRole);
 
-    // If no roles exist, initialize default roles
-    if (roles.length === 0) {
-      await initializeDefaultRoles(DEFAULT_ORG_ID);
-      
-      // Re-fetch after initialization
-      const retryResponse = await ddb.send(new QueryCommand({
-        TableName: ROLES_TABLE,
-        KeyConditionExpression: 'orgId = :orgId',
-        ExpressionAttributeValues: {
-          ':orgId': { S: DEFAULT_ORG_ID }
-        }
-      }));
-      
-      roles = (retryResponse.Items || []).map(itemToRole);
-    }
+    // Note: Roles should be created when organization is created, not here
+    // If no roles exist, return empty array (roles will be created during org setup)
 
     // Sort by priority (highest first)
     roles.sort((a, b) => b.priority - a.priority);
@@ -201,6 +226,30 @@ export async function GET() {
 // POST: Create a new role
 export async function POST(request: Request) {
   try {
+    // Extract orgId from request headers, referer URL, or use default
+    let orgId = request.headers.get('x-org-id');
+    
+    // Try to extract from referer URL if header is missing
+    if (!orgId) {
+      const referer = request.headers.get('referer') || '';
+      const match = referer.match(/\/o\/([^/]+)\//);
+      if (match) {
+        orgId = match[1];
+      }
+    }
+    
+    // Fallback to default if still not found
+    if (!orgId) {
+      orgId = DEFAULT_ORG_ID;
+    }
+    
+    if (!orgId) {
+      return NextResponse.json(
+        { error: 'Organization ID is required' },
+        { status: 400 }
+      );
+    }
+    
     const body = await request.json();
     const { name, description, color, permissions, mentionable, hoisted, priority } = body;
 
@@ -214,7 +263,7 @@ export async function POST(request: Request) {
     console.log('➕ Creating new role:', name);
 
     // Generate role ID
-    const roleId = `${DEFAULT_ORG_ID}-${name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
+    const roleId = `${orgId}-${name.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`;
     
     const newRole: Role = {
       id: roleId,
@@ -243,7 +292,7 @@ export async function POST(request: Request) {
     // Save to DynamoDB
     await ddb.send(new PutItemCommand({
       TableName: ROLES_TABLE,
-      Item: roleToItem(newRole, DEFAULT_ORG_ID),
+      Item: roleToItem(newRole, orgId),
       ConditionExpression: 'attribute_not_exists(roleId)'
     }));
 

@@ -36,7 +36,29 @@ async function getAuthContext(request: NextRequest) {
     }
 
     // Decode token (unverified for development)
-    const claims = jwt.decode(token) as any;
+    // Try jwt.decode first, fallback to manual base64 decode if needed
+    let claims: any = null
+    try {
+      claims = jwt.decode(token, { complete: false }) as any
+      
+      // If jwt.decode returns null, try manual base64 decode
+      if (!claims && token.includes('.')) {
+        const parts = token.split('.')
+        if (parts.length >= 2) {
+          const payload = parts[1]
+          try {
+            // Add padding if needed for base64 decode
+            const paddedPayload = payload + '='.repeat((4 - payload.length % 4) % 4)
+            claims = JSON.parse(Buffer.from(paddedPayload, 'base64url').toString('utf-8'))
+          } catch (e) {
+            console.error('❌ Failed to manually decode token:', e)
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Error decoding token:', error.message)
+    }
+    
     if (!claims) {
       return { error: 'Invalid token format', status: 401 };
     }
