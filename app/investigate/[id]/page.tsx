@@ -93,7 +93,6 @@ const SUGGESTED_QUESTIONS = [
 
 export default function EnhancedInvestigationPage() {
   const params = useParams();
-  const router = useRouter();
   const emailId = decodeURIComponent(params.id as string);
 
   // Data state
@@ -120,198 +119,77 @@ export default function EnhancedInvestigationPage() {
     try {
       setLoading(true);
 
-      const invRes = await fetch(
-        `/api/investigations?emailMessageId=${emailId}`,
-      );
-      if (invRes.ok) {
-        const investigations = await invRes.json();
-        if (investigations.length > 0) {
-          setInvestigation(investigations[0]);
+      // Try to load investigation data
+      try {
+        const invRes = await fetch(
+          `/api/investigations?emailMessageId=${encodeURIComponent(emailId)}`,
+        );
+        if (invRes.ok) {
+          const investigations = await invRes.json();
+          if (investigations.length > 0) {
+            setInvestigation(investigations[0]);
+          }
+        } else {
+          console.warn(`Failed to load investigations: ${invRes.status}`);
         }
+      } catch (invError) {
+        console.error("Error loading investigations:", invError);
+        // Continue even if this fails
       }
 
-      const emailRes = await fetch(`/api/email/${encodeURIComponent(emailId)}`);
-      if (emailRes.ok) {
-        const email = await emailRes.json();
-        setEmailData(email?.email ?? email);
+      // Try to load email data
+      try {
+        const emailRes = await fetch(`/api/email/${encodeURIComponent(emailId)}`);
+        if (emailRes.ok) {
+          const email = await emailRes.json();
+          setEmailData(email?.email ?? email);
+        } else {
+          console.warn(`Failed to load email: ${emailRes.status}`);
+          // Set minimal email data so page can still render
+          if (!emailData) {
+            setEmailData({
+              messageId: emailId,
+              subject: "Email data unavailable",
+              sender: "Unknown",
+              recipients: [],
+              timestamp: new Date().toISOString(),
+              body: "Email data could not be loaded from the server.",
+            });
+          }
+        }
+      } catch (emailError) {
+        console.error("Error loading email:", emailError);
+        // Set minimal email data so page can still render
+        if (!emailData) {
+          setEmailData({
+            messageId: emailId,
+            subject: "Email data unavailable",
+            sender: "Unknown",
+            recipients: [],
+            timestamp: new Date().toISOString(),
+            body: "Email data could not be loaded from the server.",
+          });
+        }
       }
 
       setLoading(false);
     } catch (error) {
       console.error("Failed to load investigation:", error);
+      // Set minimal data so page can still render
+      if (!emailData) {
+        setEmailData({
+          messageId: emailId,
+          subject: "Error loading email",
+          sender: "Unknown",
+          recipients: [],
+          timestamp: new Date().toISOString(),
+          body: "An error occurred while loading the email data.",
+        });
+      }
       setLoading(false);
     }
   }
 
-  async function startStreamingInvestigation(
-    pipelineId?: string,
-    customQuestion?: string,
-  ) {
-    if (streaming) return;
-
-    const userMessage: Message = {
-      role: "user",
-      content:
-        customQuestion ||
-        QUICK_ACTIONS.find((a) => a.pipeline === pipelineId)?.label ||
-        "Investigation",
-      isPipeline: !!pipelineId,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
-    setStreaming(true);
-    setCurrentThinking({
-      steps: [],
-      toolCalls: [],
-      toolResults: [],
-      expanded: false,
-    });
-
-    const startTime = Date.now();
-
-    try {
-      const response = await fetch("/api/agent/stream", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          emailId,
-          pipeline: pipelineId,
-          question: customQuestion,
-          messages: messages
-            .filter((m) => m.role === "user" || m.role === "assistant")
-            .map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-          maxHops: 8,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Stream failed: ${response.status}`);
-      }
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-
-      if (!reader) throw new Error("No response body");
-
-      let buffer = "";
-      let finalAnswer = "";
-      let totalTokens = 0;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.trim() || !line.startsWith("data: ")) continue;
-
-          try {
-            const event = JSON.parse(line.slice(6));
-
-            switch (event.type) {
-              case "thinking":
-                setCurrentThinking((prev: any) => ({
-                  ...prev,
-                  steps: [...(prev?.steps || []), event.data],
-                }));
-                break;
-
-              case "tool_call":
-                setCurrentThinking((prev: any) => ({
-                  ...prev,
-                  toolCalls: [...(prev?.toolCalls || []), event.data],
-                }));
-                break;
-
-              case "tool_result":
-                setCurrentThinking((prev: any) => ({
-                  ...prev,
-                  toolResults: [...(prev?.toolResults || []), event.data],
-                }));
-                break;
-
-              case "answer":
-                finalAnswer = event.data.content;
-                totalTokens = event.data.tokensUsed || 0;
-                break;
-
-              case "done":
-                const duration = Date.now() - startTime;
-                // Extract graph data from tool results
-                const graphData = currentThinking?.toolResults
-                  ? extractGraphFromToolResults(currentThinking.toolResults)
-                  : null;
-                
-                setMessages((prev) => [
-                  ...prev,
-                  {
-                    role: "assistant",
-                    content: finalAnswer || "Investigation complete.",
-                    thinking: currentThinking,
-                    duration,
-                    tokensUsed: totalTokens,
-                    graphData: graphData || undefined,
-                  },
-                ]);
-                setCurrentThinking(null);
-                setStreaming(false);
-                break;
-
-              case "error":
-                throw new Error(event.data.message);
-            }
-          } catch (parseError) {
-            console.error("Failed to parse SSE event:", parseError);
-          }
-        }
-      }
-    } catch (error: any) {
-      console.error("Streaming error:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Error: ${error.message}`,
-          isError: true,
-        },
-      ]);
-      setCurrentThinking(null);
-      setStreaming(false);
-    }
-  }
-
-  function runPipeline(pipelineId: string) {
-    startStreamingInvestigation(pipelineId);
-  }
-
-  function sendMessage() {
-    if (!input.trim() || streaming) return;
-    startStreamingInvestigation(undefined, input);
-  }
-
-  function toggleThinking(index: number) {
-    setMessages((prev) =>
-      prev.map((msg, i) => {
-        if (i === index && msg.thinking) {
-          return {
-            ...msg,
-            thinking: {
-              ...msg.thinking,
-              expanded: !msg.thinking.expanded,
-            },
-          };
-        }
-        return msg;
-      }),
-    );
-  }
 
   function handleEmailClick(emailId: string) {
     setPreviewEmailId(emailId);
@@ -324,6 +202,34 @@ export default function EnhancedInvestigationPage() {
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
           <p className="text-neutral-400">Loading investigation...</p>
+          <p className="text-neutral-500 text-xs mt-2">
+            If this takes too long, there may be API connectivity issues
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Ensure we have at least minimal email data
+  if (!emailData) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-neutral-950">
+        <div className="text-center max-w-md">
+          <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+          <h2 className="text-xl font-semibold text-neutral-200 mb-2">
+            Unable to Load Email Data
+          </h2>
+          <p className="text-neutral-400 mb-4">
+            The email data could not be loaded from the server. This may be due to:
+          </p>
+          <ul className="text-left text-sm text-neutral-500 space-y-1 mb-4">
+            <li>• API server connectivity issues</li>
+            <li>• Email not found in database</li>
+            <li>• Server configuration problems</li>
+          </ul>
+          <p className="text-xs text-neutral-500 font-mono break-all">
+            Email ID: {emailId}
+          </p>
         </div>
       </div>
     );
