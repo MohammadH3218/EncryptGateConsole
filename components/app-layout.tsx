@@ -163,6 +163,19 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
     ].filter((section) => section.items.length > 0)
   }, [companySettingsItems, mainNavItems, userSettingsItems])
 
+  // Find the most specific matching route (longest href that matches)
+  const getActiveItemHref = useMemo(() => {
+    const allItems = [...mainNavItems, ...companySettingsItems, ...userSettingsItems]
+    const matchingItems = allItems.filter(
+      (item) => pathname === item.href || pathname.startsWith(item.href + "/")
+    )
+    if (matchingItems.length === 0) return null
+    // Return the most specific match (longest href)
+    return matchingItems.reduce((prev, current) =>
+      current.href.length > prev.href.length ? current : prev
+    ).href
+  }, [pathname, mainNavItems, companySettingsItems, userSettingsItems])
+
   const handleNavigation = (href: string) => {
     setMobileNavOpen(false)
     router.push(href)
@@ -196,8 +209,8 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
             </div>
             <div className="space-y-1">
               {section.items.map((item) => {
-                // Better pathname matching - check if pathname starts with or equals item.href
-                const active = pathname === item.href || pathname.startsWith(item.href + "/")
+                // Only mark as active if this is the most specific matching route
+                const active = item.href === getActiveItemHref
                 const ItemIcon = item.icon
                 return (
                   <button
