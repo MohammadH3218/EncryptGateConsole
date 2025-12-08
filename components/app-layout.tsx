@@ -43,7 +43,6 @@ type NavItem = {
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
   label: string
   href: string
-  permissions: string[]
 }
 
 export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) {
@@ -134,58 +133,35 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
 
   const getOrgPath = (path: string) => (orgId ? `/o/${orgId}${path}` : path)
 
-  const allMainNavItems: NavItem[] = [
-    { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard"), permissions: ["dashboard.read"] },
-    { icon: Mail, label: "Detections", href: getOrgPath("/admin/detections"), permissions: ["detections.read"] },
-    { icon: Inbox, label: "All Emails", href: getOrgPath("/admin/all-emails"), permissions: ["view_all_emails"] },
-    { icon: Users, label: "Assignments", href: getOrgPath("/admin/assignments"), permissions: ["assignments.read"] },
-    { icon: Briefcase, label: "Investigations", href: getOrgPath("/admin/investigate"), permissions: ["investigations.read"] },
-    { icon: Layers, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests"), permissions: ["pushed_requests.read"] },
+  const mainNavItems: NavItem[] = [
+    { icon: Shield, label: "Dashboard", href: getOrgPath("/admin/dashboard") },
+    { icon: Mail, label: "Detections", href: getOrgPath("/admin/detections") },
+    { icon: Inbox, label: "All Emails", href: getOrgPath("/admin/all-emails") },
+    { icon: Users, label: "Assignments", href: getOrgPath("/admin/assignments") },
+    { icon: Briefcase, label: "Investigations", href: getOrgPath("/admin/investigate") },
+    { icon: Layers, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests") },
   ]
 
-  const allCompanySettingsItems: NavItem[] = [
-    { icon: Settings, label: "Company Settings", href: getOrgPath("/admin/company-settings"), permissions: ["company_settings.read"] },
-    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees"), permissions: ["manage_employees.read"] },
-    { icon: Shield, label: "Allow & Block List", href: getOrgPath("/admin/allow-block-list"), permissions: ["blocked_emails.read"] },
-    { icon: FileText, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services"), permissions: ["cloud_settings.read"] },
+  const companySettingsItems: NavItem[] = [
+    { icon: Settings, label: "Company Settings", href: getOrgPath("/admin/company-settings") },
+    { icon: Users, label: "Manage Employees", href: getOrgPath("/admin/manage-employees") },
+    { icon: Shield, label: "Allow & Block List", href: getOrgPath("/admin/allow-block-list") },
+    { icon: FileText, label: "Cloud Services", href: getOrgPath("/admin/company-settings/cloud-services") },
   ]
 
-  const allUserSettingsItems: NavItem[] = [
-    { icon: Bell, label: "Notifications", href: getOrgPath("/admin/user-settings/notifications"), permissions: ["notifications.read"] },
-    { icon: Settings, label: "Profile", href: getOrgPath("/admin/user-settings/profile"), permissions: ["profile.read"] },
-    { icon: Shield, label: "Security", href: getOrgPath("/admin/user-settings/security"), permissions: ["security.read"] },
+  const userSettingsItems: NavItem[] = [
+    { icon: Bell, label: "Notifications", href: getOrgPath("/admin/user-settings/notifications") },
+    { icon: Settings, label: "Profile", href: getOrgPath("/admin/user-settings/profile") },
+    { icon: Shield, label: "Security", href: getOrgPath("/admin/user-settings/security") },
   ]
 
-  const userRoles = session.user?.rawRoles || []
-  const isOwner = userRoles.includes("Owner") || session.user?.isOwner
-  const isSrAdmin = userRoles.includes("Sr. Admin")
-  const isAdmin = userRoles.includes("Admin") || session.user?.isAdmin
-
-  const hasPermission = (requiredPermissions: string[]) => {
-    if (requiredPermissions.length === 0) return true
-    const userPermissions = session.user?.permissions || []
-    if (userPermissions.includes("*")) return true
-    return requiredPermissions.every((permission) => userPermissions.includes(permission))
-  }
-
-  const mainNavItems = allMainNavItems.filter((item) => hasPermission(item.permissions))
-  const companySettingsItems = allCompanySettingsItems.filter((item) => {
-    if (["Company Settings", "Allow & Block List"].includes(item.label)) {
-      return isAdmin || isSrAdmin || isOwner
-    }
-    return hasPermission(item.permissions)
-  })
-  const userSettingsItems = allUserSettingsItems.filter((item) => hasPermission(item.permissions))
-
-  const sections = useMemo(
-    () =>
-      [
-        { title: "Workspace", items: mainNavItems },
-        { title: "Company", items: companySettingsItems },
-        { title: "My Settings", items: userSettingsItems },
-      ].filter((section) => section.items.length > 0),
-    [companySettingsItems, mainNavItems, userSettingsItems],
-  )
+  const sections = useMemo(() => {
+    return [
+      { title: "Workspace", items: mainNavItems },
+      { title: "Company", items: companySettingsItems },
+      { title: "My Settings", items: userSettingsItems },
+    ].filter((section) => section.items.length > 0)
+  }, [companySettingsItems, mainNavItems, userSettingsItems])
 
   const handleNavigation = (href: string) => {
     setMobileNavOpen(false)
@@ -220,7 +196,8 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
             </div>
             <div className="space-y-1">
               {section.items.map((item) => {
-                const active = pathname === item.href
+                // Better pathname matching - check if pathname starts with or equals item.href
+                const active = pathname === item.href || pathname.startsWith(item.href + "/")
                 const ItemIcon = item.icon
                 return (
                   <button
