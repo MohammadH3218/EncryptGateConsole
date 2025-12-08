@@ -3,11 +3,11 @@ import { cookies } from "next/headers"
 
 interface OrgLayoutProps {
   children: React.ReactNode
-  params: { orgId: string }
+  params: Promise<{ orgId: string }>
 }
 
 export default async function OrgLayout({ children, params }: OrgLayoutProps) {
-  const { orgId } = params
+  const { orgId } = await params
 
   // Get auth tokens from cookies (server-side)
   const cookieStore = await cookies()

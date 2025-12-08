@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation"
 
-export default function InvestigateIndex({
+export default async function InvestigateIndex({
   params,
 }: {
-  params: { orgId: string }
+  params: Promise<{ orgId: string }>
 }) {
-  redirect(`/o/${params.orgId}/admin/assignments`)
+  const { orgId } = await params
+  redirect(`/o/${orgId}/admin/assignments`)
 }

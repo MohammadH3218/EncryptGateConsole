@@ -51,9 +51,10 @@ function extractAttachments(
 
 // GET /api/email?limit=20&page=1&search=<query>
 export async function GET(request: Request) {
+  let orgId: string | null = null;
   try {
     // Extract organization ID from request
-    const orgId = extractOrgId(request);
+    orgId = extractOrgId(request);
     if (!orgId) {
       return NextResponse.json(
         {

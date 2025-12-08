@@ -10,9 +10,23 @@ let cachedClient: DynamoDBDocumentClient | null = null
 
 function getClient() {
   if (cachedClient) return cachedClient
+  
+  // Use explicit credentials if available (for local dev), otherwise use provider chain
+  let credentials
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    console.log('[OrgGet] Using explicit AWS credentials from environment')
+    credentials = {
+      accessKeyId: process.env.ACCESS_KEY_ID,
+      secretAccessKey: process.env.SECRET_ACCESS_KEY,
+    }
+  } else {
+    console.log('[OrgGet] Using AWS credential provider chain')
+    credentials = fromNodeProviderChain()
+  }
+  
   const baseClient = new DynamoDBClient({
     region: REGION,
-    credentials: fromNodeProviderChain(),
+    credentials,
   })
   cachedClient = DynamoDBDocumentClient.from(baseClient, {
     marshallOptions: { removeUndefinedValues: true },
@@ -22,9 +36,9 @@ function getClient() {
 
 export async function GET(
   _req: NextRequest,
-  context: { params: { orgId: string } },
+  context: { params: Promise<{ orgId: string }> },
 ) {
-  const orgId = context.params.orgId
+  const { orgId } = await context.params
 
   if (!orgId) {
     return NextResponse.json({ error: "Missing orgId" }, { status: 400 })
@@ -35,10 +49,12 @@ export async function GET(
     const command = new GetCommand({
       TableName: ORGANIZATIONS_TABLE,
       Key: { organizationId: orgId },
-      ProjectionExpression: "#id, #name, orgCode, region, status",
+      ProjectionExpression: "#id, #name, orgCode, #region, #status",
       ExpressionAttributeNames: {
         "#id": "organizationId",
         "#name": "name",
+        "#region": "region",
+        "#status": "status",
       },
     })
 

@@ -19,7 +19,7 @@ from flask import Flask
 from flask_cors import CORS
 import traceback
 import json
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
 # Load environment variables
 load_dotenv()
@@ -31,23 +31,45 @@ mfa_logger = logging.getLogger("mfa_operations")
 mfa_logger.setLevel(logging.INFO)
 
 # AWS Configuration
-AWS_REGION = os.getenv("REGION", "us-east-1")
-CLOUDSERVICES_TABLE = os.getenv("CLOUDSERVICES_TABLE_NAME", "CloudServices")
+AWS_REGION = os.getenv("AWS_REGION") or os.getenv("REGION", "us-east-1")
+CLOUDSERVICES_TABLE = os.getenv("CLOUDSERVICES_TABLE_NAME") or os.getenv("CLOUDSERVICES_TABLE", "CloudServices")
 
 # Legacy AWS Cognito Configuration (for backward compatibility)
 USER_POOL_ID = os.getenv("COGNITO_USERPOOL_ID")
 CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
 CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
 
-# Create AWS clients
+# Get AWS credentials from environment (for local dev)
+AWS_ACCESS_KEY_ID = os.getenv("ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY")
+
+# Create AWS clients with explicit credentials if available (for local dev)
+aws_credentials = None
+if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
+    logger.info("Using explicit AWS credentials from environment variables")
+    aws_credentials = {
+        'aws_access_key_id': AWS_ACCESS_KEY_ID,
+        'aws_secret_access_key': AWS_SECRET_ACCESS_KEY
+    }
+else:
+    logger.info("Using AWS credential provider chain (default)")
+
 try:
-    cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
-    ddb = boto3.client('dynamodb', region_name=AWS_REGION)
+    if aws_credentials:
+        cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION, **aws_credentials)
+        ddb = boto3.client('dynamodb', region_name=AWS_REGION, **aws_credentials)
+    else:
+        cognito_client = boto3.client("cognito-idp", region_name=AWS_REGION)
+        ddb = boto3.client('dynamodb', region_name=AWS_REGION)
     logger.info(f"Successfully initialized AWS clients for region {AWS_REGION}")
 except Exception as e:
     logger.error(f"Failed to initialize AWS clients: {e}")
-    cognito_client = boto3.client("cognito-idp", region_name="us-east-1")
-    ddb = boto3.client('dynamodb', region_name="us-east-1")
+    if aws_credentials:
+        cognito_client = boto3.client("cognito-idp", region_name="us-east-1", **aws_credentials)
+        ddb = boto3.client('dynamodb', region_name="us-east-1", **aws_credentials)
+    else:
+        cognito_client = boto3.client("cognito-idp", region_name="us-east-1")
+        ddb = boto3.client('dynamodb', region_name="us-east-1")
 
 # Blueprint for auth routes
 auth_services_routes = Blueprint('auth_services_routes', __name__)
@@ -68,43 +90,141 @@ def _norm(it: dict) -> dict:
         "clientSecret": gv("clientSecret"),
     }
 
+def create_cognito_client(region: str):
+    """Helper function to create a Cognito client with credentials if available"""
+    if aws_credentials:
+        return boto3.client("cognito-idp", region_name=region, **aws_credentials)
+    else:
+        return boto3.client("cognito-idp", region_name=region)
+
 def get_org_cognito(org_id: str):
     """Get Cognito configuration for a specific organization"""
     try:
+        logger.info(f"🔍 Looking up Cognito config for org: {org_id} in table: {CLOUDSERVICES_TABLE}, region: {AWS_REGION}")
+        logger.info(f"   Using credentials: {'explicit' if aws_credentials else 'provider chain'}")
+        
+        # Create a DynamoDB resource for high-level API (more reliable)
+        if aws_credentials:
+            dynamodb_resource = boto3.resource('dynamodb', region_name=AWS_REGION, **aws_credentials)
+            dynamodb_client = boto3.client('dynamodb', region_name=AWS_REGION, **aws_credentials)
+        else:
+            dynamodb_resource = boto3.resource('dynamodb', region_name=AWS_REGION)
+            dynamodb_client = boto3.client('dynamodb', region_name=AWS_REGION)
+        
+        table = dynamodb_resource.Table(CLOUDSERVICES_TABLE)
+        
         # Try GSI1 (orgId, serviceType) first if available
         try:
-            table = boto3.resource('dynamodb', region_name=AWS_REGION).Table(CLOUDSERVICES_TABLE)
+            logger.info(f"   Attempting GSI1 query with IndexName='GSI1', orgId='{org_id}'")
             resp = table.query(
                 IndexName="GSI1", 
                 KeyConditionExpression=Key("orgId").eq(org_id), 
                 Limit=10
             )
-            for raw in resp.get("Items", []):
+            items = resp.get('Items', [])
+            logger.info(f"   GSI1 query returned {len(items)} items")
+            
+            # Log all items for debugging
+            for idx, raw in enumerate(items):
+                logger.info(f"   Item {idx + 1}: orgId={raw.get('orgId')}, serviceType={raw.get('serviceType')}")
+            
+            for raw in items:
                 it = _norm(raw)
-                if it["serviceType"] in SERVICE_ALIASES:
+                service_type = it.get("serviceType", "").lower()
+                # Check if service type matches any alias (exact or contains)
+                if service_type in SERVICE_ALIASES or any(alias in service_type for alias in SERVICE_ALIASES):
+                    logger.info(f"✅ Found Cognito config via GSI1: serviceType={it.get('serviceType')}, userPoolId={it.get('userPoolId')}, clientId={it.get('clientId')}")
                     return it
         except Exception as gsi_error:
-            logger.warning(f"GSI query failed, falling back to scan: {gsi_error}")
+            logger.warning(f"   GSI query failed: {gsi_error}")
+            logger.warning(f"   Error type: {type(gsi_error).__name__}")
+            logger.warning(f"   Falling back to scan...")
     
-        # Fallback: Scan with filter
-        for st in SERVICE_ALIASES:
-            resp = ddb.scan(
-                TableName=CLOUDSERVICES_TABLE,
-                FilterExpression="orgId = :o AND serviceType = :t",
-                ExpressionAttributeValues={
-                    ":o": {"S": org_id}, 
-                    ":t": {"S": st}
-                },
-                Limit=1,
+        # Fallback: Scan with filter using high-level API
+        # First, try a broader scan that filters by orgId and checks serviceType in Python
+        logger.info("   Trying scan fallback with high-level API...")
+        try:
+            # Scan for all items with this orgId, then filter by serviceType in code
+            # This is more reliable than multiple filtered scans
+            scan_response = table.scan(
+                FilterExpression=Attr("orgId").eq(org_id),
+                Limit=50  # Get more items to ensure we find the Cognito config
             )
-            items = resp.get("Items", [])
-            if items:
-                # Unwrap DynamoDB attribute values
-                it = {k: (list(v.values())[0] if isinstance(v, dict) else v) for k, v in items[0].items()}
-                return _norm(it)
+            all_items = scan_response.get('Items', [])
+            logger.info(f"   Scan for orgId={org_id} returned {len(all_items)} total items")
+            
+            # Filter for Cognito service types in Python (more flexible)
+            for item in all_items:
+                service_type = item.get('serviceType', '').lower()
+                if any(alias in service_type for alias in SERVICE_ALIASES):
+                    normalized = _norm(item)
+                    logger.info(f"✅ Found Cognito config via scan: serviceType={item.get('serviceType')}, userPoolId={normalized.get('userPoolId')}, clientId={normalized.get('clientId')}")
+                    return normalized
+            
+            # If no match found, try exact matches for each service type alias
+            logger.info("   No match with flexible filtering, trying exact serviceType matches...")
+            for st in SERVICE_ALIASES:
+                logger.info(f"   Scanning for exact serviceType='{st}'...")
+                try:
+                    scan_response = table.scan(
+                        FilterExpression=Attr("orgId").eq(org_id) & Attr("serviceType").eq(st),
+                        Limit=10
+                    )
+                    items = scan_response.get('Items', [])
+                    logger.info(f"   Exact scan for serviceType={st} returned {len(items)} items")
+                    
+                    if items:
+                        normalized = _norm(items[0])
+                        logger.info(f"✅ Found Cognito config via exact scan: userPoolId={normalized.get('userPoolId')}, clientId={normalized.get('clientId')}")
+                        return normalized
+                except Exception as exact_scan_error:
+                    logger.warning(f"   Exact scan failed for serviceType={st}: {exact_scan_error}")
+                    
+        except Exception as scan_error:
+            logger.warning(f"   High-level scan failed: {scan_error}")
+            logger.warning(f"   Error type: {type(scan_error).__name__}")
+            
+            # Try low-level client as last resort
+            logger.info("   Trying low-level client scan as last resort...")
+            for st in SERVICE_ALIASES:
+                try:
+                    logger.info(f"   Low-level scan for serviceType='{st}'...")
+                    resp = dynamodb_client.scan(
+                        TableName=CLOUDSERVICES_TABLE,
+                        FilterExpression="orgId = :o AND serviceType = :t",
+                        ExpressionAttributeValues={
+                            ":o": {"S": org_id}, 
+                            ":t": {"S": st}
+                        },
+                        Limit=10,
+                    )
+                    items = resp.get("Items", [])
+                    logger.info(f"   Low-level scan returned {len(items)} items")
+                    if items:
+                        # Unwrap DynamoDB attribute values
+                        it = {k: (list(v.values())[0] if isinstance(v, dict) else v) for k, v in items[0].items()}
+                        normalized = _norm(it)
+                        logger.info(f"✅ Found Cognito config via low-level scan: userPoolId={normalized.get('userPoolId')}, clientId={normalized.get('clientId')}")
+                        return normalized
+                except Exception as low_level_error:
+                    logger.warning(f"   Low-level scan also failed for {st}: {low_level_error}")
+        
+        # If we get here, no configuration was found
+        logger.warning(f"❌ No Cognito configuration found for org {org_id}")
+        logger.warning(f"   Searched in table: {CLOUDSERVICES_TABLE}")
+        logger.warning(f"   Region: {AWS_REGION}")
+        logger.warning(f"   Service type aliases tried: {SERVICE_ALIASES}")
+        logger.warning(f"   This usually means:")
+        logger.warning(f"   1. The organization hasn't been set up with Cognito yet")
+        logger.warning(f"   2. The orgId format doesn't match what's in the CloudServices table")
+        logger.warning(f"   3. The serviceType value in the table doesn't match: {SERVICE_ALIASES}")
         return None
     except Exception as e:
-        logger.error(f"Error getting Cognito config for org {org_id}: {e}")
+        logger.error(f"❌ Error getting Cognito config for org {org_id}: {e}")
+        logger.error(f"   Error type: {type(e).__name__}")
+        logger.error(f"   Table: {CLOUDSERVICES_TABLE}, Region: {AWS_REGION}")
+        logger.error(f"   Using credentials: {'explicit' if aws_credentials else 'provider chain'}")
+        logger.error(traceback.format_exc())
         return None
 
 # Generate Client Secret Hash
@@ -420,7 +540,7 @@ def authenticate_user_route():
         region = cfg["region"]
         
         # Create org-specific Cognito client
-        org_cognito_client = boto3.client("cognito-idp", region_name=region)
+        org_cognito_client = create_cognito_client(region)
         
         # Step 1: Initiate authentication using the org-specific config
         logger.info(f"=== Starting authentication flow for user: {username} in org: {orgId or 'global'} ===")
@@ -507,7 +627,7 @@ def respond_to_challenge_endpoint():
             client_secret = cfg.get("clientSecret")
             user_pool_id = cfg["userPoolId"]
             region = cfg["region"]
-            org_cognito_client = boto3.client("cognito-idp", region_name=region)
+            org_cognito_client = create_cognito_client(region)
         else:
             client_id = CLIENT_ID
             client_secret = CLIENT_SECRET

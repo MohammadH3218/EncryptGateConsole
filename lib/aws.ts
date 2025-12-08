@@ -10,15 +10,28 @@ import { CognitoIdentityProviderClient } from "@aws-sdk/client-cognito-identity-
 import { WorkMailClient } from "@aws-sdk/client-workmail"
 import { SESClient } from "@aws-sdk/client-ses"
 
-// Use AWS SDK default provider chain with auto-refresh
-const credentials = fromNodeProviderChain({
-  // Timeout for credential provider calls
-  timeout: 5000,
-})
+// Get AWS credentials - use explicit credentials if available (for local dev)
+const AWS_ACCESS_KEY_ID = process.env.ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID
+const AWS_SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY
 
-const region = process.env.AWS_REGION || "us-east-1"
+let credentials
+if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
+  console.log('[AWS] Using explicit AWS credentials from environment variables')
+  credentials = {
+    accessKeyId: AWS_ACCESS_KEY_ID,
+    secretAccessKey: AWS_SECRET_ACCESS_KEY,
+  }
+} else {
+  console.log('[AWS] Using AWS credential provider chain (default)')
+  credentials = fromNodeProviderChain({
+    // Timeout for credential provider calls
+    timeout: 5000,
+  })
+}
 
-// Create AWS service clients with auto-refreshing credentials
+const region = process.env.AWS_REGION || process.env.REGION || "us-east-1"
+
+// Create AWS service clients with credentials
 export const ddb = new DynamoDBClient({ 
   region, 
   credentials,
@@ -28,19 +41,19 @@ export const ddb = new DynamoDBClient({
 
 export const cognitoClient = new CognitoIdentityProviderClient({ 
   region, 
-  credentials,
+  credentials: credentials as any,
   maxAttempts: 3,
 })
 
 export const workMailClient = new WorkMailClient({ 
   region, 
-  credentials,
+  credentials: credentials as any,
   maxAttempts: 3,
 })
 
 export const sesClient = new SESClient({ 
   region, 
-  credentials,
+  credentials: credentials as any,
   maxAttempts: 3,
 })
 

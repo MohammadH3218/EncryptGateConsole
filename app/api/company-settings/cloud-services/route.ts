@@ -18,9 +18,22 @@ const TABLE  =
 
 console.log("🔧 Cloud Services API starting with table:", TABLE);
 
-// Instantiate DynamoDBClient with the default credential/provider chain.
-// Amplify will inject AWS_REGION and your SSR IAM role at runtime.
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  const region = process.env.AWS_REGION || 'us-east-1';
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region });
+}
+
+const ddb = getDynamoDBClient();
 
 // GET handler
 export async function GET(req: Request) {

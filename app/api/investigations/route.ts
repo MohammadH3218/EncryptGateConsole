@@ -16,7 +16,21 @@ const INVESTIGATIONS_TABLE = process.env.INVESTIGATIONS_TABLE_NAME || 'Investiga
 
 console.log('🔍 Investigations API initialized with:', { REGION, ORG_ID, INVESTIGATIONS_TABLE });
 
-const ddb = new DynamoDBClient({ region: REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region: REGION,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region: REGION });
+}
+
+const ddb = getDynamoDBClient();
 
 // GET: List investigations
 export async function GET(request: Request) {

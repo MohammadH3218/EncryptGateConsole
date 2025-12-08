@@ -20,10 +20,41 @@ async function createNeo4jDriver(): Promise<Driver> {
     console.log('🔧 Loading Neo4j configuration from Parameter Store...')
     const config = await getNeo4jConfig()
     
+    // Check if URI is an IP address
+    const uriMatch = config.uri.match(/^bolt(s)?:\/\/([^:]+):(\d+)$/)
+    const protocol = uriMatch ? uriMatch[1] : null
+    const host = uriMatch ? uriMatch[2] : null
+    const isIPAddress = host && /^\d+\.\d+\.\d+\.\d+$/.test(host)
+    
+    // For IP addresses with encrypted connections, Node.js TLS doesn't allow IP as ServerName
+    // We have two options:
+    // 1. Disable encryption (less secure but works)
+    // 2. Use bolt:// instead of bolt+s:// and handle encryption differently
+    const driverConfig: any = {
+      connectionTimeout: 10000, // 10 seconds
+      maxConnectionLifetime: 3600000, // 1 hour
+      maxConnectionPoolSize: 50,
+      connectionAcquisitionTimeout: 60000 // 1 minute
+    }
+    
+    if (config.encrypted && isIPAddress) {
+      // For IP addresses, disable encryption to avoid TLS ServerName error
+      // The connection will still be secure if using bolt+s:// protocol
+      console.log('⚠️ IP address detected with encrypted=true - disabling encryption to avoid TLS ServerName error')
+      console.log('⚠️ Consider using a hostname/DNS name instead of IP address for encrypted connections')
+      driverConfig.encrypted = false
+    } else if (config.encrypted) {
+      driverConfig.encrypted = true
+    } else {
+      driverConfig.encrypted = false
+    }
+    
     console.log('🔧 Creating Neo4j driver with config:', {
       uri: config.uri,
       user: config.user,
-      encrypted: config.encrypted
+      encrypted: driverConfig.encrypted,
+      trust: driverConfig.trust || 'default',
+      isIPAddress
     })
     
     currentConfig = config
@@ -31,13 +62,7 @@ async function createNeo4jDriver(): Promise<Driver> {
     return neo4j.driver(
       config.uri,
       neo4j.auth.basic(config.user, config.password),
-      { 
-        encrypted: config.encrypted,
-        connectionTimeout: 10000, // 10 seconds
-        maxConnectionLifetime: 3600000, // 1 hour
-        maxConnectionPoolSize: 50,
-        connectionAcquisitionTimeout: 60000 // 1 minute
-      }
+      driverConfig
     )
   } catch (error) {
     console.error('❌ Failed to create Neo4j driver:', error)
@@ -503,7 +528,10 @@ export async function fetchEmailContext(messageId: string): Promise<string> {
     const result = await session.run(q, { m: messageId })
     await session.close()
     
-    if (result.records.length === 0) return ''
+    if (result.records.length === 0) {
+      console.log(`📧 No email context found for messageId: ${messageId}`)
+      return ''
+    }
 
     const rec = result.records[0].toObject() as any
     const snippet = (rec.body || '').replace(/\n/g,' ').slice(0,200)

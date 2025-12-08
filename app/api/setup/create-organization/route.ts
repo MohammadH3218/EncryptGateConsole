@@ -16,9 +16,24 @@ import {
   CreateGroupCommand,
   AdminCreateUserCommand,
 } from "@aws-sdk/client-cognito-identity-provider";
+import { initializeDefaultRoles } from "@/app/api/company-settings/roles/route";
 
-// Use environment DynamoDB client
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  const region = process.env.AWS_REGION || 'us-east-1';
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region });
+}
+
+const ddb = getDynamoDBClient();
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
 const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 const ORGS_TABLE = process.env.ORGANIZATIONS_TABLE_NAME || "Organizations";
@@ -258,6 +273,16 @@ export async function POST(req: Request) {
     } catch (error: any) {
       console.error(`❌ Failed to add admin user to security team:`, error);
       // Don't fail the entire process for this
+    }
+
+    // Step 7: Create default roles for the organization
+    console.log(`👥 Creating default roles for organization...`);
+    try {
+      await initializeDefaultRoles(organizationId);
+      console.log(`✅ Default roles created successfully`);
+    } catch (error: any) {
+      console.error(`❌ Failed to create default roles:`, error);
+      // Don't fail the entire process for this, but log it
     }
 
     console.log(`🎉 Organization ${organization.name} created successfully!`);

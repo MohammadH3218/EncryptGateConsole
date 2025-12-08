@@ -177,15 +177,6 @@ export default function OrgAwareDashboardPage() {
     loadAllData()
   }, [loadAllData])
 
-  // Auto-refresh every 60 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      loadAllData()
-    }, 60000) // 60 seconds
-
-    return () => clearInterval(interval)
-  }, [loadAllData])
-
   // Show loading state
   if (loading) {
     return (
@@ -279,7 +270,7 @@ export default function OrgAwareDashboardPage() {
 
         {/* Data Summary Footer */}
         <div className="mt-6 text-center text-sm text-gray-400">
-          Showing data for {emails.length} emails and {detections.length} detections • Auto-refresh every 60s
+          Showing data for {emails.length} emails and {detections.length} detections
         </div>
       </FadeInSection>
     </AppLayout>

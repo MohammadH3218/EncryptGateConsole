@@ -13,7 +13,22 @@ import {
   GetItemCommand,
 } from "@aws-sdk/client-dynamodb";
 
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  const region = process.env.AWS_REGION || 'us-east-1';
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region });
+}
+
+const ddb = getDynamoDBClient();
 const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 const ORGS_TABLE = process.env.ORGANIZATIONS_TABLE_NAME || "Organizations";
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices";
@@ -77,11 +92,20 @@ export async function POST(req: Request) {
       const existingUsers = await ddb.send(scanUsersCommand);
       const isFirstUser = !existingUsers.Items || existingUsers.Items.length === 0;
       
-      // Determine role
+      // Determine role - check if roles exist first
+      // If this is the first user (org creator), they should already be Owner
+      // Otherwise, assign default role from existing roles
       let role = "Security Analyst"; // Default role
+      
+      // Check if user is the org creator (first user)
       if (isFirstUser) {
         role = "Owner";
         console.log(`👑 First user detected, assigning Owner role`);
+      } else {
+        // For subsequent users, use default role (roles should already exist from org creation)
+        // The Owner will assign proper roles later
+        role = "Security Analyst";
+        console.log(`👤 Assigning default role: ${role} (Owner can update later)`);
       }
 
       // Check if user already exists

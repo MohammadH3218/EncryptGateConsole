@@ -27,8 +27,22 @@ const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 // Note: In production, ORG_ID should be extracted from request context
 // This fallback is for backward compatibility during migration
 
-// DynamoDB client with default credential provider chain
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  const region = process.env.AWS_REGION || 'us-east-1';
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region });
+}
+
+const ddb = getDynamoDBClient();
 
 async function getCognitoConfig(orgId: string) {
   console.log(`🔍 Fetching Cognito config for org ${orgId} from table ${CS_TABLE}`);

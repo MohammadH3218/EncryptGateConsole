@@ -25,8 +25,22 @@ const USERS_TABLE = process.env.USERS_TABLE_NAME || "SecurityTeamUsers";
 
 console.log("🔧 Users [id] API starting with:", { DEFAULT_ORG_ID, CS_TABLE, USERS_TABLE });
 
-// DynamoDB client with default credential provider chain
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
+// DynamoDB client - use explicit credentials if available (for local dev)
+function getDynamoDBClient() {
+  const region = process.env.AWS_REGION || 'us-east-1';
+  if (process.env.ACCESS_KEY_ID && process.env.SECRET_ACCESS_KEY) {
+    return new DynamoDBClient({
+      region,
+      credentials: {
+        accessKeyId: process.env.ACCESS_KEY_ID,
+        secretAccessKey: process.env.SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return new DynamoDBClient({ region });
+}
+
+const ddb = getDynamoDBClient();
 
 async function getCognitoConfig(orgId: string) {
   console.log(`🔍 Fetching Cognito config for org ${orgId} from table ${CS_TABLE}`);
@@ -64,6 +78,60 @@ export async function PATCH(
     // Extract orgId from request headers
     const orgId = req.headers.get('x-org-id') || DEFAULT_ORG_ID;
 
+    // Check if current user is Owner (only Owner can assign roles)
+    const authHeader = req.headers.get('Authorization');
+    let currentUserEmail: string | null = null;
+    
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const jwt = require('jsonwebtoken');
+      const token = authHeader.replace('Bearer ', '').trim();
+      
+      // Decode token with fallback to manual decode
+      let claims: any = null
+      try {
+        claims = jwt.decode(token, { complete: false }) as any
+        
+        // If jwt.decode returns null, try manual base64 decode
+        if (!claims && token.includes('.')) {
+          const parts = token.split('.')
+          if (parts.length >= 2) {
+            const payload = parts[1]
+            try {
+              const paddedPayload = payload + '='.repeat((4 - payload.length % 4) % 4)
+              claims = JSON.parse(Buffer.from(paddedPayload, 'base64url').toString('utf-8'))
+            } catch (e) {
+              console.error('❌ Failed to manually decode token:', e)
+            }
+          }
+        }
+      } catch (error: any) {
+        console.error('❌ Error decoding token:', error.message)
+      }
+      
+      currentUserEmail = claims?.email || claims?.['cognito:username'];
+    }
+    
+    if (currentUserEmail) {
+      const currentUserResp = await ddb.send(new GetItemCommand({
+        TableName: USERS_TABLE,
+        Key: {
+          orgId: { S: orgId },
+          email: { S: currentUserEmail }
+        }
+      }));
+      
+      const currentUserRole = currentUserResp.Item?.role?.S;
+      if (currentUserRole !== 'Owner') {
+        return NextResponse.json(
+          { error: "Only Owner can assign roles to users" },
+          { status: 403 }
+        );
+      }
+    } else {
+      // If we can't determine the user, we'll allow it but log a warning
+      console.warn('⚠️ Could not determine current user, allowing role assignment');
+    }
+
     const email = decodeURIComponent(params.id);
     const { roleIds } = await req.json();
     const newRole = Array.isArray(roleIds) && roleIds.length > 0 ? roleIds[0] : undefined;
@@ -75,7 +143,7 @@ export async function PATCH(
       );
     }
 
-    console.log(`🔄 Updating user role: ${email} -> ${newRole}`);
+    console.log(`🔄 Updating user role: ${email} -> ${newRole} by ${currentUserEmail || 'unknown'}`);
 
     // Get current user info
     const userResp = await ddb.send(new GetItemCommand({

@@ -121,7 +121,6 @@ export default function AdminAllEmailsPage() {
   // Success/info messages
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [infoMessage, setInfoMessage] = useState<string | null>(null)
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true)
 
   // Email viewer state
   const [emailViewerTab, setEmailViewerTab] = useState<"content" | "html" | "headers" | "debug">("content")
@@ -287,23 +286,7 @@ export default function AdminAllEmailsPage() {
     loadEmails(1, ''); // Initial load with empty search
   }, []); // Only run once on mount
 
-  // Auto-refresh every 30 seconds to show new emails automatically
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-
-    console.log('⏰ Setting up auto-refresh every 30 seconds');
-    const intervalId = setInterval(() => {
-      if (!loading) {
-        console.log('🔄 Auto-refreshing emails...');
-        loadEmails(1, searchQuery); // Preserve search during auto-refresh
-      }
-    }, 30000); // 30 seconds
-
-    return () => {
-      console.log('⏰ Cleaning up auto-refresh interval');
-      clearInterval(intervalId);
-    };
-  }, [loadEmails, autoRefreshEnabled, loading]);
+  // Auto-refresh removed per user request
 
 
   // Handle search changes - trigger new API call when search query changes
