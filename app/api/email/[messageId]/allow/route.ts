@@ -13,52 +13,67 @@ export async function POST(
   { params }: { params: Promise<{ messageId: string }> }
 ) {
   try {
-    const { messageId } = await params;
+    const { messageId: rawMessageId } = await params;
+    // Decode the messageId in case it's URL encoded
+    const messageId = decodeURIComponent(rawMessageId);
     const body = await request.json();
     const { reason } = body;
 
     console.log(`✅ Allowing email: ${messageId}`);
 
-    // Find the email
+    // Find the email - try multiple possible key structures
     const findEmailCommand = new ScanCommand({
       TableName: TABLES.EMAILS,
       FilterExpression: 'messageId = :messageId',
       ExpressionAttributeValues: {
         ':messageId': { S: messageId }
       },
-      ProjectionExpression: 'userId, receivedAt',
+      ProjectionExpression: 'userId, receivedAt, timestamp, createdAt',
       Limit: 1
     });
 
     const findResult = await ddb.send(findEmailCommand);
 
     if (!findResult.Items || findResult.Items.length === 0) {
+      console.error(`❌ Email not found: ${messageId}`);
       return NextResponse.json(
-        { error: 'Email not found' },
+        { error: 'Email not found', messageId },
         { status: 404 }
       );
     }
 
     const emailKey = findResult.Items[0];
+    const userId = emailKey.userId?.S;
+    const receivedAt = emailKey.receivedAt?.S || emailKey.timestamp?.S || emailKey.createdAt?.S;
+    
+    if (!userId || !receivedAt) {
+      console.error(`❌ Invalid email key structure:`, { userId, receivedAt });
+      return NextResponse.json(
+        { error: 'Invalid email key structure' },
+        { status: 500 }
+      );
+    }
 
     // Update email to mark as allowed
     const updateEmailCommand = new UpdateItemCommand({
       TableName: TABLES.EMAILS,
       Key: {
-        userId: { S: emailKey.userId?.S || '' },
-        receivedAt: { S: emailKey.receivedAt?.S || '' }
+        userId: { S: userId },
+        receivedAt: { S: receivedAt }
       },
-      UpdateExpression: 'SET #allowed = :allowed, #allowedAt = :allowedAt, #allowedReason = :allowedReason, #updatedAt = :updatedAt',
+      UpdateExpression: 'SET #allowed = :allowed, #allowedAt = :allowedAt, #allowedReason = :allowedReason, #status = :status, #updatedAt = :updatedAt',
       ExpressionAttributeNames: {
         '#allowed': 'allowed',
         '#allowedAt': 'allowedAt',
         '#allowedReason': 'allowedReason',
+        '#status': 'status',
         '#updatedAt': 'updatedAt'
       },
       ExpressionAttributeValues: {
         ':allowed': { BOOL: true },
         ':allowedAt': { S: new Date().toISOString() },
         ':allowedReason': { S: reason || 'Allowed from investigation' },
+        ':status': { S: 'allowed' },
         ':updatedAt': { S: new Date().toISOString() }
       }
     });

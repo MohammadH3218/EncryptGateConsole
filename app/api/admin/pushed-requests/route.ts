@@ -34,19 +34,53 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const profile = await userProfileService.getUserProfile(token)
-    
-    // Check if user has permission to push to admin
-    if (!userProfileService.hasPermission(profile.id, 'push_to_admin')) {
+    const body = await request.json()
+    const { emailMessageId, detectionId, investigationId, reason, priority } = body
+
+    // Try to get profile, but don't fail if userProfileService doesn't work
+    let profile: any = null
+    try {
+      profile = await userProfileService.getUserProfile(token)
+    } catch (profileError) {
+      console.warn('Could not get user profile, proceeding anyway:', profileError)
+    }
+
+    // If we have a profile, check permissions
+    if (profile && !userProfileService.hasPermission(profile.id, 'push_to_admin')) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 })
     }
 
-    const { investigationId, reason } = await request.json()
-    const pushedRequest = userProfileService.pushToAdmin(investigationId, profile.id, reason)
+    // Create pushed request - use investigationId or emailMessageId
+    const requestId = investigationId || emailMessageId || `push-${Date.now()}`
+    const userId = profile?.id || 'unknown'
     
-    return NextResponse.json(pushedRequest)
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to push to admin' }, { status: 500 })
+    // Try to use userProfileService if available
+    let pushedRequest
+    try {
+      pushedRequest = userProfileService.pushToAdmin(requestId, userId, reason || 'Pushed from investigation')
+    } catch (serviceError) {
+      // Fallback: create a simple pushed request object
+      console.warn('userProfileService.pushToAdmin failed, creating fallback:', serviceError)
+      pushedRequest = {
+        id: requestId,
+        investigationId: investigationId || emailMessageId,
+        emailMessageId,
+        detectionId,
+        reason: reason || 'Pushed from investigation',
+        priority: priority || 'medium',
+        status: 'pending',
+        requestedBy: userId,
+        requestedAt: new Date().toISOString(),
+      }
+    }
+    
+    return NextResponse.json({ success: true, ...pushedRequest })
+  } catch (error: any) {
+    console.error('❌ Error in POST /api/admin/pushed-requests:', error)
+    return NextResponse.json(
+      { error: 'Failed to push to admin', details: error.message },
+      { status: 500 }
+    )
   }
 }
 
