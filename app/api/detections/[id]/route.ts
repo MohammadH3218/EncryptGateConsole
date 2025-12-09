@@ -19,8 +19,11 @@ async function findDetectionByDetectionId(detectionId: string): Promise<any> {
   try {
     console.log('🔍 Scanning for detection with detectionId:', detectionId);
     
-    // Your table structure: detectionId (partition key) + receivedAt (sort key)
-    // We need to scan because we only have the detectionId, not the receivedAt
+    // Try multiple possible table structures
+    // Structure 1: detectionId (partition key) + receivedAt (sort key)
+    // Structure 2: detectionId (partition key) + createdAt (sort key)
+    // Structure 3: detectionId (partition key) + timestamp (sort key)
+    
     const scanCommand = new ScanCommand({
       TableName: DETECTIONS_TABLE,
       FilterExpression: 'detectionId = :detectionId',
@@ -37,15 +40,34 @@ async function findDetectionByDetectionId(detectionId: string): Promise<any> {
       console.log('✅ Found detection:', {
         detectionId: item.detectionId?.S,
         receivedAt: item.receivedAt?.S,
+        createdAt: item.createdAt?.S,
+        timestamp: item.timestamp?.S,
         emailMessageId: item.emailMessageId?.S
       });
+      
+      // Determine the sort key - try receivedAt first, then createdAt, then timestamp
+      const sortKey = item.receivedAt?.S || item.createdAt?.S || item.timestamp?.S;
+      const sortKeyName = item.receivedAt?.S ? 'receivedAt' : 
+                         item.createdAt?.S ? 'createdAt' : 
+                         item.timestamp?.S ? 'timestamp' : 'receivedAt';
+      
+      if (!sortKey) {
+        console.error('❌ No sort key found for detection:', detectionId);
+        // Try with just detectionId (if it's the only key)
+        return {
+          item: item,
+          deleteKey: {
+            detectionId: { S: item.detectionId?.S }
+          }
+        };
+      }
       
       // Return both the item and the correct delete key for your table structure
       return {
         item: item,
         deleteKey: {
           detectionId: { S: item.detectionId?.S },
-          receivedAt: { S: item.receivedAt?.S }
+          [sortKeyName]: { S: sortKey }
         }
       };
     }
@@ -54,8 +76,12 @@ async function findDetectionByDetectionId(detectionId: string): Promise<any> {
     return null;
     
   } catch (error: any) {
-    console.error('❌ Error scanning for detection:', error);
-    return null;
+    console.error('❌ Error scanning for detection:', {
+      message: error.message,
+      code: error.code,
+      name: error.name
+    });
+    throw error; // Re-throw to be caught by caller
   }
 }
 
@@ -89,9 +115,18 @@ export async function DELETE(
       detectionInfo = await findDetectionByDetectionId(detectionId);
       console.log('✅ Step 2: Search completed, result:', detectionInfo ? 'found' : 'not found');
     } catch (findError: any) {
-      console.error('❌ Step 2 FAILED: Error finding detection:', findError);
+      console.error('❌ Step 2 FAILED: Error finding detection:', {
+        message: findError.message,
+        code: findError.code,
+        name: findError.name,
+        stack: findError.stack
+      });
       return NextResponse.json(
-        { error: 'Error searching for detection', details: findError.message },
+        { 
+          error: 'Error searching for detection', 
+          details: findError.message,
+          code: findError.code || findError.name
+        },
         { status: 500 }
       );
     }
@@ -117,10 +152,16 @@ export async function DELETE(
 
     // Step 3: Delete from DynamoDB
     console.log('🗑️ Step 3: Deleting detection from DynamoDB...');
+    console.log('🗑️ Delete key:', JSON.stringify(deleteKey, null, 2));
     try {
       const deleteCommand = new DeleteItemCommand({
         TableName: DETECTIONS_TABLE,
-        Key: deleteKey
+        Key: deleteKey,
+        // Add condition to ensure we're deleting the right item
+        ConditionExpression: 'detectionId = :detectionId',
+        ExpressionAttributeValues: {
+          ':detectionId': { S: detectionId }
+        }
       });
 
       await ddb.send(deleteCommand);
@@ -130,30 +171,38 @@ export async function DELETE(
       console.error('❌ Step 3 FAILED: DynamoDB delete error:', {
         message: dynamoError.message,
         code: dynamoError.code,
-        name: dynamoError.name
+        name: dynamoError.name,
+        deleteKey: deleteKey
       });
-      return NextResponse.json(
-        {
-          error: 'Failed to delete detection from database',
-          details: dynamoError.message,
-          code: dynamoError.code
-        },
-        { status: 500 }
-      );
+      
+      // If it's a conditional check failure, the item might have been deleted already
+      if (dynamoError.name === 'ConditionalCheckFailedException') {
+        console.warn('⚠️ Detection may have been already deleted, continuing...');
+        // Continue with email update
+      } else {
+        return NextResponse.json(
+          {
+            error: 'Failed to delete detection from database',
+            details: dynamoError.message,
+            code: dynamoError.code || dynamoError.name
+          },
+          { status: 500 }
+        );
+      }
     }
 
     // Step 4: Update email status to 'clean'
     if (emailMessageId) {
       console.log('📧 Step 4: Updating email status for:', emailMessageId);
       try {
-        // Find the email
+        // Find the email - try multiple possible key structures
         const findEmailCommand = new ScanCommand({
           TableName: EMAILS_TABLE,
           FilterExpression: 'messageId = :messageId',
           ExpressionAttributeValues: {
             ':messageId': { S: emailMessageId }
           },
-          ProjectionExpression: 'userId, receivedAt',
+          ProjectionExpression: 'userId, receivedAt, timestamp, createdAt',
           Limit: 1
         });
 
@@ -161,39 +210,57 @@ export async function DELETE(
 
         if (findResult.Items && findResult.Items.length > 0) {
           const emailKey = findResult.Items[0];
+          
+          // Determine the correct key structure
+          const userId = emailKey.userId?.S;
+          const receivedAt = emailKey.receivedAt?.S || emailKey.timestamp?.S || emailKey.createdAt?.S;
+          
+          if (!userId || !receivedAt) {
+            console.warn('⚠️ Step 4: Cannot determine email key structure:', {
+              hasUserId: !!userId,
+              hasReceivedAt: !!receivedAt,
+              hasTimestamp: !!emailKey.timestamp?.S,
+              hasCreatedAt: !!emailKey.createdAt?.S
+            });
+          } else {
+            // Update the email
+            const updateEmailCommand = new UpdateItemCommand({
+              TableName: EMAILS_TABLE,
+              Key: {
+                userId: { S: userId },
+                receivedAt: { S: receivedAt }
+              },
+              UpdateExpression: 'SET #flaggedCategory = :flaggedCategory, #investigationStatus = :investigationStatus, #detectionId = :null, #flaggedBy = :flaggedBy, #flaggedAt = :null, #updatedAt = :updatedAt REMOVE #flaggedSeverity',
+              ExpressionAttributeNames: {
+                '#flaggedCategory': 'flaggedCategory',
+                '#investigationStatus': 'investigationStatus',
+                '#detectionId': 'detectionId',
+                '#flaggedBy': 'flaggedBy',
+                '#flaggedAt': 'flaggedAt',
+                '#updatedAt': 'updatedAt',
+                '#flaggedSeverity': 'flaggedSeverity'
+              },
+              ExpressionAttributeValues: {
+                ':flaggedCategory': { S: 'clean' },
+                ':investigationStatus': { S: 'resolved' },
+                ':null': { NULL: true },
+                ':flaggedBy': { S: 'Security Analyst' },
+                ':updatedAt': { S: new Date().toISOString() }
+              }
+            });
 
-          // Update the email
-          const updateEmailCommand = new UpdateItemCommand({
-            TableName: EMAILS_TABLE,
-            Key: {
-              userId: { S: emailKey.userId?.S || '' },
-              receivedAt: { S: emailKey.receivedAt?.S || '' }
-            },
-            UpdateExpression: 'SET #flaggedCategory = :flaggedCategory, #investigationStatus = :investigationStatus, #detectionId = :null, #flaggedBy = :flaggedBy, #flaggedAt = :null, #updatedAt = :updatedAt',
-            ExpressionAttributeNames: {
-              '#flaggedCategory': 'flaggedCategory',
-              '#investigationStatus': 'investigationStatus',
-              '#detectionId': 'detectionId',
-              '#flaggedBy': 'flaggedBy',
-              '#flaggedAt': 'flaggedAt',
-              '#updatedAt': 'updatedAt'
-            },
-            ExpressionAttributeValues: {
-              ':flaggedCategory': { S: 'clean' },
-              ':investigationStatus': { S: 'resolved' },
-              ':null': { NULL: true },
-              ':flaggedBy': { S: 'Security Analyst' },
-              ':updatedAt': { S: new Date().toISOString() }
-            }
-          });
-
-          await ddb.send(updateEmailCommand);
-          console.log('✅ Step 4: Email status updated to clean');
+            await ddb.send(updateEmailCommand);
+            console.log('✅ Step 4: Email status updated to clean');
+          }
         } else {
           console.warn('⚠️ Step 4: Email not found:', emailMessageId);
         }
       } catch (emailUpdateError: any) {
-        console.error('⚠️ Step 4 WARNING: Error updating email:', emailUpdateError.message);
+        console.error('⚠️ Step 4 WARNING: Error updating email:', {
+          message: emailUpdateError.message,
+          code: emailUpdateError.code,
+          name: emailUpdateError.name
+        });
         // Continue anyway - detection removal succeeded
       }
     } else {
