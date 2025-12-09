@@ -1,114 +1,88 @@
-// app/api/copilotkit/route.ts - CopilotKit runtime endpoint adapter
+// app/api/copilotkit/route.ts - CopilotKit runtime endpoint
 import { NextRequest } from "next/server";
+import {
+  CopilotRuntime,
+  copilotRuntimeNextJSAppRouterEndpoint,
+} from "@copilotkit/runtime";
 import { agentLoopStream } from "@/lib/agent-stream";
 import { getAgentSystemPrompt } from "@/lib/agent";
 import { fetchEmailContext } from "@/lib/neo4j";
-import { INVESTIGATION_PIPELINES, PipelineType } from "@/lib/investigation-pipelines";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/**
- * CopilotKit runtime endpoint that bridges to our existing agent system
- */
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    
-    // Extract emailId from context or request
-    const emailId = body.emailId || body.context?.emailId;
-    if (!emailId) {
-      return new Response(
-        JSON.stringify({ error: "emailId is required" }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+const copilotRuntime = new CopilotRuntime({
+  agents: {
+    default: {
+      async *streamingChatCompletion({ messages, metadata }) {
+        // Extract emailId from metadata
+        const emailId = metadata?.emailId as string | undefined;
+        if (!emailId) {
+          yield {
+            type: "text-delta" as const,
+            textDelta: "Error: emailId is required in metadata. Please provide the email ID for investigation.",
+          };
+          return;
+        }
 
-    // Get messages from CopilotKit format
-    const messages = body.messages || [];
-    const lastMessage = messages[messages.length - 1];
-    const question = lastMessage?.content || "";
-
-    // Fetch email context
-    let emailContext = "";
-    try {
-      emailContext = await fetchEmailContext(emailId);
-      if (!emailContext) {
-        emailContext = `Email ID: ${emailId}\nNote: Email context not available in graph database.`;
-      }
-    } catch (error: any) {
-      emailContext = `Email ID: ${emailId}\nNote: Neo4j connection unavailable.`;
-    }
-
-    // Build initial messages for agent
-    const initialMessages: any[] = [
-      {
-        role: "system",
-        content: getAgentSystemPrompt(emailId, emailContext),
-      },
-      ...messages.slice(0, -1).map((m: any) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      {
-        role: "user",
-        content: question,
-      },
-    ];
-
-    // Create streaming response
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
+        // Fetch email context
+        let emailContext = "";
         try {
-          let finalAnswer = "";
-
-          for await (const event of agentLoopStream(initialMessages, 8)) {
-            if (event.type === "answer") {
-              finalAnswer = event.data.content;
-              // Send to CopilotKit format
-              controller.enqueue(
-                encoder.encode(
-                  `data: ${JSON.stringify({
-                    type: "text-delta",
-                    textDelta: event.data.content,
-                  })}\n\n`
-                )
-              );
-            } else if (event.type === "done") {
-              controller.enqueue(
-                encoder.encode(`data: [DONE]\n\n`)
-              );
-              controller.close();
-              return;
-            }
+          emailContext = await fetchEmailContext(emailId);
+          if (!emailContext) {
+            emailContext = `Email ID: ${emailId}\nNote: Email context not available in graph database.`;
           }
         } catch (error: any) {
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                type: "error",
-                error: error.message,
-              })}\n\n`
-            )
-          );
-          controller.close();
+          emailContext = `Email ID: ${emailId}\nNote: Neo4j connection unavailable.`;
+        }
+
+        // Build initial messages for agent
+        const initialMessages: any[] = [
+          {
+            role: "system",
+            content: getAgentSystemPrompt(emailId, emailContext),
+          },
+          ...messages.slice(0, -1).map((m: any) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          {
+            role: "user",
+            content: messages[messages.length - 1]?.content || "",
+          },
+        ];
+
+        // Stream from agent
+        let accumulatedAnswer = "";
+        for await (const event of agentLoopStream(initialMessages, 8)) {
+          if (event.type === "answer") {
+            const content = event.data.content || "";
+            // Yield the delta (new content since last yield)
+            const delta = content.slice(accumulatedAnswer.length);
+            if (delta) {
+              yield {
+                type: "text-delta" as const,
+                textDelta: delta,
+              };
+              accumulatedAnswer = content;
+            }
+          } else if (event.type === "done") {
+            // Finalize if needed
+            return;
+          } else if (event.type === "error") {
+            yield {
+              type: "text-delta" as const,
+              textDelta: `\n\nError: ${event.data?.message || "Unknown error occurred"}`,
+            };
+            return;
+          }
         }
       },
-    });
+    },
+  },
+});
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
-  } catch (error: any) {
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
-  }
-}
+export const { GET, POST } = copilotRuntimeNextJSAppRouterEndpoint({
+  runtime: copilotRuntime,
+});
 
