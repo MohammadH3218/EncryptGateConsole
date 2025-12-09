@@ -83,9 +83,27 @@ const copilotRuntimeConfig = {
   },
 };
 
-const copilotRuntime = new CopilotRuntime(copilotRuntimeConfig);
+// Lazy initialization to prevent build-time evaluation issues
+let endpointHandlers: { GET: any; POST: any } | null = null;
 
-export const { GET, POST } = copilotRuntimeNextJSAppRouterEndpoint({
-  runtime: copilotRuntime,
-});
+function getEndpointHandlers() {
+  if (!endpointHandlers) {
+    const copilotRuntime = new CopilotRuntime(copilotRuntimeConfig);
+    endpointHandlers = copilotRuntimeNextJSAppRouterEndpoint({
+      runtime: copilotRuntime,
+    });
+  }
+  return endpointHandlers;
+}
+
+// Export handlers that lazily initialize
+export async function GET(req: NextRequest) {
+  const handlers = getEndpointHandlers();
+  return handlers.GET(req);
+}
+
+export async function POST(req: NextRequest) {
+  const handlers = getEndpointHandlers();
+  return handlers.POST(req);
+}
 
