@@ -15,11 +15,25 @@ import {
   FileText,
   Activity,
   TrendingUp,
+  Copy,
+  Send,
+  Ban,
+  CheckCircle,
+  ArrowUp,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { EmailPreviewDialog } from "@/components/email-preview-dialog";
 import { InvestigationCopilotPanel } from "@/components/InvestigationCopilotPanel";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -120,6 +134,8 @@ export default function EnhancedInvestigationPage() {
   const [emailData, setEmailData] = useState<EmailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   // UI state
   const [selectedTab, setSelectedTab] = useState("overview");
@@ -127,6 +143,9 @@ export default function EnhancedInvestigationPage() {
   // Email preview state
   const [previewEmailId, setPreviewEmailId] = useState<string | null>(null);
   const [previewDialogOpen, setPreviewDialogOpen] = useState(false);
+  const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitAction, setSubmitAction] = useState<"block" | "allow" | "push" | null>(null);
 
   // Load data
   useEffect(() => {
@@ -518,53 +537,161 @@ export default function EnhancedInvestigationPage() {
                             Email Metadata
                           </CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-3 text-sm">
-                        <div className="grid grid-cols-3 gap-4">
-                          <div>
-                            <p className="text-slate-500 text-xs font-medium mb-1">
-                              From
-                            </p>
-                            <p className="font-mono text-slate-200 text-xs">
-                              {emailData?.sender || "N/A"}
-                            </p>
+                        <CardContent className="space-y-4 text-sm">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Left Column */}
+                            <div className="space-y-4">
+                              <div>
+                                <label className="text-slate-500 text-xs font-medium block mb-1">
+                                  Subject
+                                </label>
+                                <p className="text-slate-200 text-sm font-medium break-words">
+                                  {emailData?.subject || "No Subject"}
+                                </p>
+                              </div>
+                              <div>
+                                <label className="text-slate-500 text-xs font-medium block mb-1">
+                                  From
+                                </label>
+                                <p className="font-mono text-slate-200 text-xs break-all">
+                                  {emailData?.sender || "Unknown"}
+                                </p>
+                              </div>
+                              <div>
+                                <label className="text-slate-500 text-xs font-medium block mb-1">
+                                  To
+                                </label>
+                                <div className="space-y-1">
+                                  {emailData?.recipients && emailData.recipients.length > 0 ? (
+                                    emailData.recipients.map((recipient: string, idx: number) => (
+                                      <p key={idx} className="font-mono text-slate-200 text-xs break-all">
+                                        {recipient}
+                                      </p>
+                                    ))
+                                  ) : (
+                                    <p className="text-slate-400 text-xs">No recipients</p>
+                                  )}
+                                </div>
+                              </div>
+                              {emailData?.cc && emailData.cc.length > 0 && (
+                                <div>
+                                  <label className="text-slate-500 text-xs font-medium block mb-1">
+                                    CC
+                                  </label>
+                                  <div className="space-y-1">
+                                    {emailData.cc.map((cc: string, idx: number) => (
+                                      <p key={idx} className="font-mono text-slate-200 text-xs break-all">
+                                        {cc}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              <div>
+                                <label className="text-slate-500 text-xs font-medium block mb-1">
+                                  Received
+                                </label>
+                                <p className="text-slate-200 text-xs">
+                                  {emailData?.timestamp
+                                    ? (() => {
+                                        try {
+                                          return new Date(emailData.timestamp).toLocaleString();
+                                        } catch {
+                                          return emailData.timestamp;
+                                        }
+                                      })()
+                                    : "Unknown"}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Right Column */}
+                            <div className="space-y-4">
+                              <div>
+                                <label className="text-slate-500 text-xs font-medium block mb-1">
+                                  Direction
+                                </label>
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    emailData?.direction === "inbound"
+                                      ? "bg-blue-900/30 text-blue-300 border-blue-600/30"
+                                      : "bg-gray-800/50 text-gray-300 border-gray-600/50"
+                                  }
+                                >
+                                  {emailData?.direction || "unknown"}
+                                </Badge>
+                              </div>
+                              <div>
+                                <label className="text-slate-500 text-xs font-medium block mb-1">
+                                  Status
+                                </label>
+                                <Badge
+                                  variant="outline"
+                                  className="bg-slate-800/50 text-slate-300 border-slate-600/50"
+                                >
+                                  {emailData?.status || "unknown"}
+                                </Badge>
+                              </div>
+                              {emailData?.size !== undefined && (
+                                <div>
+                                  <label className="text-slate-500 text-xs font-medium block mb-1">
+                                    Size
+                                  </label>
+                                  <p className="text-slate-200 text-xs">
+                                    {typeof emailData.size === 'number' 
+                                      ? `${(emailData.size / 1024).toFixed(1)} KB`
+                                      : emailData.size}
+                                  </p>
+                                </div>
+                              )}
+                              {emailData?.attachments && emailData.attachments.length > 0 && (
+                                <div>
+                                  <label className="text-slate-500 text-xs font-medium block mb-1">
+                                    Attachments
+                                  </label>
+                                  <p className="text-slate-200 text-xs">
+                                    {emailData.attachments.length} file{emailData.attachments.length !== 1 ? 's' : ''}
+                                  </p>
+                                </div>
+                              )}
+                              {emailData?.urls && emailData.urls.length > 0 && (
+                                <div>
+                                  <label className="text-slate-500 text-xs font-medium block mb-1">
+                                    URLs
+                                  </label>
+                                  <p className="text-slate-200 text-xs">
+                                    {emailData.urls.length} URL{emailData.urls.length !== 1 ? 's' : ''} found
+                                  </p>
+                                </div>
+                              )}
+                              <div>
+                                <label className="text-slate-500 text-xs font-medium block mb-1">
+                                  Message ID
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <p className="font-mono text-slate-400 text-[10px] break-all flex-1">
+                                    {emailData?.messageId || "N/A"}
+                                  </p>
+                                  {emailData?.messageId && (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(emailData.messageId);
+                                      }}
+                                      className="text-slate-400 hover:text-slate-200 p-1 h-6 w-6"
+                                      title="Copy Message ID"
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                          <div className="col-span-2">
-                            <p className="text-slate-500 text-xs font-medium mb-1">
-                              To
-                            </p>
-                            <p className="font-mono text-slate-200 text-xs truncate">
-                              {emailData?.recipients?.join(", ") || "N/A"}
-                            </p>
-                          </div>
-                          <div className="col-span-3">
-                            <p className="text-slate-500 text-xs font-medium mb-1">
-                              Subject
-                            </p>
-                            <p className="text-slate-200 text-sm">
-                              {emailData?.subject || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-slate-500 text-xs font-medium mb-1">
-                              Date
-                            </p>
-                            <p className="text-slate-200 text-xs">
-                              {emailData?.timestamp
-                                ? new Date(emailData.timestamp).toLocaleString()
-                                : "N/A"}
-                            </p>
-                          </div>
-                          <div className="col-span-2">
-                            <p className="text-slate-500 text-xs font-medium mb-1">
-                              Message ID
-                            </p>
-                            <p className="font-mono text-slate-400 text-[10px] truncate">
-                              {emailData?.messageId || "N/A"}
-                            </p>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
+                        </CardContent>
+                      </Card>
 
                     {investigation && (
                       <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
@@ -773,6 +900,87 @@ export default function EnhancedInvestigationPage() {
         </section>
       </div>
 
+      {/* Submit Button - Fixed at bottom right */}
+      <div className="fixed bottom-8 right-8 z-50">
+        <Button
+          onClick={() => setSubmitDialogOpen(true)}
+          size="lg"
+          className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 h-12 px-6 rounded-full"
+        >
+          <Send className="w-5 h-5 mr-2" />
+          Submit Investigation
+        </Button>
+      </div>
+
+      {/* Submit Action Dialog */}
+      <Dialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
+        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-semibold text-white">
+              Submit Investigation
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              Choose an action for this email investigation
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-3 py-4">
+            <Button
+              onClick={() => handleSubmitAction("block")}
+              disabled={submitting}
+              className="w-full justify-start bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-600/30 h-auto py-4"
+            >
+              <Ban className="w-5 h-5 mr-3" />
+              <div className="flex-1 text-left">
+                <div className="font-semibold">Block Email</div>
+                <div className="text-xs text-red-300/70 mt-1">
+                  Block this email and sender from future delivery
+                </div>
+              </div>
+            </Button>
+
+            <Button
+              onClick={() => handleSubmitAction("allow")}
+              disabled={submitting}
+              className="w-full justify-start bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-600/30 h-auto py-4"
+            >
+              <CheckCircle className="w-5 h-5 mr-3" />
+              <div className="flex-1 text-left">
+                <div className="font-semibold">Allow Email</div>
+                <div className="text-xs text-green-300/70 mt-1">
+                  Mark this specific email as allowed (email only, not sender)
+                </div>
+              </div>
+            </Button>
+
+            <Button
+              onClick={() => handleSubmitAction("push")}
+              disabled={submitting}
+              className="w-full justify-start bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-600/30 h-auto py-4"
+            >
+              <ArrowUp className="w-5 h-5 mr-3" />
+              <div className="flex-1 text-left">
+                <div className="font-semibold">Push to Admin</div>
+                <div className="text-xs text-blue-300/70 mt-1">
+                  Escalate this investigation to admin review
+                </div>
+              </div>
+            </Button>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setSubmitDialogOpen(false)}
+              disabled={submitting}
+              className="text-slate-400 hover:text-white"
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Email Preview Dialog */}
       <EmailPreviewDialog
         emailId={previewEmailId}
@@ -784,4 +992,83 @@ export default function EnhancedInvestigationPage() {
       />
     </div>
   );
+
+  // Handle submit action
+  async function handleSubmitAction(action: "block" | "allow" | "push") {
+    if (!emailData?.messageId) {
+      setError("Email message ID is required");
+      return;
+    }
+
+    setSubmitting(true);
+    setSubmitAction(action);
+
+    try {
+      let response;
+      
+      if (action === "block") {
+        response = await fetch(`/api/email/${encodeURIComponent(emailData.messageId)}/block`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messageId: emailData.messageId,
+            sender: emailData.sender,
+            reason: "Blocked from investigation",
+          }),
+        });
+      } else if (action === "allow") {
+        response = await fetch(`/api/email/${encodeURIComponent(emailData.messageId)}/allow`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messageId: emailData.messageId,
+            reason: "Allowed from investigation",
+          }),
+        });
+      } else if (action === "push") {
+        response = await fetch(`/api/admin/pushed-requests`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            emailMessageId: emailData.messageId,
+            detectionId: investigation?.detectionId,
+            investigationId: investigation?.investigationId,
+            reason: "Pushed from investigation",
+            priority: investigation?.priority || "medium",
+          }),
+        });
+      }
+
+      if (response && response.ok) {
+        const result = await response.json();
+        console.log(`✅ ${action} action completed:`, result);
+        
+        // Show success message
+        setSuccessMessage(`Successfully ${action === "block" ? "blocked" : action === "allow" ? "allowed" : "pushed"} email`);
+        
+        // Close dialog
+        setSubmitDialogOpen(false);
+        
+        // If push, navigate to pushed requests page
+        if (action === "push") {
+          const orgId = params.orgId as string;
+          setTimeout(() => {
+            window.location.href = `/o/${orgId}/admin/pushed-requests`;
+          }, 1500);
+        } else {
+          // Refresh page data
+          window.location.reload();
+        }
+      } else {
+        const errorData = await response?.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.message || `Failed to ${action} email`);
+      }
+    } catch (err: any) {
+      console.error(`❌ Failed to ${action} email:`, err);
+      setError(err.message || `Failed to ${action} email`);
+    } finally {
+      setSubmitting(false);
+      setSubmitAction(null);
+    }
+  }
 }

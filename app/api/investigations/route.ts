@@ -114,7 +114,7 @@ export async function POST(request: Request) {
     console.log('🔍 POST /api/investigations - Creating investigation...');
     
     const body = await request.json();
-    const { emailMessageId, detectionId, investigatorName, priority = 'medium' } = body;
+    const { emailMessageId, detectionId, investigatorName, priority = 'medium', emailSubject, sender, severity } = body;
 
     if (!emailMessageId || !investigatorName) {
       return NextResponse.json(
@@ -138,7 +138,7 @@ export async function POST(request: Request) {
       createdAt: { S: timestamp },
       emailMessageId: { S: emailMessageId },
       investigatorName: { S: investigatorName },
-      status: { S: 'new' },
+      status: { S: 'active' }, // Set to 'active' for in-progress investigations
       progress: { N: '0' },
       priority: { S: priority },
       findings: { S: '' },
@@ -153,6 +153,19 @@ export async function POST(request: Request) {
     if (detectionId) {
       investigationItem.detectionId = { S: detectionId };
     }
+    
+    // Add email subject and sender if provided
+    if (emailSubject) {
+      investigationItem.emailSubject = { S: emailSubject };
+    }
+    
+    if (sender) {
+      investigationItem.sender = { S: sender };
+    }
+    
+    if (severity) {
+      investigationItem.severity = { S: severity };
+    }
 
     await ddb.send(new PutItemCommand({
       TableName: INVESTIGATIONS_TABLE,
@@ -166,7 +179,7 @@ export async function POST(request: Request) {
       emailMessageId,
       detectionId,
       investigatorName,
-      status: 'new',
+      status: 'active',
       progress: 0,
       priority,
       findings: '',

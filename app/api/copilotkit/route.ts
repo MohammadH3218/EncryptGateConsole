@@ -16,32 +16,51 @@ const copilotRuntimeConfig = {
   agents: {
     default: {
       async *streamingChatCompletion({ messages, metadata }: any) {
-        // Extract emailId from metadata
-        const emailId = metadata?.emailId as string | undefined;
-        if (!emailId) {
-          yield {
-            type: "text-delta" as const,
-            textDelta: "Error: emailId is required in metadata. Please provide the email ID for investigation.",
-          };
-          return;
-        }
-
-        // Fetch email context
+        // Extract emailId from metadata (can be from metadata.emailId or metadata.investigationId)
+        const emailId = (metadata?.emailId || metadata?.investigationId) as string | undefined;
+        
+        // If no emailId, try to work without it but warn the user
         let emailContext = "";
-        try {
-          emailContext = await fetchEmailContext(emailId);
-          if (!emailContext) {
-            emailContext = `Email ID: ${emailId}\nNote: Email context not available in graph database.`;
+        if (emailId) {
+          try {
+            emailContext = await fetchEmailContext(emailId);
+            if (!emailContext) {
+              emailContext = `Email ID: ${emailId}\nNote: Email context not available in graph database.`;
+            }
+          } catch (error: any) {
+            console.warn('Failed to fetch email context:', error);
+            emailContext = `Email ID: ${emailId}\nNote: Neo4j connection unavailable.`;
           }
-        } catch (error: any) {
-          emailContext = `Email ID: ${emailId}\nNote: Neo4j connection unavailable.`;
+        } else {
+          // Work without email context - provide a general system prompt
+          emailContext = "General security investigation context. No specific email ID provided.";
+          console.warn('Copilot called without emailId in metadata');
         }
 
         // Build initial messages for agent
         const initialMessages: any[] = [
           {
             role: "system",
-            content: getAgentSystemPrompt(emailId, emailContext),
+            content: emailId 
+              ? getAgentSystemPrompt(emailId, emailContext)
+              : `You are EncryptGate Security Copilot, an expert email security analyst assistant.
+
+You help security analysts investigate emails, analyze threats, and understand email relationships.
+
+**Available Tools:**
+- inspect_schema: View Neo4j graph database structure
+- run_cypher: Execute read-only Cypher queries
+- run_gds: Run Graph Data Science algorithms
+
+**Your Approach:**
+1. Understand the analyst's question
+2. Use appropriate tools to gather evidence
+3. Provide clear, actionable insights
+4. Reference specific data from your queries
+
+**Context:** ${emailContext}
+
+Be helpful, thorough, and security-focused.`,
           },
           ...messages.slice(0, -1).map((m: any) => ({
             role: m.role,

@@ -138,7 +138,6 @@ export function AppLayout({ children, notificationsCount = 0 }: AppLayoutProps) 
     { icon: Mail, label: "Detections", href: getOrgPath("/admin/detections") },
     { icon: Inbox, label: "All Emails", href: getOrgPath("/admin/all-emails") },
     { icon: Users, label: "Assignments", href: getOrgPath("/admin/assignments") },
-    { icon: Briefcase, label: "Investigations", href: getOrgPath("/admin/investigate") },
     { icon: Layers, label: "Pushed Requests", href: getOrgPath("/admin/pushed-requests") },
   ]
 

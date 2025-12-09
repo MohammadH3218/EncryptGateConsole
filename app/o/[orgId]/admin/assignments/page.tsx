@@ -45,24 +45,64 @@ export default function AssignmentsPage() {
   const router = useRouter();
 
   useEffect(() => {
-    // Load in-progress investigations
-    const investigations = getInProgressInvestigations();
+    // Load in-progress investigations from API
+    const loadInvestigations = async () => {
+      try {
+        const response = await fetch('/api/investigations?status=active&limit=100');
+        if (response.ok) {
+          const investigations = await response.json();
+          
+          // Transform API response to match component interface
+          const investigationsWithSeverity = investigations.map((inv: any) => ({
+            id: inv.investigationId || inv.emailMessageId,
+            emailId: inv.emailMessageId,
+            emailSubject: inv.emailSubject || inv.findings || 'Investigation',
+            sender: inv.sender || 'Unknown',
+            timestamp: inv.createdAt || new Date().toISOString(),
+            lastUpdated: inv.updatedAt || inv.createdAt || new Date().toISOString(),
+            severity: inv.priority === 'critical' ? 'Critical' : 
+                     inv.priority === 'high' ? 'High' : 
+                     inv.priority === 'medium' ? 'Medium' : 'Low',
+            progress: inv.progress || 0,
+            notes: inv.notes,
+          }));
 
-    const investigationsWithSeverity = investigations.map((inv) => ({
-      ...inv,
-      severity: "Low",
-    }));
+          // Sort by severity (Critical -> High -> Medium -> Low)
+          const sortedInvestigations = investigationsWithSeverity.sort((a, b) => {
+            const severityOrder = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+            return (
+              severityOrder[a.severity as keyof typeof severityOrder] -
+              severityOrder[b.severity as keyof typeof severityOrder]
+            );
+          });
 
-    // Sort by severity (Critical -> High -> Medium -> Low)
-    const sortedInvestigations = investigationsWithSeverity.sort((a, b) => {
-      const severityOrder = { Critical: 0, High: 1, Medium: 2, Low: 3 };
-      return (
-        severityOrder[a.severity as keyof typeof severityOrder] -
-        severityOrder[b.severity as keyof typeof severityOrder]
-      );
-    });
+          setInProgressInvestigations(sortedInvestigations);
+        } else {
+          console.error('Failed to load investigations:', response.status);
+          // Fallback to localStorage if API fails
+          const investigations = getInProgressInvestigations();
+          const investigationsWithSeverity = investigations.map((inv) => ({
+            ...inv,
+            severity: "Low",
+          }));
+          setInProgressInvestigations(investigationsWithSeverity);
+        }
+      } catch (error) {
+        console.error('Error loading investigations:', error);
+        // Fallback to localStorage if API fails
+        const investigations = getInProgressInvestigations();
+        const investigationsWithSeverity = investigations.map((inv) => ({
+          ...inv,
+          severity: "Low",
+        }));
+        setInProgressInvestigations(investigationsWithSeverity);
+      }
+    };
 
-    setInProgressInvestigations(sortedInvestigations);
+    loadInvestigations();
+    // Refresh every 30 seconds
+    const interval = setInterval(loadInvestigations, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleContinueInvestigation = (id: string) => {
