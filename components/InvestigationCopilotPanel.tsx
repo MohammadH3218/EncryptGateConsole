@@ -1,6 +1,7 @@
 "use client";
 
-import { CopilotChat, useCopilotAction, useCopilotReadable } from "@copilotkit/react-core";
+import { CopilotChat } from "@copilotkit/react-ui";
+import { useCopilotAction, useCopilotReadable } from "@copilotkit/react-core";
 import type { CSSProperties } from "react";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
