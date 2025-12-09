@@ -85,6 +85,75 @@ body {
   background: rgba(59, 130, 246, 0.28);
 }
 
+/* CopilotKit dark theme overrides */
+[class*="copilot-kit"],
+[class*="copilot-chat"] {
+  --copilot-kit-background-color: #020617 !important;
+  --copilot-kit-primary-color: #22c55e !important;
+  --copilot-kit-text-color: #e2e8f0 !important;
+  --copilot-kit-text-secondary-color: #94a3b8 !important;
+  background-color: #020617 !important;
+  color: #e2e8f0 !important;
+}
+
+/* CopilotKit message bubbles */
+[class*="copilot-chat"] [class*="message"],
+[class*="copilot-kit"] [class*="message"] {
+  background-color: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(148, 163, 184, 0.2) !important;
+}
+
+[class*="copilot-chat"] [class*="user-message"],
+[class*="copilot-kit"] [class*="user-message"] {
+  background-color: #1e293b !important;
+}
+
+[class*="copilot-chat"] [class*="assistant-message"],
+[class*="copilot-kit"] [class*="assistant-message"] {
+  background-color: #0f172a !important;
+}
+
+/* CopilotKit input */
+[class*="copilot-chat"] textarea,
+[class*="copilot-chat"] input,
+[class*="copilot-kit"] textarea,
+[class*="copilot-kit"] input {
+  background-color: #020617 !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(148, 163, 184, 0.3) !important;
+}
+
+[class*="copilot-chat"] textarea::placeholder,
+[class*="copilot-kit"] textarea::placeholder {
+  color: #64748b !important;
+}
+
+/* CopilotKit buttons */
+[class*="copilot-chat"] button,
+[class*="copilot-kit"] button {
+  background-color: #1e293b !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(148, 163, 184, 0.3) !important;
+}
+
+[class*="copilot-chat"] button:hover,
+[class*="copilot-kit"] button:hover {
+  background-color: #334155 !important;
+  border-color: #22c55e !important;
+}
+
+/* CopilotKit loading state */
+[class*="copilot-chat"] [class*="loading"],
+[class*="copilot-kit"] [class*="loading"] {
+  color: #22c55e !important;
+}
+
+[class*="copilot-chat"] [class*="spinner"],
+[class*="copilot-kit"] [class*="spinner"] {
+  border-color: #22c55e !important;
+}
+
 /* CopilotKit-style enhancements */
 .copilot-message {
   animation: fadeInUp 0.3s ease-out;
