@@ -1,7 +1,7 @@
 // lib/email-helpers.ts - Internal email update functions
-import { DynamoDBClient, ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { ScanCommand, UpdateItemCommand } from '@aws-sdk/client-dynamodb';
+import { ddb } from './aws';
 
-const ddb = new DynamoDBClient({ region: process.env.AWS_REGION });
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
 // Helper function to find email by messageId

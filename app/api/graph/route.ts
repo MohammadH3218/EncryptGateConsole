@@ -4,11 +4,13 @@ export const runtime = 'nodejs';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getOpenAIApiKey, validateOpenAIKey } from '@/lib/config';
+import { ensureNeo4jConnection } from '@/lib/neo4j';
 
 // Validation schemas
 const GraphRequestSchema = z.object({
-  action: z.enum(['add_email', 'query_copilot', 'get_email_context', 'health_check']),
+  action: z.enum(['add_email', 'query_copilot', 'get_email_context', 'health_check', 'query']),
   data: z.any(),
+  queryType: z.string().optional(), // For structured queries
 });
 
 type GraphRequest = z.infer<typeof GraphRequestSchema>;
@@ -405,10 +407,148 @@ export async function POST(req: Request) {
         }
       }
 
+      // Structured graph queries
+      case 'query': {
+        try {
+          const { queryType, ...params } = graphReq.data as {
+            queryType: string;
+            senderEmail?: string;
+            emailId?: string;
+            timeRange?: string;
+            minSeverity?: string;
+            days?: number;
+          };
+
+          if (!queryType) {
+            return NextResponse.json(
+              { error: 'queryType is required for structured queries' },
+              { status: 400 }
+            );
+          }
+
+          console.log(`🔍 Processing structured query: ${queryType}`);
+
+          // Import graph query functions
+          const {
+            getSenderRelationships,
+            findSimilarIncidents,
+            getHighRiskDomains,
+            getCampaignEmails,
+          } = await import('@/lib/graph-queries');
+
+          let result: any;
+
+          switch (queryType) {
+            case 'sender_relationships': {
+              if (!params.senderEmail && !params.emailId) {
+                return NextResponse.json(
+                  { error: 'senderEmail or emailId is required for sender_relationships query' },
+                  { status: 400 }
+                );
+              }
+              // If emailId provided, extract sender first
+              let senderEmail = params.senderEmail;
+              if (!senderEmail && params.emailId) {
+                const neo4j = await ensureNeo4jConnection();
+                const emailQuery = await neo4j.runQuery(
+                  'MATCH (sender:User)-[:WAS_SENT]->(e:Email {messageId: $emailId}) RETURN sender.email AS sender LIMIT 1',
+                  { emailId: params.emailId }
+                );
+                if (emailQuery.length > 0) {
+                  senderEmail = emailQuery[0].sender;
+                }
+              }
+              if (!senderEmail) {
+                return NextResponse.json(
+                  { error: 'Could not determine sender email' },
+                  { status: 400 }
+                );
+              }
+              result = await getSenderRelationships(
+                senderEmail,
+                params.timeRange || '30d',
+                params.minSeverity
+              );
+              break;
+            }
+
+            case 'similar_incidents': {
+              if (!params.emailId) {
+                return NextResponse.json(
+                  { error: 'emailId is required for similar_incidents query' },
+                  { status: 400 }
+                );
+              }
+              const incidents = await findSimilarIncidents(params.emailId);
+              result = {
+                incidents,
+                count: incidents.length,
+              };
+              break;
+            }
+
+            case 'high_risk_domains': {
+              const days = params.days || 30;
+              result = await getHighRiskDomains(days);
+              break;
+            }
+
+            case 'campaign_for_email': {
+              if (!params.emailId) {
+                return NextResponse.json(
+                  { error: 'emailId is required for campaign_for_email query' },
+                  { status: 400 }
+                );
+              }
+              result = await getCampaignEmails(params.emailId);
+              break;
+            }
+
+            default:
+              return NextResponse.json(
+                {
+                  error: 'Unknown queryType',
+                  supportedTypes: [
+                    'sender_relationships',
+                    'similar_incidents',
+                    'high_risk_domains',
+                    'campaign_for_email',
+                  ],
+                },
+                { status: 400 }
+              );
+          }
+
+          return NextResponse.json({
+            success: true,
+            queryType,
+            data: result,
+          });
+        } catch (error: any) {
+          console.error('Failed to execute structured query:', error);
+          return NextResponse.json(
+            {
+              error: 'Failed to execute graph query',
+              message: error.message,
+            },
+            { status: 500 }
+          );
+        }
+      }
+
       // Unknown action
       default: {
         return NextResponse.json(
-          { error: 'Unknown action', supportedActions: ['add_email', 'query_copilot', 'get_email_context', 'health_check'] },
+          {
+            error: 'Unknown action',
+            supportedActions: [
+              'add_email',
+              'query_copilot',
+              'get_email_context',
+              'health_check',
+              'query',
+            ],
+          },
           { status: 400 }
         );
       }

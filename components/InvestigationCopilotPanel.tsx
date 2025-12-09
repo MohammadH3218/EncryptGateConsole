@@ -82,6 +82,209 @@ export function InvestigationCopilotPanel({
     },
   });
 
+  // CopilotKit action: Get detection summary
+  useCopilotAction({
+    name: "getDetectionSummary",
+    description: "Fetch detailed information about a security detection including severity, indicators, similar incidents, and recommended actions. Use this when the user asks about detection details or wants to understand why something was flagged.",
+    parameters: [
+      {
+        name: "detectionId",
+        type: "string",
+        description: "The ID of the detection to get details for",
+        required: true,
+      },
+    ],
+    handler: async ({ detectionId }) => {
+      try {
+        const response = await fetch(`/api/detections/${encodeURIComponent(detectionId)}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch detection: ${response.statusText}`);
+        }
+        const detection = await response.json();
+        return {
+          success: true,
+          detection: {
+            id: detection.id,
+            name: detection.name,
+            severity: detection.severity,
+            status: detection.status,
+            indicators: detection.indicators || [],
+            recommendations: detection.recommendations || [],
+            threatScore: detection.threatScore,
+            confidence: detection.confidence,
+            sentBy: detection.sentBy,
+            description: detection.description,
+          },
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.message || "Failed to fetch detection summary",
+        };
+      }
+    },
+  });
+
+  // CopilotKit action: Query email graph
+  useCopilotAction({
+    name: "queryEmailGraph",
+    description: "Query the Neo4j email relationship graph to find sender patterns, recipient networks, or campaign relationships. Use this when the user asks about email relationships, sender history, or campaign analysis.",
+    parameters: [
+      {
+        name: "senderEmail",
+        type: "string",
+        description: "The email address of the sender to query",
+        required: false,
+      },
+      {
+        name: "timeRange",
+        type: "string",
+        description: "Time range for the query (e.g., '7d', '30d', '90d')",
+        required: false,
+      },
+      {
+        name: "minSeverity",
+        type: "string",
+        description: "Minimum severity level to filter by (low, medium, high, critical)",
+        required: false,
+      },
+    ],
+    handler: async ({ senderEmail, timeRange, minSeverity }) => {
+      try {
+        const response = await fetch("/api/graph/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            queryType: "sender_relationships",
+            senderEmail: senderEmail || emailId,
+            timeRange: timeRange || "30d",
+            minSeverity: minSeverity || "low",
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to query graph: ${response.statusText}`);
+        }
+        const result = await response.json();
+        return {
+          success: true,
+          graph: result.graph || result,
+          summary: result.summary || "Graph query completed successfully",
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.message || "Failed to query email graph",
+        };
+      }
+    },
+  });
+
+  // CopilotKit action: List similar incidents
+  useCopilotAction({
+    name: "listSimilarIncidents",
+    description: "Find emails or incidents that share characteristics with the current investigation (same sender, domain, URLs, or similar patterns). Use this when the user asks about similar emails, campaigns, or related threats.",
+    parameters: [
+      {
+        name: "emailId",
+        type: "string",
+        description: "The email ID or message ID to find similar incidents for",
+        required: false,
+      },
+    ],
+    handler: async ({ emailId: providedEmailId }) => {
+      try {
+        const targetEmailId = providedEmailId || emailId;
+        if (!targetEmailId) {
+          return {
+            success: false,
+            error: "Email ID is required to find similar incidents",
+          };
+        }
+
+        // Query graph for similar incidents
+        const response = await fetch("/api/graph/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            queryType: "similar_incidents",
+            emailId: targetEmailId,
+          }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to find similar incidents: ${response.statusText}`);
+        }
+        const result = await response.json();
+        return {
+          success: true,
+          similarIncidents: result.incidents || result.data || [],
+          count: result.count || 0,
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.message || "Failed to find similar incidents",
+        };
+      }
+    },
+  });
+
+  // CopilotKit action: Update detection status (with confirmation)
+  useCopilotAction({
+    name: "updateDetectionStatus",
+    description: "Update the status of a security detection (e.g., mark as in_progress, resolved, or false_positive). IMPORTANT: Always ask the user for confirmation before calling this action, as it changes the state of an investigation.",
+    parameters: [
+      {
+        name: "detectionId",
+        type: "string",
+        description: "The ID of the detection to update",
+        required: true,
+      },
+      {
+        name: "newStatus",
+        type: "string",
+        description: "The new status (new, in_progress, resolved, false_positive)",
+        required: true,
+      },
+      {
+        name: "confirmed",
+        type: "boolean",
+        description: "Confirmation flag - must be true to proceed",
+        required: true,
+      },
+    ],
+    handler: async ({ detectionId, newStatus, confirmed }) => {
+      if (!confirmed) {
+        return {
+          success: false,
+          error: "Confirmation required. Please confirm that you want to update the detection status.",
+          requiresConfirmation: true,
+        };
+      }
+
+      try {
+        const response = await fetch(`/api/detections/${encodeURIComponent(detectionId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: newStatus }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to update detection status: ${response.statusText}`);
+        }
+        const result = await response.json();
+        return {
+          success: true,
+          message: `Detection status updated to ${newStatus}`,
+          detection: result,
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          error: error.message || "Failed to update detection status",
+        };
+      }
+    },
+  });
+
   const themeVars: CSSProperties = {
     // CopilotKit CSS variables – dark theme with blacks, greys
     "--copilot-kit-background-color": "#0f172a", // slate-900

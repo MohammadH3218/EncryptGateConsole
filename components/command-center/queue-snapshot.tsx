@@ -16,7 +16,7 @@ export function QueueSnapshot() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await fetch("/api/detections")
+        const response = await fetch("/api/stats/queue")
         if (response.ok) {
           const data = await response.json()
           setStats({
@@ -27,12 +27,12 @@ export function QueueSnapshot() {
           })
         }
       } catch (error) {
-        console.log("[v0] Failed to fetch queue stats:", error)
+        console.log("[QueueSnapshot] Failed to fetch queue stats:", error)
       }
     }
 
     fetchStats()
-    const interval = setInterval(fetchStats, 30000)
+    const interval = setInterval(fetchStats, 30000) // Poll every 30 seconds
     return () => clearInterval(interval)
   }, [])
 

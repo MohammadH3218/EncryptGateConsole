@@ -18,18 +18,18 @@ export function DetectionsContext() {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await fetch("/api/detections")
+        const response = await fetch("/api/stats/detections-summary?days=30")
         if (response.ok) {
           const data = await response.json()
           setStats({
-            critical: data.critical || 0,
-            high: data.high || 0,
-            medium: data.medium || 0,
-            low: data.low || 0,
+            critical: data.severityBreakdown?.critical || 0,
+            high: data.severityBreakdown?.high || 0,
+            medium: data.severityBreakdown?.medium || 0,
+            low: data.severityBreakdown?.low || 0,
           })
         }
       } catch (error) {
-        console.log("[v0] Failed to fetch detection stats:", error)
+        console.log("[DetectionsContext] Failed to fetch detection stats:", error)
       }
     }
 
