@@ -243,7 +243,7 @@ export default function EnhancedInvestigationPage() {
   }
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden">
+    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden" data-investigation-page>
       {/* Header */}
       <motion.div
         className="border-b border-slate-800 bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-900/90 backdrop-blur-sm shadow-lg"
@@ -274,19 +274,19 @@ export default function EnhancedInvestigationPage() {
             <div className="flex items-center gap-3">
               {investigation && (
                 <>
-                  <Badge variant="outline" className="text-xs capitalize">
+                  <Badge variant="outline" className="text-xs capitalize border-slate-700 text-slate-300 bg-slate-800/50">
                     {investigation.status}
                   </Badge>
                   <Badge
                     variant="outline"
                     className={`text-xs capitalize ${
                       investigation.priority === "critical"
-                        ? "border-red-500 text-red-400"
+                        ? "border-red-500 text-red-400 bg-red-950/20"
                         : investigation.priority === "high"
-                          ? "border-orange-500 text-orange-400"
+                          ? "border-orange-500 text-orange-400 bg-orange-950/20"
                           : investigation.priority === "medium"
-                            ? "border-yellow-500 text-yellow-400"
-                            : "border-green-500 text-green-400"
+                            ? "border-yellow-500 text-yellow-400 bg-yellow-950/20"
+                            : "border-slate-600 text-slate-300 bg-slate-800/50"
                     }`}
                   >
                     {investigation.priority}
@@ -313,17 +313,29 @@ export default function EnhancedInvestigationPage() {
             className="flex min-h-0 flex-col"
           >
             <div className="border-b border-slate-800 px-6 py-3 bg-slate-900/50">
-              <TabsList className="bg-slate-800/50">
-                <TabsTrigger value="overview" className="text-xs">
+              <TabsList className="bg-slate-800/50 border border-slate-700/50">
+                <TabsTrigger 
+                  value="overview" 
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                >
                   Overview
                 </TabsTrigger>
-                <TabsTrigger value="content" className="text-xs">
+                <TabsTrigger 
+                  value="content" 
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                >
                   Content
                 </TabsTrigger>
-                <TabsTrigger value="headers" className="text-xs">
+                <TabsTrigger 
+                  value="headers" 
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                >
                   Headers
                 </TabsTrigger>
-                <TabsTrigger value="attachments" className="text-xs">
+                <TabsTrigger 
+                  value="attachments" 
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                >
                   Attachments{" "}
                   {emailData?.attachments?.length
                     ? `(${emailData.attachments.length})`
