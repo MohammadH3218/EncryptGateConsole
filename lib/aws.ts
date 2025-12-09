@@ -23,13 +23,26 @@ if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
   }
 } else {
   console.log('[AWS] Using AWS credential provider chain (default)')
-  credentials = fromNodeProviderChain({
-    // Timeout for credential provider calls
-    timeout: 5000,
-  })
+  try {
+    credentials = fromNodeProviderChain({
+      // Timeout for credential provider calls
+      timeout: 5000,
+    })
+  } catch (error) {
+    console.error('[AWS] Failed to initialize credential provider chain:', error)
+    throw new Error('AWS credentials not configured. Please set ACCESS_KEY_ID and SECRET_ACCESS_KEY environment variables, or ensure IAM role is properly configured.')
+  }
 }
 
 const region = process.env.AWS_REGION || process.env.REGION || "us-east-1"
+
+// Log credential configuration status
+console.log('[AWS] Configuration:', {
+  region,
+  credentialSource: AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY ? 'environment_variables' : 'provider_chain',
+  hasAccessKey: !!AWS_ACCESS_KEY_ID,
+  hasSecretKey: !!AWS_SECRET_ACCESS_KEY,
+})
 
 // Create AWS service clients with credentials
 export const ddb = new DynamoDBClient({ 
@@ -38,6 +51,24 @@ export const ddb = new DynamoDBClient({
   // Add retry configuration for better reliability
   maxAttempts: 3,
 })
+
+// Optional: Test credentials on first use (lazy validation)
+let credentialsTested = false
+export async function validateCredentials(): Promise<boolean> {
+  if (credentialsTested) return true
+  
+  try {
+    // Try a simple DynamoDB operation to validate credentials
+    const { ListTablesCommand } = await import('@aws-sdk/client-dynamodb')
+    await ddb.send(new ListTablesCommand({ Limit: 1 }))
+    credentialsTested = true
+    console.log('[AWS] Credentials validated successfully')
+    return true
+  } catch (error: any) {
+    console.error('[AWS] Credential validation failed:', error.message)
+    return false
+  }
+}
 
 export const cognitoClient = new CognitoIdentityProviderClient({ 
   region, 
@@ -62,15 +93,31 @@ export function handleAwsError(error: any, context: string = "") {
   console.error(`AWS Error ${context}:`, error)
   
   // Handle specific AWS error types
-  if (error.name === "ExpiredTokenException") {
+  if (error.name === "ExpiredTokenException" || error.name === "UnrecognizedClientException") {
     return {
       statusCode: 401,
       error: "AWS_CREDENTIALS_EXPIRED",
-      message: "AWS credentials have expired. Please contact support."
+      message: "AWS credentials have expired or are invalid. Please contact support."
     }
   }
   
-  if (error.name === "AccessDeniedException") {
+  // Handle invalid security token error
+  if (error.message?.includes("security token") && error.message?.includes("invalid")) {
+    return {
+      statusCode: 401,
+      error: "AWS_ERROR",
+      message: "The security token included in the request is invalid.",
+      troubleshooting: [
+        "Check AWS credentials are valid and not expired",
+        "Verify IAM permissions for DynamoDB access",
+        "Ensure ACCESS_KEY_ID and SECRET_ACCESS_KEY environment variables are set correctly",
+        "If using IAM roles, verify the role has proper DynamoDB permissions",
+        "Check if credentials need to be refreshed"
+      ]
+    }
+  }
+  
+  if (error.name === "AccessDeniedException" || error.name === "UnauthorizedOperation") {
     return {
       statusCode: 403,
       error: "AWS_ACCESS_DENIED",
@@ -83,6 +130,21 @@ export function handleAwsError(error: any, context: string = "") {
       statusCode: 404,
       error: "AWS_RESOURCE_NOT_FOUND",
       message: "The requested AWS resource was not found."
+    }
+  }
+  
+  // Check for credential-related errors in the message
+  if (error.message?.includes("credentials") || error.message?.includes("token")) {
+    return {
+      statusCode: 401,
+      error: "AWS_ERROR",
+      message: error.message || "AWS credentials error occurred.",
+      troubleshooting: [
+        "Check AWS credentials are valid and not expired",
+        "Verify IAM permissions for DynamoDB access",
+        "Ensure ACCESS_KEY_ID and SECRET_ACCESS_KEY environment variables are set correctly",
+        "If using IAM roles, verify the role has proper DynamoDB permissions"
+      ]
     }
   }
   

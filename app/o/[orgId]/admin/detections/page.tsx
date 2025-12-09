@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Table,
   TableBody,
@@ -155,6 +157,10 @@ export default function AdminDetectionsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [assignmentFilter, setAssignmentFilter] = useState<string>("all");
   const [flagTypeFilter, setFlagTypeFilter] = useState<string>("all"); // NEW: Filter by manual/AI flags
+
+  // Sorting
+  const [sortField, setSortField] = useState<"createdAt" | "severity" | "status">("createdAt");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   // Pagination
   const [lastKey, setLastKey] = useState<string | null>(null);
@@ -461,7 +467,41 @@ export default function AdminDetectionsPage() {
       }
     }
 
+    // Apply sorting
+    filtered.sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
+
+      if (sortField === "createdAt") {
+        aValue = new Date(a.createdAt).getTime();
+        bValue = new Date(b.createdAt).getTime();
+      } else if (sortField === "severity") {
+        const severityOrder = { critical: 4, high: 3, medium: 2, low: 1 };
+        aValue = severityOrder[a.severity as keyof typeof severityOrder] || 0;
+        bValue = severityOrder[b.severity as keyof typeof severityOrder] || 0;
+      } else if (sortField === "status") {
+        const statusOrder = { new: 1, in_progress: 2, resolved: 3, false_positive: 4 };
+        aValue = statusOrder[a.status as keyof typeof statusOrder] || 0;
+        bValue = statusOrder[b.status as keyof typeof statusOrder] || 0;
+      }
+
+      if (sortDirection === "asc") {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
+
     setFilteredDetections(filtered);
+  };
+
+  const handleSort = (field: "createdAt" | "severity" | "status") => {
+    if (sortField === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection("desc");
+    }
   };
 
   const calculateStats = () => {
@@ -1307,9 +1347,15 @@ export default function AdminDetectionsPage() {
             </CardHeader>
             <CardContent>
               {loading && detections.length === 0 ? (
-                <div className="flex items-center justify-center py-8">
-                  <RefreshCw className="h-6 w-6 animate-spin mr-2 text-white" />
-                  <span className="text-white">Loading detections...</span>
+                <div className="space-y-3 py-4">
+                  {[...Array(5)].map((_, i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <Skeleton className="h-12 flex-1" />
+                      <Skeleton className="h-12 w-32" />
+                      <Skeleton className="h-12 w-24" />
+                      <Skeleton className="h-12 w-20" />
+                    </div>
+                  ))}
                 </div>
               ) : filteredDetections.length === 0 ? (
                 <div className="text-center py-8 text-gray-400">
@@ -1345,13 +1391,43 @@ export default function AdminDetectionsPage() {
                             Type
                           </TableHead>
                           <TableHead className="text-white w-[100px]">
-                            Severity
+                            <button
+                              onClick={() => handleSort("severity")}
+                              className="flex items-center gap-1 hover:text-white/80 transition-colors"
+                            >
+                              Severity
+                              {sortField === "severity" && (
+                                <span className="text-xs">
+                                  {sortDirection === "asc" ? "↑" : "↓"}
+                                </span>
+                              )}
+                            </button>
                           </TableHead>
                           <TableHead className="text-white w-[110px]">
-                            Status
+                            <button
+                              onClick={() => handleSort("status")}
+                              className="flex items-center gap-1 hover:text-white/80 transition-colors"
+                            >
+                              Status
+                              {sortField === "status" && (
+                                <span className="text-xs">
+                                  {sortDirection === "asc" ? "↑" : "↓"}
+                                </span>
+                              )}
+                            </button>
                           </TableHead>
                           <TableHead className="text-white w-[100px]">
-                            Created
+                            <button
+                              onClick={() => handleSort("createdAt")}
+                              className="flex items-center gap-1 hover:text-white/80 transition-colors"
+                            >
+                              Created
+                              {sortField === "createdAt" && (
+                                <span className="text-xs">
+                                  {sortDirection === "asc" ? "↑" : "↓"}
+                                </span>
+                              )}
+                            </button>
                           </TableHead>
                           <TableHead className="text-white w-[120px]">
                             Assigned
@@ -1362,11 +1438,24 @@ export default function AdminDetectionsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredDetections.map((detection) => (
-                          <TableRow
-                            key={detection.id}
-                            className="hover:bg-[#1f1f1f] border-[#1f1f1f]"
-                          >
+                        <AnimatePresence mode="popLayout">
+                          {filteredDetections.map((detection, index) => {
+                            const severityColor = {
+                              critical: "border-l-red-600",
+                              high: "border-l-orange-500",
+                              medium: "border-l-amber-600",
+                              low: "border-l-blue-500",
+                            }[detection.severity] || "border-l-gray-500";
+
+                            return (
+                              <motion.tr
+                                key={detection.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -10 }}
+                                transition={{ duration: 0.2, delay: index * 0.02 }}
+                                className={`hover:bg-[#1f1f1f] border-[#1f1f1f] border-l-4 ${severityColor} transition-all duration-200 hover:shadow-lg hover:translate-x-1 transition-colors duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]`}
+                              >
                             <TableCell className="font-medium text-white max-w-[200px]">
                               <div className="truncate" title={detection.name}>
                                 {detection.name}
@@ -1504,8 +1593,10 @@ export default function AdminDetectionsPage() {
                                 )}
                               </div>
                             </TableCell>
-                          </TableRow>
-                        ))}
+                              </motion.tr>
+                            );
+                          })}
+                        </AnimatePresence>
                       </TableBody>
                     </Table>
                   </div>

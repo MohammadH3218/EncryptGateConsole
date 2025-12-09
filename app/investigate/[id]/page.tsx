@@ -11,6 +11,10 @@ import {
   Users,
   History,
   Mail,
+  Clock,
+  FileText,
+  Activity,
+  TrendingUp,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +22,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EmailPreviewDialog } from "@/components/email-preview-dialog";
 import { InvestigationCopilotPanel } from "@/components/InvestigationCopilotPanel";
-import { motion } from "framer-motion";
+import { Skeleton } from "@/components/ui/skeleton";
+import { motion, AnimatePresence } from "framer-motion";
 
 // Types
 interface Investigation {
@@ -41,6 +46,18 @@ interface EmailData {
   htmlBody?: string;
   headers?: Record<string, string>;
   attachments?: any[];
+  threatScore?: number;
+  riskScore?: number;
+  indicators?: string[];
+}
+
+interface TimelineEvent {
+  id: string;
+  type: "status_change" | "assignment" | "comment" | "detection" | "investigation";
+  timestamp: string;
+  user?: string;
+  description: string;
+  metadata?: Record<string, any>;
 }
 
 
@@ -102,6 +119,7 @@ export default function EnhancedInvestigationPage() {
   );
   const [emailData, setEmailData] = useState<EmailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
 
   // UI state
   const [selectedTab, setSelectedTab] = useState("overview");
@@ -179,6 +197,56 @@ export default function EnhancedInvestigationPage() {
         }
       }
 
+      // Load timeline events
+      try {
+        const timelineRes = await fetch(`/api/investigation-history/${encodeURIComponent(emailId)}`);
+        if (timelineRes.ok) {
+          const timelineData = await timelineRes.json();
+          // Transform investigation history into timeline events
+          if (timelineData.sessions && Array.isArray(timelineData.sessions)) {
+            const events: TimelineEvent[] = [];
+            timelineData.sessions.forEach((session: any) => {
+              if (session.createdAt) {
+                events.push({
+                  id: `session-${session.sessionId}`,
+                  type: "investigation",
+                  timestamp: session.createdAt,
+                  user: session.userId,
+                  description: `Investigation session started`,
+                });
+              }
+              if (session.messages && Array.isArray(session.messages)) {
+                session.messages.forEach((msg: any, idx: number) => {
+                  if (msg.timestamp) {
+                    events.push({
+                      id: `msg-${session.sessionId}-${idx}`,
+                      type: "comment",
+                      timestamp: msg.timestamp,
+                      user: msg.role === "user" ? session.userId : "AI",
+                      description: msg.role === "user" ? "Analyst question" : "AI response",
+                    });
+                  }
+                });
+              }
+            });
+            // Sort by timestamp
+            events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+            setTimeline(events);
+          }
+        }
+      } catch (timelineError) {
+        console.log("Timeline data not available:", timelineError);
+        // Create a default timeline entry
+        setTimeline([
+          {
+            id: "detection-1",
+            type: "detection",
+            timestamp: new Date().toISOString(),
+            description: "Detection created",
+          },
+        ]);
+      }
+
       setLoading(false);
     } catch (error) {
       console.error("Failed to load investigation:", error);
@@ -206,12 +274,15 @@ export default function EnhancedInvestigationPage() {
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-slate-400 mx-auto mb-4" />
-          <p className="text-slate-400">Loading investigation...</p>
-          <p className="text-slate-500 text-xs mt-2">
-            If this takes too long, there may be API connectivity issues
-          </p>
+        <div className="w-full max-w-4xl px-6">
+          <div className="space-y-4">
+            <Skeleton className="h-16 w-full" />
+            <div className="grid grid-cols-2 gap-4">
+              <Skeleton className="h-64" />
+              <Skeleton className="h-64" />
+            </div>
+            <Skeleton className="h-32 w-full" />
+          </div>
         </div>
       </div>
     );
@@ -341,20 +412,113 @@ export default function EnhancedInvestigationPage() {
                     ? `(${emailData.attachments.length})`
                     : ""}
                 </TabsTrigger>
+                <TabsTrigger 
+                  value="timeline" 
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                >
+                  Timeline
+                </TabsTrigger>
               </TabsList>
             </div>
 
             <ScrollArea className="flex-1 min-h-0">
               <div className="p-6">
-                <TabsContent value="overview" className="mt-0">
-                  <div className="space-y-4">
-                    <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-sm font-medium text-slate-300">
-                          Email Metadata
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-3 text-sm">
+                <AnimatePresence mode="wait">
+                  <TabsContent value="overview" className="mt-0" key="overview">
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                      className="space-y-4"
+                    >
+                      {/* Risk Score Card */}
+                      {(emailData?.threatScore !== undefined || emailData?.riskScore !== undefined) && (
+                        <Card className="bg-gradient-to-br from-slate-900/50 to-slate-800/50 border-slate-800 shadow-lg">
+                          <CardHeader className="pb-3">
+                            <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                              <TrendingUp className="w-4 h-4" />
+                              Risk Assessment
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <div className="grid grid-cols-2 gap-4">
+                              {emailData.threatScore !== undefined && (
+                                <div>
+                                  <p className="text-slate-500 text-xs font-medium mb-1">Threat Score</p>
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full ${
+                                          emailData.threatScore >= 80
+                                            ? "bg-red-500"
+                                            : emailData.threatScore >= 60
+                                            ? "bg-orange-500"
+                                            : emailData.threatScore >= 40
+                                            ? "bg-yellow-500"
+                                            : "bg-blue-500"
+                                        }`}
+                                        style={{ width: `${emailData.threatScore}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-slate-200 text-sm font-semibold">
+                                      {emailData.threatScore}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                              {emailData.riskScore !== undefined && (
+                                <div>
+                                  <p className="text-slate-500 text-xs font-medium mb-1">Risk Score</p>
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full ${
+                                          emailData.riskScore >= 80
+                                            ? "bg-red-500"
+                                            : emailData.riskScore >= 60
+                                            ? "bg-orange-500"
+                                            : emailData.riskScore >= 40
+                                            ? "bg-yellow-500"
+                                            : "bg-blue-500"
+                                        }`}
+                                        style={{ width: `${emailData.riskScore}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-slate-200 text-sm font-semibold">
+                                      {emailData.riskScore}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                            {emailData.indicators && emailData.indicators.length > 0 && (
+                              <div>
+                                <p className="text-slate-500 text-xs font-medium mb-2">Key Indicators</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {emailData.indicators.map((indicator, i) => (
+                                    <Badge
+                                      key={i}
+                                      variant="outline"
+                                      className="text-xs border-orange-500/50 text-orange-400 bg-orange-950/20"
+                                    >
+                                      {indicator}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      )}
+
+                      <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm font-medium text-slate-300">
+                            Email Metadata
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3 text-sm">
                         <div className="grid grid-cols-3 gap-4">
                           <div>
                             <p className="text-slate-500 text-xs font-medium mb-1">
@@ -431,10 +595,16 @@ export default function EnhancedInvestigationPage() {
                         </CardContent>
                       </Card>
                     )}
-                  </div>
-                </TabsContent>
+                    </motion.div>
+                  </TabsContent>
 
-                <TabsContent value="content" className="mt-0">
+                  <TabsContent value="content" className="mt-0" key="content">
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                    >
                   <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-slate-300">
@@ -447,9 +617,16 @@ export default function EnhancedInvestigationPage() {
                       </pre>
                     </CardContent>
                   </Card>
-                </TabsContent>
+                    </motion.div>
+                  </TabsContent>
 
-                <TabsContent value="headers" className="mt-0">
+                  <TabsContent value="headers" className="mt-0" key="headers">
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                    >
                   <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-slate-300">
@@ -464,9 +641,16 @@ export default function EnhancedInvestigationPage() {
                       </pre>
                     </CardContent>
                   </Card>
-                </TabsContent>
+                    </motion.div>
+                  </TabsContent>
 
-                <TabsContent value="attachments" className="mt-0">
+                  <TabsContent value="attachments" className="mt-0" key="attachments">
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                    >
                   <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-slate-300">
@@ -500,7 +684,81 @@ export default function EnhancedInvestigationPage() {
                       )}
                     </CardContent>
                   </Card>
-                </TabsContent>
+                    </motion.div>
+                  </TabsContent>
+
+                  <TabsContent value="timeline" className="mt-0" key="timeline">
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                            <Clock className="w-4 h-4" />
+                            Investigation Timeline
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          {timeline.length > 0 ? (
+                            <div className="space-y-4">
+                              {timeline.map((event, index) => (
+                                <motion.div
+                                  key={event.id}
+                                  initial={{ opacity: 0, x: -20 }}
+                                  animate={{ opacity: 1, x: 0 }}
+                                  transition={{ delay: index * 0.05 }}
+                                  className="flex gap-4 relative"
+                                >
+                                  <div className="flex flex-col items-center">
+                                    <div className={`w-2 h-2 rounded-full ${
+                                      event.type === "detection" ? "bg-red-500" :
+                                      event.type === "status_change" ? "bg-blue-500" :
+                                      event.type === "assignment" ? "bg-purple-500" :
+                                      event.type === "comment" ? "bg-yellow-500" :
+                                      "bg-slate-500"
+                                    }`} />
+                                    {index < timeline.length - 1 && (
+                                      <div className="w-px h-full bg-slate-700 mt-2" />
+                                    )}
+                                  </div>
+                                  <div className="flex-1 pb-4">
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="text-xs font-medium text-slate-300">
+                                        {event.type === "detection" && <AlertTriangle className="w-3 h-3 inline mr-1" />}
+                                        {event.type === "status_change" && <Activity className="w-3 h-3 inline mr-1" />}
+                                        {event.type === "assignment" && <Users className="w-3 h-3 inline mr-1" />}
+                                        {event.type === "comment" && <FileText className="w-3 h-3 inline mr-1" />}
+                                        {event.description}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                                      <span>{new Date(event.timestamp).toLocaleString()}</span>
+                                      {event.user && (
+                                        <>
+                                          <span>•</span>
+                                          <span>{event.user}</span>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </motion.div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-center py-8 text-slate-500">
+                              <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                              <p className="text-sm">No timeline events yet</p>
+                              <p className="text-xs mt-1">Timeline will show status changes, assignments, and comments</p>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </motion.div>
+                  </TabsContent>
+                </AnimatePresence>
               </div>
             </ScrollArea>
           </Tabs>

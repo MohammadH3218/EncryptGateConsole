@@ -2,11 +2,11 @@ export const runtime = 'nodejs'
 
 import { NextResponse } from 'next/server'
 import {
-  DynamoDBClient,
   QueryCommand,
   PutItemCommand,
   GetItemCommand
 } from '@aws-sdk/client-dynamodb'
+import { ddb } from '@/lib/aws'
 import { z } from 'zod'
 
 const ORG_ID          = process.env.ORGANIZATION_ID      || 'default-org'
@@ -24,8 +24,6 @@ console.log('📧 Enhanced Webhook Handler initialized:', {
   BASE_URL,
   AWS_REGION
 })
-
-const ddb = new DynamoDBClient({ region: AWS_REGION })
 
 // Enhanced schemas for different processing methods
 const S3ProcessedEmailSchema = z.object({

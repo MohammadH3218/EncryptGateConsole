@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Bell, Clock, AlertCircle, UserCheck, CheckCircle } from "lucide-react"
+import { motion, AnimatePresence } from "framer-motion"
 
 interface Notification {
   id: number
@@ -40,6 +41,28 @@ export function Notifications() {
     },
   ])
 
+  // Fetch real notifications from API
+  useEffect(() => {
+    const fetchNotifications = async () => {
+      try {
+        const response = await fetch("/api/notifications")
+        if (response.ok) {
+          const data = await response.json()
+          if (data.notifications && Array.isArray(data.notifications)) {
+            setNotifications(data.notifications)
+          }
+        }
+      } catch (error) {
+        console.log("[Notifications] Failed to fetch notifications:", error)
+        // Keep mock data on error
+      }
+    }
+
+    fetchNotifications()
+    const interval = setInterval(fetchNotifications, 30000) // Poll every 30 seconds
+    return () => clearInterval(interval)
+  }, [])
+
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 px-2 text-white/70">
@@ -48,13 +71,18 @@ export function Notifications() {
       </div>
 
       <div className="space-y-2">
-        {notifications.map((notification) => (
-          <div
-            key={notification.id}
-            className={`rounded-xl border border-app-border/60 bg-app-surface/60 px-3 py-2 transition-colors hover:bg-white/5 ${
-              notification.unread ? "ring-1 ring-app-ring/40" : ""
-            }`}
-          >
+        <AnimatePresence mode="popLayout">
+          {notifications.map((notification, index) => (
+            <motion.div
+              key={notification.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, delay: index * 0.05 }}
+              className={`rounded-xl border border-app-border/60 bg-app-surface/60 px-3 py-2 transition-all duration-200 hover:bg-white/5 hover:border-app-border hover:shadow-md ${
+                notification.unread ? "ring-1 ring-app-ring/40" : ""
+              }`}
+            >
             <div className="flex items-start gap-2">
               <div className="flex-shrink-0 mt-0.5">
                 {notification.type === "detection" && <AlertCircle className="w-3 h-3 text-red-400" />}
@@ -69,10 +97,11 @@ export function Notifications() {
                   <span className="text-xs text-white/40">{notification.time}</span>
                 </div>
               </div>
-              {notification.unread && <div className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-400" />}
+              {notification.unread && <div className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-blue-400 animate-pulse" />}
             </div>
-          </div>
-        ))}
+          </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   )
