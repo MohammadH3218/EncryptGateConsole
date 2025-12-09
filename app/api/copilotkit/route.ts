@@ -11,10 +11,11 @@ import { fetchEmailContext } from "@/lib/neo4j";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const copilotRuntime = new CopilotRuntime({
+// Create the runtime configuration
+const copilotRuntimeConfig = {
   agents: {
     default: {
-      async *streamingChatCompletion({ messages, metadata }) {
+      async *streamingChatCompletion({ messages, metadata }: any) {
         // Extract emailId from metadata
         const emailId = metadata?.emailId as string | undefined;
         if (!emailId) {
@@ -80,7 +81,9 @@ const copilotRuntime = new CopilotRuntime({
       },
     },
   },
-});
+};
+
+const copilotRuntime = new CopilotRuntime(copilotRuntimeConfig);
 
 export const { GET, POST } = copilotRuntimeNextJSAppRouterEndpoint({
   runtime: copilotRuntime,
