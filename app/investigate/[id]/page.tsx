@@ -142,8 +142,14 @@ export default function EnhancedInvestigationPage() {
       try {
         const emailRes = await fetch(`/api/email/${encodeURIComponent(emailId)}`);
         if (emailRes.ok) {
-          const email = await emailRes.json();
-          setEmailData(email?.email ?? email);
+          const response = await emailRes.json();
+          // Handle both response formats: { ok: true, email: {...} } or direct email object
+          const email = response?.email || response;
+          if (email && email.messageId) {
+            setEmailData(email);
+          } else {
+            console.warn("Invalid email data structure:", response);
+          }
         } else {
           console.warn(`Failed to load email: ${emailRes.status}`);
           // Set minimal email data so page can still render
@@ -201,7 +207,7 @@ export default function EnhancedInvestigationPage() {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
         <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
+          <Loader2 className="w-12 h-12 animate-spin text-slate-400 mx-auto mb-4" />
           <p className="text-slate-400">Loading investigation...</p>
           <p className="text-slate-500 text-xs mt-2">
             If this takes too long, there may be API connectivity issues
@@ -249,7 +255,7 @@ export default function EnhancedInvestigationPage() {
           <div className="flex items-center justify-between">
             <div className="flex-1 min-h-0">
               <h1 className="text-xl font-semibold flex items-center gap-2 mb-1">
-                <Shield className="w-5 h-5 text-blue-500" />
+                <Shield className="w-5 h-5 text-slate-300" />
                 Email Security Investigation
               </h1>
               <div className="flex items-center gap-4 text-sm">

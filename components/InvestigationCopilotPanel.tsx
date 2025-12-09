@@ -3,9 +3,9 @@
 import { CopilotChat } from "@copilotkit/react-ui";
 import { useCopilotAction, useCopilotReadable } from "@copilotkit/react-core";
 import type { CSSProperties } from "react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, AlertTriangle, Shield, Users, History, Monitor, X } from "lucide-react";
+import { Sparkles, AlertTriangle, Shield, Users, History, Monitor, X, Loader2 } from "lucide-react";
 import { EmailRelationshipGraph } from "@/components/EmailRelationshipGraph";
 
 interface InvestigationCopilotPanelProps {
@@ -18,6 +18,41 @@ export function InvestigationCopilotPanel({
   emailId,
 }: InvestigationCopilotPanelProps) {
   const [selectedGraphSender, setSelectedGraphSender] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Track loading state by monitoring CopilotKit chat for streaming indicators
+  useEffect(() => {
+    const chatContainer = document.querySelector('[class*="copilot-chat"]');
+    if (!chatContainer) return;
+    
+    const checkForLoading = () => {
+      // Check for typing indicators, streaming text, or loading states
+      const hasStreaming = chatContainer.querySelector('[class*="streaming"], [class*="typing"]');
+      const lastMessage = chatContainer.querySelector('[class*="message"]:last-child');
+      const hasEmptyResponse = lastMessage && (!lastMessage.textContent || lastMessage.textContent.trim().length === 0);
+      
+      setIsLoading(!!hasStreaming || (!!hasEmptyResponse && lastMessage?.querySelector('[class*="assistant"]')));
+    };
+    
+    // Check periodically
+    const interval = setInterval(checkForLoading, 200);
+    
+    // Watch for DOM changes
+    const observer = new MutationObserver(() => {
+      checkForLoading();
+    });
+    
+    observer.observe(chatContainer, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+    
+    return () => {
+      clearInterval(interval);
+      observer.disconnect();
+    };
+  }, []);
 
   // Provide context to CopilotKit about the current investigation
   useCopilotReadable({
@@ -48,17 +83,18 @@ export function InvestigationCopilotPanel({
   });
 
   const themeVars: CSSProperties = {
-    // CopilotKit CSS variables – dark + SOC-ish neon accent
-    "--copilot-kit-background-color": "#020617", // panel bg
-    "--copilot-kit-primary-color": "#22c55e", // accent (green)
-    "--copilot-kit-contrast-color": "#0b1120", // text on primary
-    "--copilot-kit-input-background-color": "#020617",
-    "--copilot-kit-secondary-color": "#1e293b",
-    "--copilot-kit-secondary-contrast-color": "#e5e7eb",
-    "--copilot-kit-separator-color": "rgba(148, 163, 184, 0.35)",
-    "--copilot-kit-muted-color": "#9ca3af",
-    "--copilot-kit-shadow-md":
-      "0 18px 40px rgba(15, 23, 42, 0.85)", // deep SOC shadow
+    // CopilotKit CSS variables – dark theme with blacks, greys
+    "--copilot-kit-background-color": "#0f172a", // slate-900
+    "--copilot-kit-primary-color": "#22c55e", // emerald-500 (green accent)
+    "--copilot-kit-contrast-color": "#020617", // slate-950
+    "--copilot-kit-input-background-color": "#020617", // slate-950
+    "--copilot-kit-secondary-color": "#1e293b", // slate-800
+    "--copilot-kit-secondary-contrast-color": "#f1f5f9", // slate-100
+    "--copilot-kit-separator-color": "rgba(148, 163, 184, 0.2)", // slate-400/20
+    "--copilot-kit-muted-color": "#64748b", // slate-500
+    "--copilot-kit-text-color": "#e2e8f0", // slate-200
+    "--copilot-kit-text-secondary-color": "#94a3b8", // slate-400
+    "--copilot-kit-shadow-md": "0 18px 40px rgba(15, 23, 42, 0.85)",
   };
 
   const quickQuestions = [
@@ -174,7 +210,7 @@ export function InvestigationCopilotPanel({
       </motion.div>
 
       {/* Chat area */}
-      <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl bg-slate-950/60">
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl bg-slate-950/60 relative">
         <CopilotChat
           className="w-full"
           // Let CopilotKit know about current context
@@ -190,7 +226,7 @@ export function InvestigationCopilotPanel({
           // optional: avatar icons
           icons={{
             user: (
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-700/70 text-[10px]">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-700/70 text-[10px] text-slate-200">
                 U
               </div>
             ),
@@ -203,19 +239,23 @@ export function InvestigationCopilotPanel({
         />
       </div>
 
-      {/* Tiny typing / latency hint bar (visual polish) */}
-      <motion.div
-        className="mt-2 flex items-center justify-between text-[10px] text-slate-500"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3 }}
-      >
-        <span>Powered by EncryptGate Copilot</span>
-        <span className="flex items-center gap-1">
-          <span className="h-1 w-1 rounded-full bg-emerald-400 animate-[ping_1.5s_ease-out_infinite]" />
-          Streaming responses
-        </span>
-      </motion.div>
+      {/* Loading indicator */}
+      <AnimatePresence>
+        {isLoading && (
+          <motion.div
+            className="mt-2 flex items-center justify-end text-[10px] text-slate-400"
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            transition={{ duration: 0.2 }}
+          >
+            <span className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/50 border border-slate-700/50">
+              <Loader2 className="h-3 w-3 animate-spin text-emerald-400" />
+              <span className="text-slate-400">Processing...</span>
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Graph Visualization Section */}
       <AnimatePresence>
