@@ -63,6 +63,18 @@ interface EmailData {
   threatScore?: number;
   riskScore?: number;
   indicators?: string[];
+  direction?: string;
+  status?: string;
+  size?: number;
+  flaggedCategory?: string;
+  flaggedSeverity?: string;
+  investigationStatus?: string;
+  flaggedBy?: string;
+  flaggedAt?: string;
+  detectionId?: string;
+  threatLevel?: string;
+  cc?: string[];
+  urls?: string[];
 }
 
 interface TimelineEvent {
@@ -290,6 +302,57 @@ export default function EnhancedInvestigationPage() {
     setPreviewDialogOpen(true);
   }
 
+  // Badge helper functions (matching All Emails page)
+  const getFlaggedBadge = (category?: string, severity?: string) => {
+    if (!category || category === "none" || category === "clean") {
+      return <Badge variant="outline" className="border-gray-500/30 text-gray-400">Not Flagged</Badge>;
+    }
+    const severityColors: Record<string, string> = {
+      critical: "bg-red-600 text-white",
+      high: "bg-orange-600 text-white",
+      medium: "bg-yellow-600 text-white",
+      low: "bg-slate-600 text-white",
+    };
+    const color = severity ? severityColors[severity.toLowerCase()] || "bg-gray-600 text-white" : "bg-gray-600 text-white";
+    const label = category === "ai" ? "AI" : category === "manual" ? "Manual" : category;
+    return (
+      <Badge className={`${color} capitalize`}>
+        {label} {severity && `(${severity})`}
+      </Badge>
+    );
+  };
+
+  const getInvestigationBadge = (status?: string) => {
+    if (!status) return null;
+    switch (status.toLowerCase()) {
+      case "new":
+        return <Badge variant="destructive" className="bg-red-600"><AlertCircle className="h-3 w-3 mr-1" />New</Badge>;
+      case "in_progress":
+      case "active":
+        return <Badge variant="secondary" className="bg-yellow-600"><Clock className="h-3 w-3 mr-1" />In Progress</Badge>;
+      case "resolved":
+        return <Badge variant="outline" className="border-green-500 text-green-500"><CheckCircle className="h-3 w-3 mr-1" />Resolved</Badge>;
+      default:
+        return <Badge variant="outline">{status}</Badge>;
+    }
+  };
+
+  const getStatusBadge = (status?: string) => {
+    if (!status) return <Badge variant="secondary">Unknown</Badge>;
+    switch (status.toLowerCase()) {
+      case "quarantined":
+        return <Badge variant="destructive">Quarantined</Badge>;
+      case "blocked":
+        return <Badge variant="destructive">Blocked</Badge>;
+      case "analyzed":
+        return <Badge variant="outline">Analyzed</Badge>;
+      case "received":
+        return <Badge variant="secondary">Received</Badge>;
+      default:
+        return <Badge variant="secondary">{status}</Badge>;
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
@@ -336,7 +399,7 @@ export default function EnhancedInvestigationPage() {
     <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden" data-investigation-page>
       {/* Header */}
       <motion.div
-        className="border-b border-slate-800 bg-gradient-to-r from-slate-900 via-slate-900/95 to-slate-900/90 backdrop-blur-sm shadow-lg"
+        className="border-b border-slate-800 bg-slate-900"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
@@ -383,6 +446,14 @@ export default function EnhancedInvestigationPage() {
                   </Badge>
                 </>
               )}
+              <Button
+                onClick={() => setSubmitDialogOpen(true)}
+                size="default"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white transition-all duration-200 h-9 px-4 ml-2"
+              >
+                <Send className="w-4 h-4 mr-2" />
+                Submit Investigation
+              </Button>
             </div>
           </div>
         </div>
@@ -392,7 +463,7 @@ export default function EnhancedInvestigationPage() {
       <div className="flex-1 min-h-0 flex gap-4 px-4 pb-4 pt-2 overflow-hidden">
         {/* Left Panel - Email Data */}
         <motion.section
-          className="flex-1 min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex flex-col overflow-hidden shadow-xl"
+          className="flex-1 min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex flex-col overflow-hidden"
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
@@ -453,7 +524,7 @@ export default function EnhancedInvestigationPage() {
                     >
                       {/* Risk Score Card */}
                       {(emailData?.threatScore !== undefined || emailData?.riskScore !== undefined) && (
-                        <Card className="bg-gradient-to-br from-slate-900/50 to-slate-800/50 border-slate-800 shadow-lg">
+                        <Card className="bg-slate-900/50 border-slate-800">
                           <CardHeader className="pb-3">
                             <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
                               <TrendingUp className="w-4 h-4" />
@@ -475,7 +546,7 @@ export default function EnhancedInvestigationPage() {
                                             ? "bg-orange-500"
                                             : emailData.threatScore >= 40
                                             ? "bg-yellow-500"
-                                            : "bg-blue-500"
+                                            : "bg-slate-500"
                                         }`}
                                         style={{ width: `${emailData.threatScore}%` }}
                                       />
@@ -499,7 +570,7 @@ export default function EnhancedInvestigationPage() {
                                             ? "bg-orange-500"
                                             : emailData.riskScore >= 40
                                             ? "bg-yellow-500"
-                                            : "bg-blue-500"
+                                            : "bg-slate-500"
                                         }`}
                                         style={{ width: `${emailData.riskScore}%` }}
                                       />
@@ -531,7 +602,7 @@ export default function EnhancedInvestigationPage() {
                         </Card>
                       )}
 
-                      <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                      <Card className="bg-slate-900/50 border-slate-800">
                         <CardHeader className="pb-3">
                           <CardTitle className="text-sm font-medium text-slate-300">
                             Email Metadata
@@ -615,7 +686,7 @@ export default function EnhancedInvestigationPage() {
                                   variant="outline"
                                   className={
                                     emailData?.direction === "inbound"
-                                      ? "bg-blue-900/30 text-blue-300 border-blue-600/30"
+                                      ? "bg-slate-800/50 text-slate-300 border-slate-600/50"
                                       : "bg-gray-800/50 text-gray-300 border-gray-600/50"
                                   }
                                 >
@@ -694,7 +765,7 @@ export default function EnhancedInvestigationPage() {
                       </Card>
 
                     {investigation && (
-                      <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                      <Card className="bg-slate-900/50 border-slate-800">
                         <CardHeader className="pb-3">
                           <CardTitle className="text-sm font-medium text-slate-300">
                             Investigation Details
@@ -732,7 +803,7 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                  <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                  <Card className="bg-slate-900/50 border-slate-800">
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-slate-300">
                         Email Body
@@ -754,7 +825,7 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                  <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                  <Card className="bg-slate-900/50 border-slate-800">
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-slate-300">
                         Email Headers
@@ -778,7 +849,7 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                  <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                  <Card className="bg-slate-900/50 border-slate-800">
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-slate-300">
                         Attachments
@@ -821,7 +892,7 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <Card className="bg-slate-900/50 border-slate-800 shadow-lg">
+                      <Card className="bg-slate-900/50 border-slate-800">
                         <CardHeader className="pb-3">
                           <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
                             <Clock className="w-4 h-4" />
@@ -842,7 +913,7 @@ export default function EnhancedInvestigationPage() {
                                   <div className="flex flex-col items-center">
                                     <div className={`w-2 h-2 rounded-full ${
                                       event.type === "detection" ? "bg-red-500" :
-                                      event.type === "status_change" ? "bg-blue-500" :
+                                      event.type === "status_change" ? "bg-slate-500" :
                                       event.type === "assignment" ? "bg-purple-500" :
                                       event.type === "comment" ? "bg-yellow-500" :
                                       "bg-slate-500"
@@ -900,17 +971,7 @@ export default function EnhancedInvestigationPage() {
         </section>
       </div>
 
-      {/* Submit Button - Fixed at bottom right */}
-      <div className="fixed bottom-8 right-8 z-50">
-        <Button
-          onClick={() => setSubmitDialogOpen(true)}
-          size="lg"
-          className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg hover:shadow-xl transition-all duration-200 h-12 px-6 rounded-full"
-        >
-          <Send className="w-5 h-5 mr-2" />
-          Submit Investigation
-        </Button>
-      </div>
+      {/* Submit Button - In header area */}
 
       {/* Submit Action Dialog */}
       <Dialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
@@ -956,12 +1017,12 @@ export default function EnhancedInvestigationPage() {
             <Button
               onClick={() => handleSubmitAction("push")}
               disabled={submitting}
-              className="w-full justify-start bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-600/30 h-auto py-4"
+              className="w-full justify-start bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 border border-slate-600/50 h-auto py-4"
             >
               <ArrowUp className="w-5 h-5 mr-3" />
               <div className="flex-1 text-left">
                 <div className="font-semibold">Push to Admin</div>
-                <div className="text-xs text-blue-300/70 mt-1">
+                <div className="text-xs text-slate-400 mt-1">
                   Escalate this investigation to admin review
                 </div>
               </div>
@@ -1051,13 +1112,25 @@ export default function EnhancedInvestigationPage() {
         
         // If push, navigate to pushed requests page
         if (action === "push") {
-          const orgId = params.orgId as string;
+          // Try to get orgId from pathname
+          const pathname = window.location.pathname;
+          const orgMatch = pathname.match(/\/o\/([^/]+)/);
+          const orgId = orgMatch ? orgMatch[1] : null;
+          if (!orgId) {
+            // Fallback: just reload if no orgId found
+            setTimeout(() => {
+              window.location.reload();
+            }, 1500);
+            return;
+          }
           setTimeout(() => {
             window.location.href = `/o/${orgId}/admin/pushed-requests`;
           }, 1500);
         } else {
           // Refresh page data
-          window.location.reload();
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
         }
       } else {
         const errorData = await response?.json().catch(() => ({}));
