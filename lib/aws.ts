@@ -198,5 +198,7 @@ export const TABLES = {
   USERS: process.env.USERS_TABLE_NAME || "SecurityTeamUsers", 
   CLOUDSERVICES: process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices",
   EMAILS: process.env.EMAILS_TABLE_NAME || "Emails",
-  DETECTIONS: process.env.DETECTIONS_TABLE_NAME || "Detections"
+  DETECTIONS: process.env.DETECTIONS_TABLE_NAME || "Detections",
+  ENDPOINTS: process.env.ENDPOINTS_TABLE_NAME || "Endpoints",
+  ENDPOINT_EVENTS: process.env.ENDPOINT_EVENTS_TABLE_NAME || "EndpointEvents",
 } as const

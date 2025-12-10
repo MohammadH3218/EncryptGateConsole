@@ -106,6 +106,7 @@
 5. Write to DynamoDB (email + detection records)
 6. Update Neo4j graph (via API or direct connection)
 7. Optionally invoke downstream Lambdas for deep analysis
+8. Standard pipeline: SES → Lambda → `/api/emails/ingest` → `/api/threat-detection` → Neo4j graph updates
 
 ### AWS Parameter Store (SSM)
 
