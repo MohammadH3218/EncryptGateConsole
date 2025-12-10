@@ -25,7 +25,11 @@
       "Bash(aws dynamodb scan:*)",
       "Bash(python:*)",
       "Bash(findstr:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(aws:*)",
+      "Bash(test:*)",
+      "Bash(eb deploy:*)",
+      "Bash(git archive:*)"
     ],
     "deny": [],
     "ask": []
