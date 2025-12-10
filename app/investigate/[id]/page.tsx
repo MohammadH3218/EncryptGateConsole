@@ -186,8 +186,14 @@ export default function InvestigationPage() {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-black">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 text-slate-400 animate-spin mx-auto mb-4" />
-          <p className="text-slate-400 text-sm">Loading investigation...</p>
+          <div className="relative mb-6">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-600/20 to-emerald-600/5 border border-emerald-600/20 flex items-center justify-center mx-auto">
+              <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
+            </div>
+            <div className="absolute inset-0 rounded-full bg-emerald-600/10 animate-ping" style={{ animationDuration: '2s' }} />
+          </div>
+          <p className="text-slate-300 font-medium mb-2">Loading investigation...</p>
+          <p className="text-slate-500 text-sm">Retrieving email data and security analysis</p>
         </div>
       </div>
     );
@@ -197,9 +203,14 @@ export default function InvestigationPage() {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-black">
         <div className="text-center max-w-md">
-          <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
+          <div className="w-16 h-16 rounded-full bg-yellow-600/10 border border-yellow-600/20 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-8 h-8 text-yellow-500" />
+          </div>
           <h2 className="text-xl font-semibold text-white mb-2">Unable to Load Email Data</h2>
-          <p className="text-slate-400">Email ID: {emailId}</p>
+          <p className="text-slate-400 text-sm mb-4">The requested email could not be found or loaded</p>
+          <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+            <p className="text-xs text-slate-500 font-mono break-all">{emailId}</p>
+          </div>
         </div>
       </div>
     );
@@ -208,27 +219,29 @@ export default function InvestigationPage() {
   return (
     <div className="h-screen w-screen bg-black flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-slate-800 bg-slate-950 px-6 py-4">
+      <div className="border-b border-slate-800 bg-gradient-to-r from-slate-950 to-slate-900 px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <Shield className="w-5 h-5 text-slate-400" />
+              <div className="p-1.5 rounded-lg bg-emerald-600/10 border border-emerald-600/20">
+                <Shield className="w-5 h-5 text-emerald-500" />
+              </div>
               <h1 className="text-lg font-semibold text-white">Email Security Investigation</h1>
               {investigation && (
                 <>
-                  <Badge variant="outline" className="text-xs border-slate-700 text-slate-300">
+                  <Badge variant="outline" className="text-xs border-slate-700 text-slate-300 bg-slate-800/50">
                     {investigation.status}
                   </Badge>
                   <Badge
                     variant="outline"
                     className={`text-xs ${
                       investigation.priority === "critical"
-                        ? "border-red-500 text-red-400"
+                        ? "border-red-500 text-red-400 bg-red-900/20"
                         : investigation.priority === "high"
-                        ? "border-orange-500 text-orange-400"
+                        ? "border-orange-500 text-orange-400 bg-orange-900/20"
                         : investigation.priority === "medium"
-                        ? "border-yellow-500 text-yellow-400"
-                        : "border-slate-600 text-slate-300"
+                        ? "border-yellow-500 text-yellow-400 bg-yellow-900/20"
+                        : "border-slate-600 text-slate-300 bg-slate-800/50"
                     }`}
                   >
                     {investigation.priority}
@@ -237,15 +250,15 @@ export default function InvestigationPage() {
               )}
             </div>
             <div className="flex items-center gap-2 text-sm">
-              <Mail className="w-4 h-4 text-slate-500" />
-              <span className="text-slate-300 font-medium">{emailData.subject}</span>
+              <Mail className="w-4 h-4 text-emerald-500/70" />
+              <span className="text-slate-200 font-medium max-w-md truncate">{emailData.subject}</span>
               <ChevronRight className="w-4 h-4 text-slate-600" />
-              <span className="text-slate-500 font-mono text-xs">{emailData.sender}</span>
+              <span className="text-slate-400 font-mono text-xs">{emailData.sender}</span>
             </div>
           </div>
           <Button
             onClick={() => setSubmitDialogOpen(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-4"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-4 shadow-lg shadow-emerald-600/20 transition-all hover:shadow-emerald-600/30"
           >
             <Send className="w-4 h-4 mr-2" />
             Submit Investigation
@@ -259,29 +272,33 @@ export default function InvestigationPage() {
         <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
           <Tabs value={selectedTab} onValueChange={setSelectedTab} className="flex-1 flex flex-col min-h-0">
             <div className="border-b border-slate-800 bg-slate-950 px-6">
-              <TabsList className="bg-transparent border-0 h-12">
+              <TabsList className="bg-transparent border-0 h-12 gap-1">
                 <TabsTrigger
                   value="overview"
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none"
+                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none hover:text-slate-200 transition-colors"
                 >
+                  <FileText className="w-4 h-4 mr-2" />
                   Overview
                 </TabsTrigger>
                 <TabsTrigger
                   value="content"
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none"
+                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none hover:text-slate-200 transition-colors"
                 >
+                  <Mail className="w-4 h-4 mr-2" />
                   Content
                 </TabsTrigger>
                 <TabsTrigger
                   value="headers"
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none"
+                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none hover:text-slate-200 transition-colors"
                 >
+                  <FileText className="w-4 h-4 mr-2" />
                   Headers
                 </TabsTrigger>
                 <TabsTrigger
                   value="attachments"
-                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none"
+                  className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-emerald-500 data-[state=active]:text-white text-slate-400 rounded-none hover:text-slate-200 transition-colors"
                 >
+                  <LinkIcon className="w-4 h-4 mr-2" />
                   Attachments {emailData.attachments?.length ? `(${emailData.attachments.length})` : ""}
                 </TabsTrigger>
               </TabsList>
@@ -290,107 +307,162 @@ export default function InvestigationPage() {
             <ScrollArea className="flex-1">
               <div className="p-6">
                 <TabsContent value="overview" className="mt-0 space-y-4">
-                  {/* Email Metadata */}
-                  <Card className="bg-slate-950 border-slate-800">
-                    <CardHeader>
-                      <CardTitle className="text-base font-semibold text-white">Email Details</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 gap-6">
-                        <div className="space-y-4">
-                          <div>
-                            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Subject</label>
-                            <p className="text-sm text-white mt-1">{emailData.subject}</p>
-                          </div>
-                          <div>
-                            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">From</label>
-                            <p className="text-sm text-white mt-1 font-mono">{emailData.sender}</p>
-                          </div>
-                          <div>
-                            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">To</label>
-                            <div className="mt-1 space-y-1">
-                              {emailData.recipients && emailData.recipients.length > 0 ? (
-                                emailData.recipients.map((recipient, idx) => (
-                                  <p key={idx} className="text-sm text-white font-mono">{recipient}</p>
-                                ))
-                              ) : (
-                                <p className="text-sm text-slate-500">No recipients</p>
-                              )}
-                            </div>
-                          </div>
-                          {emailData.cc && emailData.cc.length > 0 && (
-                            <div>
-                              <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">CC</label>
-                              <div className="mt-1 space-y-1">
-                                {emailData.cc.map((cc, idx) => (
-                                  <p key={idx} className="text-sm text-white font-mono">{cc}</p>
+                  {/* Email Metadata - Two Card Layout matching All Emails */}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {/* Card 1: Email Information */}
+                    <Card className="bg-[#1a1a1a] border-slate-800">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">Email Information</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Subject</label>
+                          <p className="font-medium text-white mt-1 break-words">{emailData.subject || 'No Subject'}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">From</label>
+                          <p className="font-mono text-sm text-white mt-1 break-all">{emailData.sender}</p>
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">To</label>
+                          <div className="mt-1">
+                            {emailData.recipients && emailData.recipients.length > 0 ? (
+                              <div className="space-y-1">
+                                {emailData.recipients.map((recipient, idx) => (
+                                  <p key={idx} className="font-mono text-sm text-white break-all">{recipient}</p>
                                 ))}
                               </div>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-4">
-                          <div>
-                            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Received</label>
-                            <p className="text-sm text-white mt-1">
-                              {emailData.timestamp ? new Date(emailData.timestamp).toLocaleString() : "Unknown"}
-                            </p>
+                            ) : (
+                              <p className="text-sm text-gray-400">No recipients</p>
+                            )}
                           </div>
+                        </div>
+                        {emailData.cc && emailData.cc.length > 0 && (
                           <div>
-                            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Direction</label>
-                            <Badge variant="outline" className="mt-1 text-xs border-slate-700 text-slate-300">
+                            <label className="text-sm font-medium text-gray-400">CC</label>
+                            <div className="mt-1 space-y-1">
+                              {emailData.cc.map((cc, idx) => (
+                                <p key={idx} className="font-mono text-sm text-white break-all">{cc}</p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Received</label>
+                          <p className="text-sm text-white mt-1">
+                            {emailData.timestamp ?
+                              (() => {
+                                try {
+                                  return new Date(emailData.timestamp).toLocaleString();
+                                } catch (error) {
+                                  return emailData.timestamp;
+                                }
+                              })()
+                              : 'Unknown'
+                            }
+                          </p>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Card 2: Status & Security */}
+                    <Card className="bg-[#1a1a1a] border-slate-800">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-white text-base">Status & Security</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Direction</label>
+                          <div className="mt-1">
+                            <Badge
+                              variant={emailData.direction === "inbound" ? "secondary" : "outline"}
+                              className={emailData.direction === "inbound"
+                                ? "bg-blue-900/30 text-blue-300 border-blue-600/30"
+                                : "bg-gray-800/50 text-gray-300 border-gray-600/50"
+                              }
+                            >
                               {emailData.direction || "unknown"}
                             </Badge>
                           </div>
-                          <div>
-                            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Status</label>
-                            <Badge variant="outline" className="mt-1 text-xs border-slate-700 text-slate-300">
+                        </div>
+                        {investigation && (
+                          <>
+                            <div>
+                              <label className="text-sm font-medium text-gray-400">Investigation Status</label>
+                              <div className="mt-1">
+                                <Badge variant="outline" className="border-emerald-600/30 text-emerald-300 bg-emerald-900/20">
+                                  {investigation.status}
+                                </Badge>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-sm font-medium text-gray-400">Priority</label>
+                              <div className="mt-1">
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    investigation.priority === "critical"
+                                      ? "border-red-500 text-red-400 bg-red-900/20"
+                                      : investigation.priority === "high"
+                                      ? "border-orange-500 text-orange-400 bg-orange-900/20"
+                                      : investigation.priority === "medium"
+                                      ? "border-yellow-500 text-yellow-400 bg-yellow-900/20"
+                                      : "border-slate-600 text-slate-300 bg-slate-800/50"
+                                  }
+                                >
+                                  {investigation.priority}
+                                </Badge>
+                              </div>
+                            </div>
+                          </>
+                        )}
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Status</label>
+                          <div className="mt-1">
+                            <Badge variant="outline" className="border-slate-700 text-slate-300 bg-slate-800/50">
                               {emailData.status || "unknown"}
                             </Badge>
                           </div>
-                          {emailData.size && (
-                            <div>
-                              <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Size</label>
-                              <p className="text-sm text-white mt-1">
-                                {typeof emailData.size === 'number' ? `${(emailData.size / 1024).toFixed(1)} KB` : emailData.size}
-                              </p>
-                            </div>
-                          )}
-                          {emailData.attachments && emailData.attachments.length > 0 && (
-                            <div>
-                              <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Attachments</label>
-                              <p className="text-sm text-white mt-1">
-                                {emailData.attachments.length} file{emailData.attachments.length !== 1 ? 's' : ''}
-                              </p>
-                            </div>
-                          )}
-                          {emailData.urls && emailData.urls.length > 0 && (
-                            <div>
-                              <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">URLs Found</label>
-                              <p className="text-sm text-white mt-1">
-                                {emailData.urls.length} URL{emailData.urls.length !== 1 ? 's' : ''}
-                              </p>
-                            </div>
-                          )}
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Size</label>
+                          <p className="text-sm text-white mt-1">
+                            {emailData.size ? (emailData.size / 1024).toFixed(1) : '0.0'} KB
+                          </p>
+                        </div>
+                        {emailData.attachments && emailData.attachments.length > 0 && (
                           <div>
-                            <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Message ID</label>
-                            <div className="flex items-center gap-2 mt-1">
-                              <p className="text-xs text-slate-400 font-mono truncate flex-1">{emailData.messageId}</p>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => navigator.clipboard.writeText(emailData.messageId)}
-                                className="h-7 w-7 p-0 text-slate-400 hover:text-white"
-                              >
-                                <Copy className="h-3 w-3" />
-                              </Button>
-                            </div>
+                            <label className="text-sm font-medium text-gray-400">Attachments</label>
+                            <p className="text-sm text-white mt-1">
+                              {emailData.attachments.length} file{emailData.attachments.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                        )}
+                        {emailData.urls && emailData.urls.length > 0 && (
+                          <div>
+                            <label className="text-sm font-medium text-gray-400">URLs Found</label>
+                            <p className="text-sm text-white mt-1">
+                              {emailData.urls.length} URL{emailData.urls.length !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                        )}
+                        <div>
+                          <label className="text-sm font-medium text-gray-400">Message ID</label>
+                          <div className="flex items-center gap-2 mt-1">
+                            <p className="text-xs text-gray-400 font-mono break-all flex-1">{emailData.messageId}</p>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => navigator.clipboard.writeText(emailData.messageId)}
+                              className="text-gray-400 hover:text-white p-1 h-7 w-7"
+                            >
+                              <Copy className="h-3 w-3" />
+                            </Button>
                           </div>
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
+                  </div>
 
                   {/* Investigation Details */}
                   {investigation && (
