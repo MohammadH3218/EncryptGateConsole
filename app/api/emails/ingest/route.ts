@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { ddb, extractOrgId, TABLES } from '@/lib/aws';
 import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { getDriver } from '@/lib/neo4j';
 
 export const runtime = 'nodejs';
 
@@ -142,32 +143,49 @@ export async function POST(request: Request) {
       console.warn('⚠️ Threat detection failed, continuing without detection:', threatError.message);
     }
 
-    // Update Neo4j graph
+        // Update Neo4j graph directly
     try {
-      const graphResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/graph/query`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'add_email',
-          data: {
-            messageId: validated.messageId,
-            sender: validated.from,
-            recipients: validated.to,
-            subject: validated.subject,
-            body: validated.body || '',
-            timestamp: validated.timestamp,
-            urls: extractURLs(validated.body || ''),
-          },
-        }),
-      });
-
-      if (graphResponse.ok) {
-        console.log(`✅ Email added to Neo4j graph: ${validated.messageId}`);
-      }
+      const driver = await getDriver();
+      const session = driver.session();
+      const urls = extractURLs(validated.body || validated.htmlBody || '');
+      await session.run(
+        
+        MERGE (sender:User {email:, orgId:})
+        MERGE (domain:Domain {name: split(,'@')[1], orgId:})
+        MERGE (sender)-[:FROM_DOMAIN]->(domain)
+        MERGE (email:Email {messageId:, orgId:})
+          SET email.subject = ,
+              email.sentAt = datetime(),
+              email.severity = ,
+              email.riskScore = 
+        MERGE (sender)-[:WAS_SENT]->(email)
+        WITH email
+        UNWIND  AS rcpt
+          MERGE (r:User {email:rcpt, orgId:})
+          MERGE (email)-[:WAS_SENT_TO]->(r)
+        WITH email
+        UNWIND  AS urlVal
+          MERGE (u:URL {value:urlVal})
+          MERGE (email)-[:CONTAINS_URL]->(u)
+        RETURN email
+        ,
+        {
+          sender: validated.from,
+          orgId: emailOrgId,
+          messageId: validated.messageId,
+          subject: validated.subject,
+          timestamp: validated.timestamp,
+          recipients: validated.to,
+          urls,
+          severity,
+          threatScore,
+        }
+      );
+      await session.close();
+      console.log(ƒo. Email added to Neo4j graph: );
     } catch (graphError: any) {
-      console.warn('⚠️ Neo4j graph update failed:', graphError.message);
+      console.warn('ƒsÿ‹,? Neo4j graph update failed:', graphError.message);
     }
-
     return NextResponse.json({
       success: true,
       emailId: validated.messageId,

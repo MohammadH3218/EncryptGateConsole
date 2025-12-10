@@ -155,10 +155,11 @@ export function InvestigationCopilotPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            queryType: "sender_relationships",
-            senderEmail: senderEmail || emailId,
-            timeRange: timeRange || "30d",
-            minSeverity: minSeverity || "low",
+            type: "sender_graph",
+            params: {
+              senderEmail: senderEmail || emailId || "",
+              minSeverity: minSeverity || undefined,
+            },
           }),
         });
         if (!response.ok) {
@@ -206,8 +207,8 @@ export function InvestigationCopilotPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            queryType: "similar_incidents",
-            emailId: targetEmailId,
+            type: "campaign_for_email",
+            params: { emailId: targetEmailId },
           }),
         });
         if (!response.ok) {
@@ -307,6 +308,8 @@ export function InvestigationCopilotPanel({
     "What's unusual about this email?",
     "Is this part of a larger campaign?",
     "Show a graph of related users.",
+    "Show recent suspicious activity on this user's devices.",
+    "List similar incidents tied to this email.",
   ];
 
   return (
