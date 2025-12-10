@@ -1,124 +1,47 @@
 "use client";
 
-import { CopilotChat } from "@copilotkit/react-ui";
-import { useCopilotAction, useCopilotReadable } from "@copilotkit/react-core";
-import type { CSSProperties } from "react";
-import { useState, useEffect } from "react";
-import { Sparkles, AlertTriangle, Shield, Users, History, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  Sparkles,
+  AlertTriangle,
+  Shield,
+  Users,
+  History,
+  Loader2,
+  Send,
+  ChevronDown
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface InvestigationCopilotPanelProps {
   investigationId: string;
   emailId?: string | null;
 }
 
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+}
+
 export function InvestigationCopilotPanel({
   investigationId,
   emailId,
 }: InvestigationCopilotPanelProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
-  // Provide context to CopilotKit
-  useCopilotReadable({
-    description: "Current investigation context",
-    value: {
-      investigationId,
-      emailId: emailId || null,
-    },
-  });
-
-  // CopilotKit actions
-  useCopilotAction({
-    name: "getDetectionSummary",
-    description: "Fetch detailed information about a security detection",
-    parameters: [
-      {
-        name: "detectionId",
-        type: "string",
-        description: "The ID of the detection",
-        required: true,
-      },
-    ],
-    handler: async ({ detectionId }) => {
-      try {
-        const response = await fetch(`/api/detections/${encodeURIComponent(detectionId)}`);
-        if (!response.ok) throw new Error(`Failed to fetch detection`);
-        const detection = await response.json();
-        return {
-          success: true,
-          detection,
-        };
-      } catch (error: any) {
-        return {
-          success: false,
-          error: error.message,
-        };
-      }
-    },
-  });
-
-  useCopilotAction({
-    name: "listSimilarIncidents",
-    description: "Find similar incidents or emails",
-    parameters: [
-      {
-        name: "emailId",
-        type: "string",
-        description: "Email ID to find similar incidents for",
-        required: false,
-      },
-    ],
-    handler: async ({ emailId: providedEmailId }) => {
-      try {
-        const targetEmailId = providedEmailId || emailId;
-        if (!targetEmailId) {
-          return { success: false, error: "Email ID required" };
-        }
-
-        const response = await fetch("/api/graph/query", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: "campaign_for_email",
-            params: { emailId: targetEmailId },
-          }),
-        });
-
-        if (!response.ok) throw new Error("Failed to find similar incidents");
-        const result = await response.json();
-        return {
-          success: true,
-          similarIncidents: result.incidents || [],
-          count: result.count || 0,
-        };
-      } catch (error: any) {
-        return {
-          success: false,
-          error: error.message,
-        };
-      }
-    },
-  });
-
-  const themeVars: CSSProperties = {
-    "--copilot-kit-background-color": "#020617",
-    "--copilot-kit-primary-color": "#10b981",
-    "--copilot-kit-contrast-color": "#000000",
-    "--copilot-kit-input-background-color": "#000000",
-    "--copilot-kit-secondary-color": "#0f172a",
-    "--copilot-kit-secondary-contrast-color": "#f1f5f9",
-    "--copilot-kit-separator-color": "rgba(100, 116, 139, 0.2)",
-    "--copilot-kit-muted-color": "#64748b",
-    "--copilot-kit-text-color": "#e2e8f0",
-    "--copilot-kit-text-secondary-color": "#94a3b8",
-    "--copilot-kit-shadow-md": "none",
-  };
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const quickActions = [
-    { icon: Sparkles, label: "Initialize", id: "initialize" },
-    { icon: AlertTriangle, label: "Why Flagged?", id: "whyFlagged" },
-    { icon: Users, label: "Who Else?", id: "whoElse" },
-    { icon: Shield, label: "Sender Risk", id: "senderRisk" },
-    { icon: History, label: "Similar Incidents", id: "similarIncidents" },
+    { icon: Sparkles, label: "Initialize Investigation", id: "initialize", prompt: "Initialize investigation for this email" },
+    { icon: AlertTriangle, label: "Why Flagged?", id: "whyFlagged", prompt: "Why was this email flagged?" },
+    { icon: Users, label: "Who Else?", id: "whoElse", prompt: "Who else received this email?" },
+    { icon: Shield, label: "Sender Risk", id: "senderRisk", prompt: "What is the risk level of this sender?" },
+    { icon: History, label: "Similar Incidents", id: "similarIncidents", prompt: "Are there similar incidents?" },
   ];
 
   const quickQuestions = [
@@ -129,10 +52,55 @@ export function InvestigationCopilotPanel({
     "Is this part of a larger campaign?",
   ];
 
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  const handleSendMessage = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: input.trim(),
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
+    setInput("");
+    setIsLoading(true);
+
+    // Simulate AI response - replace with actual API call
+    setTimeout(() => {
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: `I'm analyzing your question: "${userMessage.content}". This is a placeholder response. In production, this would connect to your investigation API.`,
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, assistantMessage]);
+      setIsLoading(false);
+    }, 1500);
+  };
+
+  const handleQuickAction = (prompt: string) => {
+    setInput(prompt);
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSendMessage();
+    }
+  };
+
   return (
-    <div className="h-full flex flex-col" style={themeVars}>
+    <div className="h-full flex flex-col bg-slate-950">
       {/* Header */}
-      <div className="border-b border-slate-800 px-4 py-3 bg-slate-950">
+      <div className="border-b border-slate-800 px-4 py-3 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-sm font-semibold text-white">Investigation Assistant</h2>
           <div className="flex items-center gap-1.5">
@@ -140,25 +108,19 @@ export function InvestigationCopilotPanel({
             <span className="text-xs text-slate-400">Ready</span>
           </div>
         </div>
-        <p className="text-xs text-slate-500">Ask about relationships, risk, and similar incidents</p>
+        <p className="text-xs text-slate-500">AI-powered security investigation assistant</p>
       </div>
 
       {/* Quick Actions */}
-      <div className="border-b border-slate-800 px-4 py-3 bg-slate-950">
+      <div className="border-b border-slate-800 px-4 py-3 flex-shrink-0">
         <div className="flex flex-wrap gap-2">
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (
               <button
                 key={action.id}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded transition-colors"
-                onClick={() => {
-                  const input = document.querySelector<HTMLTextAreaElement>("[data-copilot-chat-input]");
-                  if (input) {
-                    input.value = action.label;
-                    input.focus();
-                  }
-                }}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-emerald-600/50 rounded transition-all"
+                onClick={() => handleQuickAction(action.prompt)}
               >
                 <Icon className="h-3 w-3" />
                 {action.label}
@@ -169,19 +131,13 @@ export function InvestigationCopilotPanel({
       </div>
 
       {/* Suggested Questions */}
-      <div className="border-b border-slate-800 px-4 py-3 bg-slate-950">
+      <div className="border-b border-slate-800 px-4 py-3 flex-shrink-0">
         <div className="flex flex-wrap gap-1.5">
           {quickQuestions.map((q) => (
             <button
               key={q}
-              className="px-2 py-1 text-[11px] text-slate-400 hover:text-white bg-transparent hover:bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-full transition-colors"
-              onClick={() => {
-                const input = document.querySelector<HTMLTextAreaElement>("[data-copilot-chat-input]");
-                if (input) {
-                  input.value = q;
-                  input.focus();
-                }
-              }}
+              className="px-2 py-1 text-[11px] text-slate-400 hover:text-emerald-400 bg-transparent hover:bg-slate-900 border border-slate-800 hover:border-emerald-600/30 rounded-full transition-all"
+              onClick={() => handleQuickAction(q)}
             >
               {q}
             </button>
@@ -189,58 +145,106 @@ export function InvestigationCopilotPanel({
         </div>
       </div>
 
-      {/* Chat Area */}
-      <div className="flex-1 min-h-0 relative copilot-chat-wrapper">
-        <CopilotChat
-          className="h-full"
-          metadata={{
-            investigationId,
-            emailId: emailId ?? undefined,
-          }}
-          labels={{
-            inputPlaceholder: "Ask about this email, sender, or campaign...",
-            title: "",
-          }}
-          showHeader={false}
-          icons={{
-            user: (
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-800 text-[10px] text-slate-300">
-                U
+      {/* Chat Messages */}
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        <div
+          ref={scrollRef}
+          className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
+        >
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center px-6">
+              <div className="w-12 h-12 rounded-full bg-emerald-600/10 flex items-center justify-center mb-4">
+                <Sparkles className="w-6 h-6 text-emerald-500" />
               </div>
-            ),
-            assistant: (
-              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600/20 text-[10px] text-emerald-400">
-                AI
+              <h3 className="text-sm font-semibold text-white mb-2">Start Your Investigation</h3>
+              <p className="text-xs text-slate-500 max-w-[280px]">
+                Ask questions about this email, analyze sender reputation, or investigate related incidents.
+              </p>
+            </div>
+          ) : (
+            messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}
+              >
+                {message.role === "assistant" && (
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600/20 border border-emerald-600/30">
+                    <Sparkles className="h-4 w-4 text-emerald-400" />
+                  </div>
+                )}
+                <div
+                  className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                    message.role === "user"
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-900 text-slate-200 border border-slate-800"
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                  <span className="text-[10px] opacity-60 mt-1 block">
+                    {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                {message.role === "user" && (
+                  <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-slate-800 border border-slate-700">
+                    <span className="text-xs text-slate-300 font-medium">U</span>
+                  </div>
+                )}
               </div>
-            ),
-          }}
-        />
-        <style jsx global>{`
-          /* Hide CopilotKit branding */
-          .copilot-chat-wrapper a[href*="copilotkit"],
-          .copilot-chat-wrapper [class*="powered"],
-          .copilot-chat-wrapper [class*="branding"],
-          .copilot-chat-wrapper [class*="PoweredBy"],
-          .copilot-chat-wrapper div:has(> a[href*="copilotkit"]) {
-            display: none !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
-            height: 0 !important;
-            overflow: hidden !important;
-            position: absolute !important;
-          }
-        `}</style>
-      </div>
-
-      {/* Loading indicator */}
-      {isLoading && (
-        <div className="px-4 py-2 border-t border-slate-800 bg-slate-950">
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span>Processing...</span>
-          </div>
+            ))
+          )}
+          {isLoading && (
+            <div className="flex gap-3 justify-start">
+              <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-emerald-600/20 border border-emerald-600/30">
+                <Loader2 className="h-4 w-4 text-emerald-400 animate-spin" />
+              </div>
+              <div className="bg-slate-900 text-slate-200 border border-slate-800 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse" style={{ animationDelay: '0ms' }} />
+                    <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse" style={{ animationDelay: '150ms' }} />
+                    <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-pulse" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <span className="text-xs text-slate-400">Analyzing...</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Input Area */}
+        <div className="border-t border-slate-800 p-3 flex-shrink-0 bg-slate-950">
+          <div className="flex gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask about this email, sender, or campaign..."
+              className="flex-1 bg-black border border-slate-800 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-600/50 focus:border-emerald-600/50 resize-none min-h-[44px] max-h-[120px]"
+              rows={1}
+              style={{
+                height: 'auto',
+                minHeight: '44px',
+              }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement;
+                target.style.height = 'auto';
+                target.style.height = Math.min(target.scrollHeight, 120) + 'px';
+              }}
+            />
+            <Button
+              onClick={handleSendMessage}
+              disabled={!input.trim() || isLoading}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white h-[44px] w-[44px] p-0 flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-[10px] text-slate-600 mt-2 px-1">
+            Press Enter to send, Shift+Enter for new line
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
