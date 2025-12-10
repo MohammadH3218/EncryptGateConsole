@@ -149,26 +149,26 @@ export async function POST(request: Request) {
       const session = driver.session();
       const urls = extractURLs(validated.body || validated.htmlBody || '');
       await session.run(
-        
-        MERGE (sender:User {email:, orgId:})
-        MERGE (domain:Domain {name: split(,'@')[1], orgId:})
+        `
+        MERGE (sender:User {email:$sender, orgId:$orgId})
+        MERGE (domain:Domain {name: split($sender,'@')[1], orgId:$orgId})
         MERGE (sender)-[:FROM_DOMAIN]->(domain)
-        MERGE (email:Email {messageId:, orgId:})
-          SET email.subject = ,
-              email.sentAt = datetime(),
-              email.severity = ,
-              email.riskScore = 
+        MERGE (email:Email {messageId:$messageId, orgId:$orgId})
+          SET email.subject = $subject,
+              email.sentAt = datetime($timestamp),
+              email.severity = $severity,
+              email.riskScore = $threatScore
         MERGE (sender)-[:WAS_SENT]->(email)
         WITH email
-        UNWIND  AS rcpt
-          MERGE (r:User {email:rcpt, orgId:})
+        UNWIND $recipients AS rcpt
+          MERGE (r:User {email:rcpt, orgId:$orgId})
           MERGE (email)-[:WAS_SENT_TO]->(r)
         WITH email
-        UNWIND  AS urlVal
+        UNWIND $urls AS urlVal
           MERGE (u:URL {value:urlVal})
           MERGE (email)-[:CONTAINS_URL]->(u)
         RETURN email
-        ,
+        `,
         {
           sender: validated.from,
           orgId: emailOrgId,
@@ -182,9 +182,9 @@ export async function POST(request: Request) {
         }
       );
       await session.close();
-      console.log(ƒo. Email added to Neo4j graph: );
+      console.log(`Email added to Neo4j graph: ${validated.messageId}`);
     } catch (graphError: any) {
-      console.warn('ƒsÿ‹,? Neo4j graph update failed:', graphError.message);
+      console.warn('Neo4j graph update failed:', graphError.message);
     }
     return NextResponse.json({
       success: true,
