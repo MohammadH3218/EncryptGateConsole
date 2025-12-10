@@ -355,15 +355,15 @@ export default function EnhancedInvestigationPage() {
 
   if (loading) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
+      <div className="h-screen w-screen flex items-center justify-center bg-black">
         <div className="w-full max-w-4xl px-6">
           <div className="space-y-4">
-            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-16 w-full bg-slate-900" />
             <div className="grid grid-cols-2 gap-4">
-              <Skeleton className="h-64" />
-              <Skeleton className="h-64" />
+              <Skeleton className="h-64 bg-slate-900" />
+              <Skeleton className="h-64 bg-slate-900" />
             </div>
-            <Skeleton className="h-32 w-full" />
+            <Skeleton className="h-32 w-full bg-slate-900" />
           </div>
         </div>
       </div>
@@ -373,10 +373,10 @@ export default function EnhancedInvestigationPage() {
   // Ensure we have at least minimal email data
   if (!emailData) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-slate-950">
+      <div className="h-screen w-screen flex items-center justify-center bg-black">
         <div className="text-center max-w-md">
           <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-          <h2 className="text-xl font-semibold text-slate-200 mb-2">
+          <h2 className="text-xl font-semibold text-white mb-2">
             Unable to Load Email Data
           </h2>
           <p className="text-slate-400 mb-4">
@@ -396,10 +396,10 @@ export default function EnhancedInvestigationPage() {
   }
 
   return (
-    <div className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden" data-investigation-page>
+    <div className="h-screen w-screen bg-black text-slate-100 flex flex-col overflow-hidden" data-investigation-page>
       {/* Header */}
       <motion.div
-        className="border-b border-slate-800 bg-slate-900"
+        className="border-b border-slate-800/50 bg-slate-950"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
@@ -407,18 +407,18 @@ export default function EnhancedInvestigationPage() {
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex-1 min-h-0">
-              <h1 className="text-xl font-semibold flex items-center gap-2 mb-1">
-                <Shield className="w-5 h-5 text-slate-300" />
+              <h1 className="text-xl font-semibold flex items-center gap-2 mb-1 text-white">
+                <Shield className="w-5 h-5 text-slate-400" />
                 Email Security Investigation
               </h1>
               <div className="flex items-center gap-4 text-sm">
-                <p className="text-slate-400 flex items-center gap-2">
+                <p className="text-slate-300 flex items-center gap-2">
                   <Mail className="w-4 h-4" />
                   <span className="font-semibold">
                     {emailData?.subject || "No subject"}
                   </span>
                 </p>
-                <p className="text-slate-500">•</p>
+                <p className="text-slate-600">•</p>
                 <p className="text-slate-400 font-mono text-xs">
                   {emailData?.sender || "Unknown sender"}
                 </p>
@@ -427,19 +427,19 @@ export default function EnhancedInvestigationPage() {
             <div className="flex items-center gap-3">
               {investigation && (
                 <>
-                  <Badge variant="outline" className="text-xs capitalize border-slate-700 text-slate-300 bg-slate-800/50">
+                  <Badge variant="outline" className="text-xs capitalize border-slate-700 text-slate-300 bg-slate-900/50">
                     {investigation.status}
                   </Badge>
                   <Badge
                     variant="outline"
                     className={`text-xs capitalize ${
                       investigation.priority === "critical"
-                        ? "border-red-500 text-red-400 bg-red-950/20"
+                        ? "border-red-500 text-red-400 bg-red-950/30"
                         : investigation.priority === "high"
-                          ? "border-orange-500 text-orange-400 bg-orange-950/20"
+                          ? "border-orange-500 text-orange-400 bg-orange-950/30"
                           : investigation.priority === "medium"
-                            ? "border-yellow-500 text-yellow-400 bg-yellow-950/20"
-                            : "border-slate-600 text-slate-300 bg-slate-800/50"
+                            ? "border-yellow-500 text-yellow-400 bg-yellow-950/30"
+                            : "border-slate-600 text-slate-300 bg-slate-900/50"
                     }`}
                   >
                     {investigation.priority}
@@ -460,10 +460,10 @@ export default function EnhancedInvestigationPage() {
       </motion.div>
 
       {/* Main Content */}
-      <div className="flex-1 min-h-0 flex gap-4 px-4 pb-4 pt-2 overflow-hidden">
+      <div className="flex-1 min-h-0 flex gap-4 px-4 pb-4 pt-2 overflow-hidden bg-black">
         {/* Left Panel - Email Data */}
         <motion.section
-          className="flex-1 min-w-0 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex flex-col overflow-hidden"
+          className="flex-1 min-w-0 rounded-2xl border border-slate-800/50 bg-slate-950 p-4 flex flex-col overflow-hidden"
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.4, delay: 0.1 }}
@@ -473,38 +473,38 @@ export default function EnhancedInvestigationPage() {
             onValueChange={setSelectedTab}
             className="flex min-h-0 flex-col"
           >
-            <div className="border-b border-slate-800 px-6 py-3 bg-slate-900/50">
-              <TabsList className="bg-slate-800/50 border border-slate-700/50">
-                <TabsTrigger 
-                  value="overview" 
-                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+            <div className="border-b border-slate-800/50 px-6 py-3 bg-black">
+              <TabsList className="bg-slate-900 border border-slate-800">
+                <TabsTrigger
+                  value="overview"
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:border-slate-700"
                 >
                   Overview
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="content" 
-                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                <TabsTrigger
+                  value="content"
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:border-slate-700"
                 >
                   Content
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="headers" 
-                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                <TabsTrigger
+                  value="headers"
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:border-slate-700"
                 >
                   Headers
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="attachments" 
-                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                <TabsTrigger
+                  value="attachments"
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:border-slate-700"
                 >
                   Attachments{" "}
                   {emailData?.attachments?.length
                     ? `(${emailData.attachments.length})`
                     : ""}
                 </TabsTrigger>
-                <TabsTrigger 
-                  value="timeline" 
-                  className="text-xs text-slate-400 data-[state=active]:bg-slate-900 data-[state=active]:text-slate-200 data-[state=active]:border-slate-700"
+                <TabsTrigger
+                  value="timeline"
+                  className="text-xs text-slate-400 data-[state=active]:bg-slate-800 data-[state=active]:text-white data-[state=active]:border-slate-700"
                 >
                   Timeline
                 </TabsTrigger>
@@ -524,9 +524,9 @@ export default function EnhancedInvestigationPage() {
                     >
                       {/* Risk Score Card */}
                       {(emailData?.threatScore !== undefined || emailData?.riskScore !== undefined) && (
-                        <Card className="bg-slate-900/50 border-slate-800">
+                        <Card className="bg-slate-950 border-slate-800/50">
                           <CardHeader className="pb-3">
-                            <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                            <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
                               <TrendingUp className="w-4 h-4" />
                               Risk Assessment
                             </CardTitle>
@@ -602,9 +602,9 @@ export default function EnhancedInvestigationPage() {
                         </Card>
                       )}
 
-                      <Card className="bg-slate-900/50 border-slate-800">
+                      <Card className="bg-slate-950 border-slate-800/50">
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-sm font-medium text-slate-300">
+                          <CardTitle className="text-sm font-medium text-white">
                             Email Metadata
                           </CardTitle>
                         </CardHeader>
@@ -765,9 +765,9 @@ export default function EnhancedInvestigationPage() {
                       </Card>
 
                     {investigation && (
-                      <Card className="bg-slate-900/50 border-slate-800">
+                      <Card className="bg-slate-950 border-slate-800/50">
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-sm font-medium text-slate-300">
+                          <CardTitle className="text-sm font-medium text-white">
                             Investigation Details
                           </CardTitle>
                         </CardHeader>
@@ -803,14 +803,14 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                  <Card className="bg-slate-900/50 border-slate-800">
+                  <Card className="bg-slate-950 border-slate-800/50">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-slate-300">
+                      <CardTitle className="text-sm font-medium text-white">
                         Email Body
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <pre className="text-sm whitespace-pre-wrap font-mono text-slate-300 bg-slate-950 p-4 rounded-lg">
+                      <pre className="text-sm whitespace-pre-wrap font-mono text-slate-300 bg-black p-4 rounded-lg border border-slate-800/30">
                         {emailData?.body || "No content"}
                       </pre>
                     </CardContent>
@@ -825,14 +825,14 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                  <Card className="bg-slate-900/50 border-slate-800">
+                  <Card className="bg-slate-950 border-slate-800/50">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-slate-300">
+                      <CardTitle className="text-sm font-medium text-white">
                         Email Headers
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <pre className="text-xs font-mono whitespace-pre-wrap text-slate-400 bg-slate-950 p-4 rounded-lg overflow-x-auto">
+                      <pre className="text-xs font-mono whitespace-pre-wrap text-slate-400 bg-black p-4 rounded-lg overflow-x-auto border border-slate-800/30">
                         {emailData?.headers
                           ? JSON.stringify(emailData.headers, null, 2)
                           : "No headers"}
@@ -849,9 +849,9 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                  <Card className="bg-slate-900/50 border-slate-800">
+                  <Card className="bg-slate-950 border-slate-800/50">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-slate-300">
+                      <CardTitle className="text-sm font-medium text-white">
                         Attachments
                       </CardTitle>
                     </CardHeader>
@@ -862,7 +862,7 @@ export default function EnhancedInvestigationPage() {
                           {emailData.attachments.map((att: any, i: number) => (
                             <li
                               key={i}
-                              className="text-sm bg-slate-950 p-3 rounded-lg flex items-center justify-between"
+                              className="text-sm bg-black p-3 rounded-lg flex items-center justify-between border border-slate-800/30"
                             >
                               <span className="text-slate-200">
                                 {att.filename}
@@ -892,9 +892,9 @@ export default function EnhancedInvestigationPage() {
                       exit={{ opacity: 0, y: -10 }}
                       transition={{ duration: 0.2 }}
                     >
-                      <Card className="bg-slate-900/50 border-slate-800">
+                      <Card className="bg-slate-950 border-slate-800/50">
                         <CardHeader className="pb-3">
-                          <CardTitle className="text-sm font-medium text-slate-300 flex items-center gap-2">
+                          <CardTitle className="text-sm font-medium text-white flex items-center gap-2">
                             <Clock className="w-4 h-4" />
                             Investigation Timeline
                           </CardTitle>
@@ -975,7 +975,7 @@ export default function EnhancedInvestigationPage() {
 
       {/* Submit Action Dialog */}
       <Dialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
-        <DialogContent className="bg-slate-900 border-slate-800 text-white max-w-md">
+        <DialogContent className="bg-slate-950 border-slate-800/50 text-white max-w-md">
           <DialogHeader>
             <DialogTitle className="text-xl font-semibold text-white">
               Submit Investigation

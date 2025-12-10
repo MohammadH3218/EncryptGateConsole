@@ -416,7 +416,7 @@ export function InvestigationCopilotPanel({
       </motion.div>
 
       {/* Chat area */}
-      <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl bg-slate-950/60 relative">
+      <div className="flex min-h-0 flex-1 overflow-hidden rounded-2xl bg-slate-950/60 relative copilot-chat-container">
         <CopilotChat
           className="w-full"
           // Let CopilotKit know about current context
@@ -443,6 +443,24 @@ export function InvestigationCopilotPanel({
             ),
           }}
         />
+        <style jsx global>{`
+          /* Hide CopilotKit branding */
+          .copilot-chat-container [class*="copilot"] a[href*="copilotkit"],
+          .copilot-chat-container [class*="copilot"] [class*="powered"],
+          .copilot-chat-container [class*="copilot"] [class*="branding"],
+          .copilot-chat-container [class*="powered-by"],
+          .copilot-chat-container a[href*="copilotkit.ai"],
+          .copilot-chat-container div:has(> a[href*="copilotkit"]) {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            height: 0 !important;
+            width: 0 !important;
+            overflow: hidden !important;
+            position: absolute !important;
+            pointer-events: none !important;
+          }
+        `}</style>
       </div>
 
       {/* Loading indicator */}
