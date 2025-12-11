@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   Loader2,
   AlertTriangle,
   Shield,
   Mail,
-  Clock,
   Copy,
   Send,
   Ban,
@@ -16,6 +15,7 @@ import {
   ChevronRight,
   FileText,
   Link as LinkIcon,
+  ArrowLeft,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -31,7 +31,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { InvestigationCopilotPanel } from "@/components/InvestigationCopilotPanel";
-import { Skeleton } from "@/components/ui/skeleton";
 
 // Types
 interface Investigation {
@@ -39,8 +38,8 @@ interface Investigation {
   emailMessageId: string;
   status: string;
   priority: string;
-  severity: string;
-  description: string;
+  severity?: string;
+  description?: string;
   createdAt: string;
 }
 
@@ -53,16 +52,19 @@ interface EmailData {
   body: string;
   htmlBody?: string;
   headers?: Record<string, string>;
-  attachments?: any[];
+  attachments?: Array<{ filename: string; size?: number }>;
   direction?: string;
   status?: string;
   size?: number;
   cc?: string[];
   urls?: string[];
+  flaggedCategory?: string;
+  flaggedSeverity?: string;
 }
 
 export default function InvestigationPage() {
   const params = useParams();
+  const router = useRouter();
   const emailId = decodeURIComponent(params.id as string);
 
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
@@ -80,6 +82,7 @@ export default function InvestigationPage() {
   async function loadData() {
     try {
       setLoading(true);
+      console.log('🔍 Loading investigation data for:', emailId);
 
       // Load investigation
       try {
@@ -88,42 +91,37 @@ export default function InvestigationPage() {
           const investigations = await invRes.json();
           if (investigations.length > 0) {
             setInvestigation(investigations[0]);
+            console.log('✅ Investigation loaded:', investigations[0]);
           }
         }
       } catch (e) {
         console.warn("Failed to load investigation:", e);
       }
 
-      // Load email
+      // Load email with proper error handling
       const emailRes = await fetch(`/api/email/${encodeURIComponent(emailId)}`);
+      console.log('📧 Email API response status:', emailRes.status);
+
       if (emailRes.ok) {
         const response = await emailRes.json();
+        console.log('📧 Email API response:', response);
+
         const email = response?.email || response;
         if (email && email.messageId) {
           setEmailData(email);
+          console.log('✅ Email data loaded:', email);
         } else {
-          setEmailData({
-            messageId: emailId,
-            subject: "Email data unavailable",
-            sender: "Unknown",
-            recipients: [],
-            timestamp: new Date().toISOString(),
-            body: "Email data could not be loaded.",
-          });
+          console.error('❌ Invalid email data structure:', response);
+          setError("Invalid email data format");
         }
       } else {
-        setEmailData({
-          messageId: emailId,
-          subject: "Email data unavailable",
-          sender: "Unknown",
-          recipients: [],
-          timestamp: new Date().toISOString(),
-          body: "Email data could not be loaded.",
-        });
+        const errorData = await emailRes.json();
+        console.error('❌ Email API error:', errorData);
+        setError(errorData.error || "Failed to load email");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to load data:", err);
-      setError("Failed to load investigation data");
+      setError(err.message || "Failed to load investigation data");
     } finally {
       setLoading(false);
     }
@@ -199,18 +197,26 @@ export default function InvestigationPage() {
     );
   }
 
-  if (!emailData) {
+  if (error || !emailData) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-black">
         <div className="text-center max-w-md">
-          <div className="w-16 h-16 rounded-full bg-yellow-600/10 border border-yellow-600/20 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="w-8 h-8 text-yellow-500" />
+          <div className="w-16 h-16 rounded-full bg-red-600/10 border border-red-600/20 flex items-center justify-center mx-auto mb-4">
+            <AlertTriangle className="w-8 h-8 text-red-500" />
           </div>
           <h2 className="text-xl font-semibold text-white mb-2">Unable to Load Email Data</h2>
-          <p className="text-slate-400 text-sm mb-4">The requested email could not be found or loaded</p>
-          <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+          <p className="text-slate-400 text-sm mb-4">{error || "The requested email could not be found"}</p>
+          <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 mb-4">
             <p className="text-xs text-slate-500 font-mono break-all">{emailId}</p>
           </div>
+          <Button
+            onClick={() => router.back()}
+            variant="outline"
+            className="border-slate-700 text-slate-300 hover:bg-slate-900"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Go Back
+          </Button>
         </div>
       </div>
     );
@@ -219,9 +225,9 @@ export default function InvestigationPage() {
   return (
     <div className="h-screen w-screen bg-black flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="border-b border-slate-800 bg-gradient-to-r from-slate-950 to-slate-900 px-6 py-4">
+      <div className="border-b border-slate-800 bg-gradient-to-r from-slate-950 to-slate-900 px-6 py-4 flex-shrink-0">
         <div className="flex items-center justify-between">
-          <div>
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
               <div className="p-1.5 rounded-lg bg-emerald-600/10 border border-emerald-600/20">
                 <Shield className="w-5 h-5 text-emerald-500" />
@@ -250,15 +256,15 @@ export default function InvestigationPage() {
               )}
             </div>
             <div className="flex items-center gap-2 text-sm">
-              <Mail className="w-4 h-4 text-emerald-500/70" />
-              <span className="text-slate-200 font-medium max-w-md truncate">{emailData.subject}</span>
-              <ChevronRight className="w-4 h-4 text-slate-600" />
-              <span className="text-slate-400 font-mono text-xs">{emailData.sender}</span>
+              <Mail className="w-4 h-4 text-emerald-500/70 flex-shrink-0" />
+              <span className="text-slate-200 font-medium truncate">{emailData.subject || "No Subject"}</span>
+              <ChevronRight className="w-4 h-4 text-slate-600 flex-shrink-0" />
+              <span className="text-slate-400 font-mono text-xs truncate">{emailData.sender}</span>
             </div>
           </div>
           <Button
             onClick={() => setSubmitDialogOpen(true)}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-4 shadow-lg shadow-emerald-600/20 transition-all hover:shadow-emerald-600/30"
+            className="bg-emerald-600 hover:bg-emerald-700 text-white h-9 px-4 shadow-lg shadow-emerald-600/20 transition-all hover:shadow-emerald-600/30 flex-shrink-0 ml-4"
           >
             <Send className="w-4 h-4 mr-2" />
             Submit Investigation
@@ -269,7 +275,7 @@ export default function InvestigationPage() {
       {/* Main Content */}
       <div className="flex-1 min-h-0 flex">
         {/* Left Panel - Email Details */}
-        <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-black">
           <Tabs value={selectedTab} onValueChange={setSelectedTab} className="flex-1 flex flex-col min-h-0">
             <div className="border-b border-slate-800 bg-slate-950 px-6">
               <TabsList className="bg-transparent border-0 h-12 gap-1">
@@ -307,12 +313,15 @@ export default function InvestigationPage() {
             <ScrollArea className="flex-1">
               <div className="p-6">
                 <TabsContent value="overview" className="mt-0 space-y-4">
-                  {/* Email Metadata - Two Card Layout matching All Emails */}
+                  {/* Email Metadata - Two Card Layout */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {/* Card 1: Email Information */}
                     <Card className="bg-[#1a1a1a] border-slate-800">
                       <CardHeader className="pb-3">
-                        <CardTitle className="text-white text-base">Email Information</CardTitle>
+                        <CardTitle className="text-white text-base flex items-center gap-2">
+                          <Mail className="w-4 h-4 text-emerald-500" />
+                          Email Information
+                        </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <div>
@@ -368,7 +377,10 @@ export default function InvestigationPage() {
                     {/* Card 2: Status & Security */}
                     <Card className="bg-[#1a1a1a] border-slate-800">
                       <CardHeader className="pb-3">
-                        <CardTitle className="text-white text-base">Status & Security</CardTitle>
+                        <CardTitle className="text-white text-base flex items-center gap-2">
+                          <Shield className="w-4 h-4 text-emerald-500" />
+                          Status & Security
+                        </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-4">
                         <div>
@@ -454,7 +466,7 @@ export default function InvestigationPage() {
                               variant="ghost"
                               size="sm"
                               onClick={() => navigator.clipboard.writeText(emailData.messageId)}
-                              className="text-gray-400 hover:text-white p-1 h-7 w-7"
+                              className="text-gray-400 hover:text-white p-1 h-7 w-7 flex-shrink-0"
                             >
                               <Copy className="h-3 w-3" />
                             </Button>
@@ -465,18 +477,18 @@ export default function InvestigationPage() {
                   </div>
 
                   {/* Investigation Details */}
-                  {investigation && (
-                    <Card className="bg-slate-950 border-slate-800">
+                  {investigation && investigation.description && (
+                    <Card className="bg-[#1a1a1a] border-slate-800">
                       <CardHeader>
-                        <CardTitle className="text-base font-semibold text-white">Investigation Info</CardTitle>
+                        <CardTitle className="text-base font-semibold text-white">Investigation Notes</CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-3">
                         <div>
-                          <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Description</label>
+                          <label className="text-sm font-medium text-gray-400">Description</label>
                           <p className="text-sm text-white mt-1">{investigation.description || "No description"}</p>
                         </div>
                         <div>
-                          <label className="text-xs font-medium text-slate-500 uppercase tracking-wide">Created</label>
+                          <label className="text-sm font-medium text-gray-400">Created</label>
                           <p className="text-sm text-white mt-1">{new Date(investigation.createdAt).toLocaleString()}</p>
                         </div>
                       </CardContent>
@@ -485,20 +497,31 @@ export default function InvestigationPage() {
                 </TabsContent>
 
                 <TabsContent value="content" className="mt-0">
-                  <Card className="bg-slate-950 border-slate-800">
+                  <Card className="bg-[#1a1a1a] border-slate-800">
                     <CardHeader>
                       <CardTitle className="text-base font-semibold text-white">Email Body</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <pre className="text-sm text-slate-300 whitespace-pre-wrap font-mono bg-black p-4 rounded border border-slate-800">
-                        {emailData.body || "No content"}
-                      </pre>
+                      {emailData.htmlBody ? (
+                        <div className="bg-black p-4 rounded border border-slate-800 max-h-[600px] overflow-auto">
+                          <iframe
+                            srcDoc={emailData.htmlBody}
+                            className="w-full min-h-[400px] bg-white"
+                            title="Email HTML Content"
+                            sandbox="allow-same-origin"
+                          />
+                        </div>
+                      ) : (
+                        <pre className="text-sm text-slate-300 whitespace-pre-wrap font-mono bg-black p-4 rounded border border-slate-800">
+                          {emailData.body || "No content"}
+                        </pre>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
 
                 <TabsContent value="headers" className="mt-0">
-                  <Card className="bg-slate-950 border-slate-800">
+                  <Card className="bg-[#1a1a1a] border-slate-800">
                     <CardHeader>
                       <CardTitle className="text-base font-semibold text-white">Email Headers</CardTitle>
                     </CardHeader>
@@ -511,14 +534,14 @@ export default function InvestigationPage() {
                 </TabsContent>
 
                 <TabsContent value="attachments" className="mt-0">
-                  <Card className="bg-slate-950 border-slate-800">
+                  <Card className="bg-[#1a1a1a] border-slate-800">
                     <CardHeader>
                       <CardTitle className="text-base font-semibold text-white">Attachments</CardTitle>
                     </CardHeader>
                     <CardContent>
                       {emailData.attachments && emailData.attachments.length > 0 ? (
                         <div className="space-y-2">
-                          {emailData.attachments.map((att: any, i: number) => (
+                          {emailData.attachments.map((att, i) => (
                             <div
                               key={i}
                               className="flex items-center justify-between p-3 bg-black rounded border border-slate-800"
@@ -527,9 +550,11 @@ export default function InvestigationPage() {
                                 <FileText className="w-4 h-4 text-slate-400" />
                                 <span className="text-sm text-white">{att.filename}</span>
                               </div>
-                              <span className="text-xs text-slate-500">
-                                {att.size ? `${(att.size / 1024).toFixed(2)} KB` : "Unknown size"}
-                              </span>
+                              {att.size && (
+                                <span className="text-xs text-slate-500">
+                                  {(att.size / 1024).toFixed(2)} KB
+                                </span>
+                              )}
                             </div>
                           ))}
                         </div>
