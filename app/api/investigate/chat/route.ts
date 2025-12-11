@@ -2,7 +2,7 @@
 export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
-import { askCopilot } from '@/lib/neo4j';
+import { askInvestigationAssistant } from '@/lib/neo4j';
 
 export async function POST(request: Request) {
   try {
@@ -18,8 +18,8 @@ export async function POST(request: Request) {
 
     console.log('🤖 Investigation chat request:', { question, messageId });
 
-    // Use the Neo4j copilot function
-    const response = await askCopilot(question, messageId);
+    // Use the custom investigation assistant
+    const response = await askInvestigationAssistant(question, messageId);
 
     return NextResponse.json({
       success: true,

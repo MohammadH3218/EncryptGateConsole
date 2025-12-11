@@ -175,7 +175,7 @@ export async function ensureNeo4jConnection(): Promise<Neo4jConnection> {
 
 // === Prompt Templates ===
 const SYSTEM_CYPHER_PROMPT = `
-You are EncryptGate Copilot, a Neo4j Cypher expert.
+You are EncryptGate Investigation Assistant, a Neo4j Cypher expert.
 Use only these labels and relationship types exactly as listed:
 - Labels: User, Email, URL
 - Relationships: WAS_SENT, WAS_SENT_TO, CONTAINS_URL
@@ -207,7 +207,7 @@ IMPORTANT CONSTRAINTS:
 `.trim()
 
 const SYSTEM_CORRECTION_PROMPT = `
-You are EncryptGate Copilot, a Neo4j Cypher expert.
+You are EncryptGate Investigation Assistant, a Neo4j Cypher expert.
 Fix the broken Cypher query based on the error message provided.
 Use only these labels and relationships:
 - User, Email, URL
@@ -226,7 +226,7 @@ Return ONLY the fixed query. NO markdown, NO explanations.
 `.trim()
 
 const SYSTEM_SUMMARY_PROMPT = `
-You are EncryptGate Copilot, a security analyst assistant.
+You are EncryptGate Investigation Assistant, a security analyst AI.
 Provide a clear, detailed summary of the query results:
 - Explain what the data shows in context of the investigation.
 - Highlight important findings.
@@ -235,7 +235,7 @@ Do NOT output any Cypher.
 `.trim()
 
 const SYSTEM_ERROR_ANALYSIS_PROMPT = `
-You are EncryptGate Copilot, a security analyst assistant for Neo4j email investigations.
+You are EncryptGate Investigation Assistant, a security analyst AI for Neo4j email investigations.
 
 All query attempts failed. Analyze:
 1. Why the queries couldn't connect or ran empty.
@@ -678,7 +678,7 @@ Provide a clear analysis in context.
 }
 
 // === Main Entry Point ===
-export async function askCopilot(
+export async function askInvestigationAssistant(
   question: string,
   messageId: string
 ): Promise<string> {
@@ -770,7 +770,7 @@ export async function askCopilot(
     ].join('\n')
 
   } catch (error: any) {
-    console.error('❌ Copilot error:', error)
+    console.error('❌ Investigation Assistant error:', error)
     
     // Ensure we always return a string, never undefined
     const errorMessage = error?.message || 'Unknown error occurred'

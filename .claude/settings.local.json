@@ -29,7 +29,11 @@
       "Bash(aws:*)",
       "Bash(test:*)",
       "Bash(eb deploy:*)",
-      "Bash(git archive:*)"
+      "Bash(git archive:*)",
+      "Bash(if [ -f .env.local ])",
+      "Bash(then echo '=== .env.local exists ===')",
+      "Bash(else echo \".env.local not found\")",
+      "Bash(fi)"
     ],
     "deny": [],
     "ask": []
