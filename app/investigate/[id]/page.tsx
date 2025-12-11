@@ -57,18 +57,26 @@ export default function InvestigationPage() {
       }
 
       const emailRes = await fetch(`/api/email/${encodeURIComponent(emailId)}`)
+      const rawBody = await emailRes.text()
+
+      let parsed: any = null
+      try {
+        parsed = rawBody ? JSON.parse(rawBody) : null
+      } catch (err) {
+        console.error("Email API returned non-JSON response:", rawBody)
+        setError("Email service returned an unexpected response. Please retry.")
+        return
+      }
 
       if (emailRes.ok) {
-        const response = await emailRes.json()
-        const email = response?.email || response
+        const email = parsed?.email || parsed
         if (email && email.messageId) {
           setEmailData(email as EmailDetails)
         } else {
           setError("Invalid email data format")
         }
       } else {
-        const errorData = await emailRes.json()
-        setError(errorData.error || "Failed to load email")
+        setError(parsed?.error || "Failed to load email")
       }
     } catch (err: any) {
       setError(err.message || "Failed to load investigation data")
@@ -153,7 +161,9 @@ export default function InvestigationPage() {
             <AlertTriangle className="w-8 h-8 text-danger" />
           </div>
           <h2 className="text-xl font-semibold text-foreground mb-2">Unable to Load Email Data</h2>
-          <p className="text-muted-foreground text-sm mb-4">{error || "The requested email could not be found"}</p>
+          <p className="text-muted-foreground text-sm mb-4">
+            {error || "The requested email could not be found. If this keeps happening, retry or contact an admin."}
+          </p>
           <div className="glass-card border border-border rounded-lg p-3 mb-4">
             <p className="text-xs text-muted-foreground font-mono break-all">{emailId}</p>
           </div>
