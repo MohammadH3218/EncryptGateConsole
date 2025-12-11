@@ -33,7 +33,8 @@
       "Bash(if [ -f .env.local ])",
       "Bash(then echo '=== .env.local exists ===')",
       "Bash(else echo \".env.local not found\")",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []
