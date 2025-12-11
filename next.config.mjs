@@ -141,6 +141,10 @@ const nextConfig = {
         destination: '/api/test-neo4j-connection',
       },
       {
+        source: '/api/debug-config',
+        destination: '/api/debug-config',
+      },
+      {
         source: '/api/:path*',
         destination: 'https://backend.console-encryptgate.net/api/:path*',
       },
