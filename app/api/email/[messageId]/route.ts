@@ -53,12 +53,19 @@ function extractAttachments(
   return attachments.length ? attachments : undefined;
 }
 
+// Helper function to normalize messageId (remove angle brackets if present)
+function normalizeMessageId(messageId: string): string {
+  // Remove angle brackets if they exist
+  return messageId.replace(/^<|>$/g, '');
+}
+
 // Helper function to find email by messageId
 async function findEmailByMessageId(
   messageId: string,
 ): Promise<{ userId: string; receivedAt: string } | null> {
   try {
-    const scanCommand = new ScanCommand({
+    // Try with the messageId as-is first
+    let scanCommand = new ScanCommand({
       TableName: EMAILS_TABLE,
       FilterExpression: "messageId = :messageId",
       ExpressionAttributeValues: {
@@ -67,7 +74,7 @@ async function findEmailByMessageId(
       ProjectionExpression: "userId, receivedAt",
     });
 
-    const result = await ddb.send(scanCommand);
+    let result = await ddb.send(scanCommand);
 
     if (result.Items && result.Items.length > 0) {
       const item = result.Items[0];
@@ -75,6 +82,52 @@ async function findEmailByMessageId(
         userId: item.userId?.S || "",
         receivedAt: item.receivedAt?.S || "",
       };
+    }
+
+    // If not found, try with normalized version (without angle brackets)
+    const normalizedId = normalizeMessageId(messageId);
+    if (normalizedId !== messageId) {
+      scanCommand = new ScanCommand({
+        TableName: EMAILS_TABLE,
+        FilterExpression: "messageId = :messageId",
+        ExpressionAttributeValues: {
+          ":messageId": { S: normalizedId },
+        },
+        ProjectionExpression: "userId, receivedAt",
+      });
+
+      result = await ddb.send(scanCommand);
+
+      if (result.Items && result.Items.length > 0) {
+        const item = result.Items[0];
+        return {
+          userId: item.userId?.S || "",
+          receivedAt: item.receivedAt?.S || "",
+        };
+      }
+    }
+
+    // If still not found, try with angle brackets added
+    if (!messageId.startsWith('<') && !messageId.endsWith('>')) {
+      const withBrackets = `<${messageId}>`;
+      scanCommand = new ScanCommand({
+        TableName: EMAILS_TABLE,
+        FilterExpression: "messageId = :messageId",
+        ExpressionAttributeValues: {
+          ":messageId": { S: withBrackets },
+        },
+        ProjectionExpression: "userId, receivedAt",
+      });
+
+      result = await ddb.send(scanCommand);
+
+      if (result.Items && result.Items.length > 0) {
+        const item = result.Items[0];
+        return {
+          userId: item.userId?.S || "",
+          receivedAt: item.receivedAt?.S || "",
+        };
+      }
     }
 
     return null;
@@ -107,6 +160,8 @@ export async function GET(
       );
     }
 
+    // Normalize messageId (handle angle brackets)
+    // The findEmailByMessageId function will try multiple formats
     const emailKey = await findEmailByMessageId(messageId);
     if (!emailKey) {
       return NextResponse.json(
@@ -193,6 +248,8 @@ export async function PATCH(
       // If decoding fails, use the raw value (might already be decoded)
       messageId = rawMessageId;
     }
+    // Normalize messageId (handle angle brackets)
+    // The findEmailByMessageId function will try multiple formats
     console.log("📧 Processing messageId:", messageId);
 
     const body = await request.json();
