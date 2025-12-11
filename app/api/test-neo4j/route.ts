@@ -3,13 +3,14 @@ export const runtime = 'nodejs';
 
 import { NextResponse } from 'next/server';
 import neo4j from 'neo4j-driver';
+import { getNeo4jConfig } from '@/lib/config';
 
 export async function GET() {
-  const diagnostics = {
+  let diagnostics = {
     timestamp: new Date().toISOString(),
     neo4j: {
-      uri: 'bolt://localhost:7687',
-      user: 'neo4j',
+      uri: 'unknown',
+      user: 'unknown',
       encrypted: false,
       status: 'unknown',
       error: null as string | null,
@@ -17,15 +18,28 @@ export async function GET() {
     }
   };
 
+  // Get config from Parameter Store or environment
+  let config;
+  try {
+    config = await getNeo4jConfig();
+    diagnostics.neo4j.uri = config.uri;
+    diagnostics.neo4j.user = config.user;
+    diagnostics.neo4j.encrypted = config.encrypted;
+  } catch (error: any) {
+    diagnostics.neo4j.status = 'config_error';
+    diagnostics.neo4j.error = `Failed to load config: ${error.message}`;
+    return NextResponse.json(diagnostics, { status: 500 });
+  }
+
   // Test Neo4j connection directly
   let driver: neo4j.Driver | null = null;
   
   try {
     console.log('🔍 Creating Neo4j driver...');
     driver = neo4j.driver(
-      'bolt://localhost:7687',
-      neo4j.auth.basic('neo4j', 'REDACTED_PASSWORD'),
-      { encrypted: false }
+      config.uri,
+      neo4j.auth.basic(config.user, config.password),
+      { encrypted: config.encrypted }
     );
 
     console.log('🔍 Testing connection...');
