@@ -442,12 +442,15 @@ Analyze why they failed and recommend next steps.
 }
 
 // === Build Prompt for New Cypher Generation ===
-function buildCypherPrompt(question: string, scenario: string): string {
+function buildCypherPrompt(question: string, scenario: string, schema: string): string {
   return `
 Context:
 ${scenario}
 
 Question: "${question}"
+Schema:
+${schema}
+
 Generate ONLY the raw Cypher query. No markdown or code fences.
 MUST start with MATCH and include RETURN.
 ALWAYS include LIMIT 50.
@@ -458,7 +461,8 @@ Keep messageId angle brackets intact.
 // === Generate Initial Cypher ===
 async function generateCypher(
   question: string,
-  scenario: string
+  scenario: string,
+  schema: string
 ): Promise<string> {
   const [type,data] = analyzeQuestion(question, scenario)
   if (type === 'most_emails_to_recipient' && data.recipient) {
@@ -468,7 +472,7 @@ async function generateCypher(
     )
   }
 
-  const raw = await askLLM(SYSTEM_CYPHER_PROMPT, buildCypherPrompt(question, scenario))
+  const raw = await askLLM(SYSTEM_CYPHER_PROMPT, buildCypherPrompt(question, scenario, schema))
   let q = extractCypherQuery(raw)
 
   if (!/LIMIT/i.test(q)) {
@@ -497,10 +501,79 @@ function cleanQueryForExecution(query: string): string | null {
   return q
 }
 
+// === Basic Safety Guard ===
+const DANGEROUS_KEYWORDS = ['DELETE', 'REMOVE', 'SET ', 'CREATE ', 'MERGE ', 'DROP ', 'DETACH ', 'CALL dbms', 'LOAD CSV']
+function isDangerousQuery(query: string): boolean {
+  const upper = query.toUpperCase()
+  return DANGEROUS_KEYWORDS.some(kw => upper.includes(kw))
+}
+
+// === Schema Helpers ===
+async function getSchemaOverview(): Promise<string> {
+  const driverInstance = await getDriver()
+  const session = driverInstance.session({ defaultAccessMode: neo4j.session.READ })
+  try {
+    const nodeRes = await session.run(`
+      CALL db.schema.nodeTypeProperties() YIELD nodeLabels, propertyName, propertyTypes, mandatory
+      RETURN nodeLabels, propertyName, propertyTypes, mandatory
+    `)
+    const relRes = await session.run(`
+      CALL db.schema.relTypeProperties() YIELD relationshipType, sourceNodeLabels, targetNodeLabels, propertyName, propertyTypes
+      RETURN relationshipType, sourceNodeLabels, targetNodeLabels, propertyName, propertyTypes
+    `)
+
+    const nodeLines = nodeRes.records.map(rec => {
+      const labels = rec.get('nodeLabels') as string[] | null
+      const prop = rec.get('propertyName') as string
+      const types = rec.get('propertyTypes') as string[] | null
+      const required = rec.get('mandatory') as boolean | null
+      return `${labels?.join('|') || 'Unknown'} { ${prop}: ${types?.join(',') || 'any'}${required ? ' (required)' : ''} }`
+    })
+
+    const relLines = relRes.records.map(rec => {
+      const rel = rec.get('relationshipType') as string
+      const from = rec.get('sourceNodeLabels') as string[] | null
+      const to = rec.get('targetNodeLabels') as string[] | null
+      const prop = rec.get('propertyName') as string
+      const types = rec.get('propertyTypes') as string[] | null
+      const fromLabel = from?.join('|') || '?'
+      const toLabel = to?.join('|') || '?'
+      return `(:${fromLabel})-[:${rel} { ${prop}: ${types?.join(',') || 'any'} }]->(:${toLabel})`
+    })
+
+    return [
+      'Node properties:',
+      nodeLines.length ? nodeLines.join('\n') : 'None',
+      '',
+      'Relationships:',
+      relLines.length ? relLines.join('\n') : 'None'
+    ].join('\n')
+  } catch (error) {
+    console.error('Failed to load schema overview:', error)
+    return 'Schema unavailable; use only known labels: User, Email, URL and relationships WAS_SENT, WAS_SENT_TO, CONTAINS_URL.'
+  } finally {
+    await session.close()
+  }
+}
+
+// === EXPLAIN validation before execution ===
+async function validateCypher(query: string): Promise<string | null> {
+  const driverInstance = await getDriver()
+  const session = driverInstance.session({ defaultAccessMode: neo4j.session.READ })
+  try {
+    await session.run(`EXPLAIN ${query}`)
+    return null
+  } catch (e: any) {
+    return e?.message || 'Unknown validation error'
+  } finally {
+    await session.close()
+  }
+}
+
 // === Execute Cypher ===
 async function runQuery(cypher: string): Promise<any[]> {
   const driver = await getDriver()
-  const session: Session = driver.session()
+  const session: Session = driver.session({ defaultAccessMode: neo4j.session.READ })
   try {
     const res = await session.run(cypher)
     await session.close()
@@ -616,6 +689,7 @@ export async function askCopilot(
       return '❌ Neo4j database connection failed. Please check your connection settings and ensure Neo4j is running.'
     }
 
+    const schemaOverview = await getSchemaOverview()
     const scenario = await fetchEmailContext(messageId)
     if (!scenario) {
       return `❌ No email found with Message-ID "${messageId}". Please verify the email exists in the database.`
@@ -635,7 +709,7 @@ export async function askCopilot(
       if (res.length && res[0] && !('error' in res[0])) {
         return summarizeResults(question, qtpl, res)
       } else {
-        errors.push((res.length && res[0] && res[0].error) || 'No results')
+        errors.push((res.length && res[0] && (res[0] as any).error) || 'No results')
       }
     }
 
@@ -643,7 +717,7 @@ export async function askCopilot(
     for (let i = 1; i <= MAX_RETRY_ATTEMPTS; i++) {
       let q: string
       if (i === 1) {
-        q = await generateCypher(question, scenario)
+        q = await generateCypher(question, scenario, schemaOverview)
       } else {
         q = await autoCorrectCypher(
           attempts[i-2],
@@ -662,11 +736,22 @@ export async function askCopilot(
         continue
       }
 
+      if (isDangerousQuery(clean)) {
+        errors.push('Query rejected: unsafe clauses detected')
+        continue
+      }
+
+      const validationError = await validateCypher(clean)
+      if (validationError) {
+        errors.push(validationError)
+        continue
+      }
+
       const res = await runQuery(clean)
       if (res.length && res[0] && !('error' in res[0])) {
         return summarizeResults(question, clean, res)
       } else {
-        errors.push((res.length && res[0] && res[0].error) || 'No results')
+        errors.push((res.length && res[0] && (res[0] as any).error) || 'No results')
       }
     }
 
