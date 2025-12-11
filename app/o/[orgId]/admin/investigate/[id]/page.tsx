@@ -17,11 +17,16 @@ export default function AdminInvestigatePage() {
   const params = useParams()
   const router = useRouter()
   const orgId = params.orgId as string
-  // Next.js already decodes route parameters, but we need to handle it carefully
-  // Get the raw id and ensure proper encoding for API calls
+  // Next.js route params are automatically decoded, but sometimes they come encoded
+  // Get the raw id - it should already be decoded by Next.js
   const rawId = params.id as string
-  // Only decode if it looks encoded (contains %)
-  const emailId = rawId.includes('%') ? decodeURIComponent(rawId) : rawId
+  // Try to decode if it looks encoded (contains %), otherwise use as-is
+  let emailId: string
+  try {
+    emailId = rawId.includes('%') ? decodeURIComponent(rawId) : rawId
+  } catch {
+    emailId = rawId
+  }
 
   const [investigation, setInvestigation] = useState<InvestigationSummary | null>(null)
   const [emailData, setEmailData] = useState<EmailDetails | null>(null)
@@ -65,10 +70,12 @@ export default function AdminInvestigatePage() {
         console.warn("Failed to load investigation:", e)
       }
 
-      // Use the raw params.id for the API call to avoid double encoding issues
-      // But encode it properly for the URL
+      // For the API call, we need to properly encode the messageId
+      // Since emailId is already decoded, we encode it once for the URL
       const apiMessageId = encodeURIComponent(emailId)
-      console.log("📧 [Investigate Page] Calling API with encoded messageId:", apiMessageId)
+      console.log("📧 [Investigate Page] Decoded emailId:", emailId)
+      console.log("📧 [Investigate Page] Encoded for API:", apiMessageId)
+      console.log("📧 [Investigate Page] API URL will be: /api/email/" + apiMessageId.substring(0, 50) + "...")
       const emailRes = await fetch(`/api/email/${apiMessageId}`)
       const rawBody = await emailRes.text()
 

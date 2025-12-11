@@ -151,16 +151,25 @@ export async function GET(
   try {
     const { messageId: rawMessageId } = await params;
     console.log("📧 [GET /api/email/[messageId]] Raw messageId from params:", rawMessageId);
+    console.log("📧 [GET /api/email/[messageId]] Raw messageId length:", rawMessageId?.length);
+    console.log("📧 [GET /api/email/[messageId]] Contains %:", rawMessageId?.includes('%'));
     
     // Decode URL-encoded messageId (safely handle already-decoded strings)
     let messageId: string;
-    try {
-      messageId = decodeURIComponent(rawMessageId);
-      console.log("📧 Decoded messageId:", messageId);
-    } catch (e) {
-      // If decoding fails, use the raw value (might already be decoded)
+    if (rawMessageId && rawMessageId.includes('%')) {
+      try {
+        messageId = decodeURIComponent(rawMessageId);
+        console.log("📧 Decoded messageId:", messageId);
+        console.log("📧 Decoded messageId length:", messageId.length);
+      } catch (e) {
+        // If decoding fails, use the raw value
+        messageId = rawMessageId;
+        console.log("📧 Decoding failed, using raw:", messageId);
+      }
+    } else {
+      // Already decoded or doesn't need decoding
       messageId = rawMessageId;
-      console.log("📧 Using raw messageId (decoding failed):", messageId);
+      console.log("📧 Using raw messageId (no encoding detected):", messageId);
     }
 
     if (!messageId) {
@@ -176,23 +185,51 @@ export async function GET(
 
     // Normalize messageId (handle angle brackets)
     // The findEmailByMessageId function will try multiple formats
-    const emailKey = await findEmailByMessageId(messageId);
-    if (!emailKey) {
+    let emailKey;
+    try {
+      emailKey = await findEmailByMessageId(messageId);
+    } catch (findError: any) {
+      console.error("❌ Error in findEmailByMessageId:", findError);
       return NextResponse.json(
-        { error: "Email not found", messageId },
+        {
+          error: "Failed to search for email",
+          details: findError?.message || "Database query failed",
+          messageId: messageId.substring(0, 50) + "...",
+        },
+        { status: 500 },
+      );
+    }
+    
+    if (!emailKey) {
+      console.warn("❌ Email not found with messageId:", messageId.substring(0, 50));
+      return NextResponse.json(
+        { error: "Email not found", messageId: messageId.substring(0, 50) + "..." },
         { status: 404 },
       );
     }
 
-    const getCommand = new GetItemCommand({
-      TableName: EMAILS_TABLE,
-      Key: {
-        userId: { S: emailKey.userId },
-        receivedAt: { S: emailKey.receivedAt },
-      },
-    });
+    let result;
+    try {
+      const getCommand = new GetItemCommand({
+        TableName: EMAILS_TABLE,
+        Key: {
+          userId: { S: emailKey.userId },
+          receivedAt: { S: emailKey.receivedAt },
+        },
+      });
 
-    const result = await ddb.send(getCommand);
+      result = await ddb.send(getCommand);
+    } catch (dbError: any) {
+      console.error("❌ DynamoDB GetItem error:", dbError);
+      return NextResponse.json(
+        {
+          error: "Database error",
+          details: dbError?.message || "Failed to retrieve email from database",
+        },
+        { status: 500 },
+      );
+    }
+    
     const item = result.Item;
 
     if (!item) {
@@ -235,11 +272,16 @@ export async function GET(
 
     return NextResponse.json({ ok: true, email });
   } catch (err: any) {
-    console.error("Error fetching email by messageId:", err?.message || err);
+    console.error("❌ [GET /api/email/[messageId]] Unexpected error:", {
+      message: err?.message,
+      stack: err?.stack,
+      name: err?.name,
+    });
     return NextResponse.json(
       {
         error: "Failed to fetch email",
         details: err?.message || "Internal Server Error",
+        type: err?.name || "UnknownError",
       },
       { status: 500 },
     );
