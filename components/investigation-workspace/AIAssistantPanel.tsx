@@ -42,14 +42,77 @@ export function AIAssistantPanel({ emailId, onQuery }: AIAssistantPanelProps) {
   const [input, setInput] = useState("")
   const [messages, setMessages] = useState<Message[]>([])
   const [isTyping, setIsTyping] = useState(false)
+  const [connectionStatus, setConnectionStatus] = useState<{
+    connected: boolean
+    checking: boolean
+    neo4j?: boolean
+    openai?: string
+    error?: string
+  }>({ connected: false, checking: true })
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, isTyping])
 
+  // Check connection status on mount and periodically
+  useEffect(() => {
+    const checkConnection = async () => {
+      console.log('🔍 [Investigation Assistant] Checking Neo4j connection status...')
+      try {
+        const response = await fetch('/api/test-neo4j-connection')
+        const data = await response.json()
+
+        console.log('📊 [Investigation Assistant] Connection check result:', {
+          success: data.success,
+          neo4j: data.neo4j,
+          openai: data.openai
+        })
+
+        setConnectionStatus({
+          connected: data.success === true,
+          checking: false,
+          neo4j: data.neo4j?.connected,
+          openai: data.openai?.status,
+          error: data.success ? undefined : (data.error || data.message)
+        })
+
+        if (!data.success) {
+          console.error('❌ [Investigation Assistant] Connection failed:', {
+            error: data.error,
+            message: data.message,
+            details: data.details
+          })
+        } else {
+          console.log('✅ [Investigation Assistant] Successfully connected to Neo4j and OpenAI')
+        }
+      } catch (error) {
+        console.error('❌ [Investigation Assistant] Failed to check connection:', error)
+        setConnectionStatus({
+          connected: false,
+          checking: false,
+          error: error instanceof Error ? error.message : 'Connection check failed'
+        })
+      }
+    }
+
+    // Check immediately
+    checkConnection()
+
+    // Check every 30 seconds
+    const interval = setInterval(checkConnection, 30000)
+
+    return () => clearInterval(interval)
+  }, [])
+
   const sendToAssistant = async (prompt: string) => {
     if (!prompt.trim() || !emailId) return
+
+    console.log('💬 [Investigation Assistant] Sending query:', {
+      prompt: prompt.trim(),
+      emailId,
+      timestamp: new Date().toISOString()
+    })
 
     const userMessage: Message = { role: "user", content: prompt.trim(), timestamp: new Date() }
     setMessages((prev) => [...prev, userMessage])
@@ -57,6 +120,9 @@ export function AIAssistantPanel({ emailId, onQuery }: AIAssistantPanelProps) {
     onQuery?.(prompt)
 
     try {
+      console.log('📡 [Investigation Assistant] Calling /api/investigate/chat...')
+      const startTime = performance.now()
+
       const response = await fetch("/api/investigate/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -66,7 +132,19 @@ export function AIAssistantPanel({ emailId, onQuery }: AIAssistantPanelProps) {
         }),
       })
 
+      const endTime = performance.now()
+      console.log(`⏱️ [Investigation Assistant] API call took ${(endTime - startTime).toFixed(0)}ms`)
+
       const data = await response.json()
+
+      console.log('📨 [Investigation Assistant] Response received:', {
+        status: response.status,
+        success: data?.success,
+        hasResponse: !!data?.response,
+        responseLength: data?.response?.length || 0,
+        error: data?.error
+      })
+
       const assistantContent = data?.response || data?.answer || data?.message
 
       const assistantMessage: Message = {
@@ -77,7 +155,14 @@ export function AIAssistantPanel({ emailId, onQuery }: AIAssistantPanelProps) {
       }
 
       setMessages((prev) => [...prev, assistantMessage])
+
+      if (data?.success) {
+        console.log('✅ [Investigation Assistant] Query completed successfully')
+      } else {
+        console.warn('⚠️ [Investigation Assistant] Query completed with error:', data?.error)
+      }
     } catch (error: unknown) {
+      console.error('❌ [Investigation Assistant] Query failed:', error)
       const message = error instanceof Error ? error.message : "Investigation assistant unavailable."
       setMessages((prev) => [
         ...prev,
@@ -105,14 +190,37 @@ export function AIAssistantPanel({ emailId, onQuery }: AIAssistantPanelProps) {
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-teal to-electric-blue flex items-center justify-center">
             <Sparkles className="w-4 h-4 text-primary-foreground" />
           </div>
-          <div>
+          <div className="flex-1">
             <h3 className="font-semibold text-sm text-foreground">Investigation Assistant</h3>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse" />
-              <span className="text-xs text-muted-foreground">Connected</span>
+              {connectionStatus.checking ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                  <span className="text-xs text-muted-foreground">Checking...</span>
+                </>
+              ) : connectionStatus.connected ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-cyber-green animate-pulse" />
+                  <span className="text-xs text-cyber-green">Connected</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-danger" />
+                  <span className="text-xs text-danger" title={connectionStatus.error}>
+                    Disconnected
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
+        {!connectionStatus.connected && !connectionStatus.checking && (
+          <div className="mt-2 p-2 rounded-lg bg-danger/10 border border-danger/30">
+            <p className="text-xs text-danger">
+              Neo4j connection failed. Check console (F12) for details.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="p-4 border-b border-border/50 shrink-0">
