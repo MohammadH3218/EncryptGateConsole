@@ -87,10 +87,18 @@ async function findEmailByMessageId(
 // GET: retrieve email detail by messageId (always returns JSON, even on failure)
 export async function GET(
   _request: Request,
-  { params }: { params: { messageId: string } },
+  { params }: { params: Promise<{ messageId: string }> },
 ) {
   try {
-    const messageId = params?.messageId;
+    const { messageId: rawMessageId } = await params;
+    // Decode URL-encoded messageId (safely handle already-decoded strings)
+    let messageId: string;
+    try {
+      messageId = decodeURIComponent(rawMessageId);
+    } catch {
+      // If decoding fails, use the raw value (might already be decoded)
+      messageId = rawMessageId;
+    }
 
     if (!messageId) {
       return NextResponse.json(
@@ -176,14 +184,15 @@ export async function PATCH(
   try {
     console.log("📧 PATCH /api/email/[messageId] - Updating email status...");
 
-    // Note: ORG_ID might not be required in all environments
-    if (!ORG_ID) {
-      console.warn(
-        "⚠️ ORGANIZATION_ID not set, proceeding without org validation",
-      );
+    const { messageId: rawMessageId } = await params;
+    // Decode URL-encoded messageId (safely handle already-decoded strings)
+    let messageId: string;
+    try {
+      messageId = decodeURIComponent(rawMessageId);
+    } catch {
+      // If decoding fails, use the raw value (might already be decoded)
+      messageId = rawMessageId;
     }
-
-    const { messageId } = await params;
     console.log("📧 Processing messageId:", messageId);
 
     const body = await request.json();
