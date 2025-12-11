@@ -7,7 +7,7 @@ import os
 import traceback
 from datetime import datetime
 
-# Initialize the blueprint and logger
+# Initialize the blueprint
 auth_routes = Blueprint('auth_routes', __name__)
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
