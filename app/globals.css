@@ -25,6 +25,10 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.35);
   --shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.45);
+  --teal: #14b8a6;
+  --electric-blue: #06b6d4;
+  --cyber-green: #22c55e;
+  --warning-strong: #f59e0b;
 }
 
 html,
@@ -346,6 +350,71 @@ button {
   background: var(--sidebar-active);
   border-left: 3px solid var(--accent-primary);
   color: #cbd5e1;
+}
+
+.glass {
+  background: radial-gradient(circle at 10% 20%, rgba(14, 184, 166, 0.08), transparent 35%),
+    radial-gradient(circle at 80% 0%, rgba(6, 182, 212, 0.05), transparent 35%),
+    rgba(18, 18, 18, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.glass-card {
+  background: linear-gradient(145deg, rgba(15, 23, 42, 0.8), rgba(6, 12, 24, 0.85));
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.glow-teal {
+  box-shadow: 0 0 0 1px rgba(20, 184, 166, 0.3), 0 15px 45px rgba(20, 184, 166, 0.15);
+}
+
+.transition-smooth {
+  transition: all 180ms ease;
+}
+
+.bg-teal {
+  background-color: var(--teal);
+}
+
+.text-teal {
+  color: var(--teal);
+}
+
+.bg-electric-blue {
+  background-color: var(--electric-blue);
+}
+
+.text-electric-blue {
+  color: var(--electric-blue);
+}
+
+.bg-cyber-green {
+  background-color: var(--cyber-green);
+}
+
+.text-cyber-green {
+  color: var(--cyber-green);
+}
+
+.bg-danger {
+  background-color: var(--danger);
+}
+
+.text-danger {
+  color: var(--danger);
+}
+
+.bg-warning {
+  background-color: var(--warning-strong);
+}
+
+.text-warning {
+  color: var(--warning-strong);
 }
 
 @layer base {
