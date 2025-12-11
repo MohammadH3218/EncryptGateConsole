@@ -106,8 +106,9 @@ export default function AssignmentsPage() {
   }, []);
 
   const handleContinueInvestigation = (id: string) => {
+    const orgId = params.orgId as string;
     const encodedId = encodeURIComponent(id);
-    window.open(`/investigate/${encodedId}`, "_blank", "noopener,noreferrer");
+    window.open(`/o/${orgId}/admin/investigate/${encodedId}`, "_blank", "noopener,noreferrer");
   };
 
   const getSeverityBadgeClass = (severity: string) => {

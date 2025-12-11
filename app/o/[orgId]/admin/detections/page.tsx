@@ -777,14 +777,16 @@ export default function AdminDetectionsPage() {
       }
 
       // Navigate to investigation page (this should always work)
-      const navigationUrl = `/investigate/${encodedMessageId}`;
+      const orgId = params.orgId as string;
+      const navigationUrl = `/o/${orgId}/admin/investigate/${encodedMessageId}`;
       console.log("🧭 Opening investigation tab:", navigationUrl);
 
       window.open(navigationUrl, "_blank", "noopener,noreferrer");
     } catch (error) {
       console.error("❌ Unexpected error during investigation setup:", error);
       // Always try to navigate to investigation page as last resort
-      const fallbackUrl = `/investigate/${encodeURIComponent(detection.emailMessageId)}`;
+      const orgId = params.orgId as string;
+      const fallbackUrl = `/o/${orgId}/admin/investigate/${encodeURIComponent(detection.emailMessageId)}`;
       console.log("🔄 Fallback investigation tab:", fallbackUrl);
       window.open(fallbackUrl, "_blank", "noopener,noreferrer");
     }

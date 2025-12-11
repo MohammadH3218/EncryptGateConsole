@@ -137,7 +137,7 @@ export function DetectionDialog({
       String(detection.id);
     const encodedId = encodeURIComponent(rawId);
 
-    const target = `/investigate/${encodedId}`;
+    const target = `/o/${orgId}/admin/investigate/${encodedId}`;
 
     window.open(target, "_blank", "noopener,noreferrer");
     onOpenChange(false);

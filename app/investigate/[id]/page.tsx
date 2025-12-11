@@ -16,7 +16,11 @@ const GRAPH_TRIGGERS = ["sender", "recipient", "emails", "campaign", "graph", "r
 export default function InvestigationPage() {
   const params = useParams()
   const router = useRouter()
-  const emailId = decodeURIComponent(params.id as string)
+  // Next.js already decodes route parameters, but we need to handle it carefully
+  // Get the raw id and ensure proper encoding for API calls
+  const rawId = params.id as string
+  // Only decode if it looks encoded (contains %)
+  const emailId = rawId.includes('%') ? decodeURIComponent(rawId) : rawId
 
   const [investigation, setInvestigation] = useState<InvestigationSummary | null>(null)
   const [emailData, setEmailData] = useState<EmailDetails | null>(null)
@@ -44,6 +48,9 @@ export default function InvestigationPage() {
       setLoading(true)
       setError(null)
 
+      console.log("📧 [Investigate Page] Loading data for emailId:", emailId)
+      console.log("📧 [Investigate Page] Raw params.id:", params.id)
+
       try {
         const invRes = await fetch(`/api/investigations?emailMessageId=${encodeURIComponent(emailId)}`)
         if (invRes.ok) {
@@ -56,7 +63,11 @@ export default function InvestigationPage() {
         console.warn("Failed to load investigation:", e)
       }
 
-      const emailRes = await fetch(`/api/email/${encodeURIComponent(emailId)}`)
+      // Use the raw params.id for the API call to avoid double encoding issues
+      // But encode it properly for the URL
+      const apiMessageId = encodeURIComponent(emailId)
+      console.log("📧 [Investigate Page] Calling API with encoded messageId:", apiMessageId)
+      const emailRes = await fetch(`/api/email/${apiMessageId}`)
       const rawBody = await emailRes.text()
 
       let parsed: any = null
