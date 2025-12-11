@@ -588,38 +588,102 @@ async function runQuery(cypher: string): Promise<any[]> {
 }
 
 // === Fetch Email Context ===
+// Helper function to normalize messageId (remove angle brackets if present)
+function normalizeMessageId(messageId: string): string {
+  return messageId.replace(/^<|>$/g, '');
+}
+
+// Helper function to get messageId variations (handles encoding issues and brackets)
+function getMessageIdVariations(messageId: string): string[] {
+  const variations: string[] = [messageId];
+  
+  // Normalize (remove brackets)
+  const normalized = normalizeMessageId(messageId);
+  if (normalized !== messageId && !variations.includes(normalized)) {
+    variations.push(normalized);
+  }
+  
+  // Try with brackets if not present
+  const withBrackets = messageId.startsWith('<') ? messageId : `<${messageId}>`;
+  if (!variations.includes(withBrackets)) {
+    variations.push(withBrackets);
+  }
+  
+  // Try with brackets on normalized version
+  const normalizedWithBrackets = `<${normalized}>`;
+  if (!variations.includes(normalizedWithBrackets)) {
+    variations.push(normalizedWithBrackets);
+  }
+  
+  // Try with spaces replaced by underscores (common encoding issue)
+  if (messageId.includes(' ')) {
+    const withUnderscores = messageId.replace(/ /g, '_');
+    if (!variations.includes(withUnderscores)) {
+      variations.push(withUnderscores);
+    }
+  }
+  
+  // Try with underscores replaced by spaces
+  if (messageId.includes('_')) {
+    const withSpaces = messageId.replace(/_/g, ' ');
+    if (!variations.includes(withSpaces)) {
+      variations.push(withSpaces);
+    }
+  }
+  
+  // Remove duplicates
+  return [...new Set(variations)];
+}
+
 export async function fetchEmailContext(messageId: string): Promise<string> {
   try {
-    const q = `
-    MATCH (u:User)-[:WAS_SENT]->(e:Email {messageId:$m})
-    OPTIONAL MATCH (e)-[:WAS_SENT_TO]->(r:User)
-    RETURN u.email AS sender, collect(r.email) AS recipients,
-           e.sentDate AS date, e.subject AS subject, e.body AS body
-    `
-    const driver = await getDriver()
-    const session = driver.session()
-    const result = await session.run(q, { m: messageId })
-    await session.close()
+    // Get all variations to try
+    const variations = getMessageIdVariations(messageId);
+    console.log(`🔍 Trying ${variations.length} messageId variations:`, variations.slice(0, 3));
     
-    if (result.records.length === 0) {
-      console.log(`📧 No email context found for messageId: ${messageId}`)
-      return ''
+    const driver = await getDriver();
+    const session = driver.session();
+    
+    // Try each variation until we find a match
+    for (const variant of variations) {
+      try {
+        const q = `
+        MATCH (u:User)-[:WAS_SENT]->(e:Email {messageId:$m})
+        OPTIONAL MATCH (e)-[:WAS_SENT_TO]->(r:User)
+        RETURN u.email AS sender, collect(r.email) AS recipients,
+               e.sentDate AS date, e.subject AS subject, e.body AS body
+        LIMIT 1
+        `;
+        
+        const result = await session.run(q, { m: variant });
+        
+        if (result.records.length > 0) {
+          await session.close();
+          const rec = result.records[0].toObject() as any;
+          const snippet = (rec.body || '').replace(/\n/g, ' ').slice(0, 200);
+          console.log(`✅ Found email with messageId variant: ${variant}`);
+          return [
+            `Investigating Email:`,
+            `- Message-ID: ${variant}`,
+            `- From: ${rec.sender}`,
+            `- To: ${rec.recipients?.join(', ') || 'N/A'}`,
+            `- Date: ${rec.date}`,
+            `- Subject: ${rec.subject || 'N/A'}`,
+            `- Snippet: ${snippet}…`
+          ].join('\n');
+        }
+      } catch (queryError) {
+        // Continue to next variation
+        console.warn(`⚠️ Query failed for variant ${variant}:`, queryError);
+      }
     }
-
-    const rec = result.records[0].toObject() as any
-    const snippet = (rec.body || '').replace(/\n/g,' ').slice(0,200)
-    return [
-      `Investigating Email:`,
-      `- Message-ID: ${messageId}`,
-      `- From: ${rec.sender}`,
-      `- To: ${rec.recipients.join(', ')}`,
-      `- Date: ${rec.date}`,
-      `- Subject: ${rec.subject}`,
-      `- Snippet: ${snippet}…`
-    ].join('\n')
+    
+    await session.close();
+    console.log(`📧 No email context found for messageId after trying ${variations.length} variations: ${messageId}`);
+    return '';
   } catch (error) {
-    console.error('❌ Failed to fetch email context:', error)
-    return ''
+    console.error('❌ Failed to fetch email context:', error);
+    return '';
   }
 }
 
@@ -692,7 +756,17 @@ export async function askInvestigationAssistant(
     const schemaOverview = await getSchemaOverview()
     const scenario = await fetchEmailContext(messageId)
     if (!scenario) {
-      return `❌ No email found with Message-ID "${messageId}". Please verify the email exists in the database.`
+      return `❌ No email found with Message-ID "${messageId}". Please verify the email exists in the Neo4j database. 
+
+**Possible reasons:**
+- The email may not have been synced to Neo4j yet
+- The Message-ID format may not match (tried multiple variations)
+- The email may only exist in DynamoDB
+
+**Suggested actions:**
+- Check if the email exists in DynamoDB
+- Verify the email was processed through the ingestion pipeline
+- Try re-syncing the email to Neo4j if needed`
     }
 
     const attempts: string[] = []
