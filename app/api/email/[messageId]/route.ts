@@ -84,13 +84,13 @@ async function findEmailByMessageId(
   }
 }
 
-// GET: retrieve email detail by messageId
+// GET: retrieve email detail by messageId (always returns JSON, even on failure)
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ messageId: string }> },
+  { params }: { params: { messageId: string } },
 ) {
   try {
-    const { messageId } = await params;
+    const messageId = params?.messageId;
 
     if (!messageId) {
       return NextResponse.json(
@@ -158,9 +158,12 @@ export async function GET(
 
     return NextResponse.json({ ok: true, email });
   } catch (err: any) {
-    console.error("Error fetching email by messageId:", err);
+    console.error("Error fetching email by messageId:", err?.message || err);
     return NextResponse.json(
-      { error: "Failed to fetch email", details: err.message },
+      {
+        error: "Failed to fetch email",
+        details: err?.message || "Internal Server Error",
+      },
       { status: 500 },
     );
   }
