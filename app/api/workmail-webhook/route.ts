@@ -8,6 +8,8 @@ import {
 } from '@aws-sdk/client-dynamodb'
 import { ddb } from '@/lib/aws'
 import { z } from 'zod'
+import { getDriver } from '@/lib/neo4j'
+import neo4j from 'neo4j-driver'
 
 const ORG_ID          = process.env.ORGANIZATION_ID      || 'default-org'
 const CS_TABLE        = process.env.CLOUDSERVICES_TABLE  || 'CloudServices'
@@ -288,15 +290,69 @@ export async function POST(req: Request) {
           }
         }
 
-        // Update graph
+        // Add email to Neo4j graph directly
         try {
-          await fetch(`${BASE_URL}/api/graph`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'add_email', data: { ...emailData, userId } })
+          console.log('📊 Adding email to Neo4j graph...')
+          const driver = await getDriver()
+          const session = driver.session()
+          
+          const neo4jQuery = `
+            // Create or merge sender
+            MERGE (sender:User {email: $senderEmail})
+            ON CREATE SET sender.createdAt = datetime()
+            
+            // Create email node (use MERGE to avoid duplicates)
+            MERGE (e:Email {messageId: $messageId})
+            ON CREATE SET 
+              e.subject = $subject,
+              e.body = $body,
+              e.sentDate = $sentDate,
+              e.direction = $direction,
+              e.size = $size
+            ON MATCH SET
+              e.subject = $subject,
+              e.body = $body,
+              e.sentDate = $sentDate,
+              e.direction = $direction,
+              e.size = $size
+            
+            // Create relationship: sender sent email
+            MERGE (sender)-[:WAS_SENT]->(e)
+            
+            // Create or merge recipients and relationships
+            WITH e
+            UNWIND $recipients AS recipientEmail
+            MERGE (recipient:User {email: recipientEmail})
+            ON CREATE SET recipient.createdAt = datetime()
+            MERGE (e)-[:WAS_SENT_TO]->(recipient)
+            
+            // Handle URLs if present
+            WITH e
+            UNWIND CASE WHEN $urls IS NOT NULL AND size($urls) > 0 THEN $urls ELSE [] END AS urlString
+            MERGE (url:URL {url: urlString})
+            ON CREATE SET url.createdAt = datetime()
+            MERGE (e)-[:CONTAINS_URL]->(url)
+            
+            RETURN e.messageId as messageId
+          `
+          
+          const result = await session.run(neo4jQuery, {
+            messageId: emailData.messageId,
+            senderEmail: emailData.sender,
+            subject: emailData.subject || 'No Subject',
+            body: emailData.body || '',
+            sentDate: emailData.timestamp,
+            direction: emailData.direction || 'inbound',
+            size: emailData.size || 0,
+            recipients: emailData.recipients || [],
+            urls: emailData.urls || []
           })
-        } catch (graphErr) {
-          console.warn('⚠️ Graph update call failed:', graphErr)
+          
+          await session.close()
+          console.log('✅ Email successfully added to Neo4j graph:', emailData.messageId)
+        } catch (graphErr: any) {
+          console.error('❌ Failed to add email to Neo4j graph:', graphErr.message)
+          // Don't fail the whole request if Neo4j fails - email is still in DynamoDB
         }
 
         console.log('🎉 S3-processed email handling complete')
@@ -379,6 +435,71 @@ export async function POST(req: Request) {
           : emailData.recipients[recipientsMonitored.findIndex(Boolean)] || emailData.recipients[0]
         
         await storeEmailInDynamoDB(emailData, userId)
+        
+        // Add email to Neo4j graph directly
+        try {
+          console.log('📊 Adding WorkMail email to Neo4j graph...')
+          const driver = await getDriver()
+          const session = driver.session()
+          
+          const neo4jQuery = `
+            // Create or merge sender
+            MERGE (sender:User {email: $senderEmail})
+            ON CREATE SET sender.createdAt = datetime()
+            
+            // Create email node (use MERGE to avoid duplicates)
+            MERGE (e:Email {messageId: $messageId})
+            ON CREATE SET 
+              e.subject = $subject,
+              e.body = $body,
+              e.sentDate = $sentDate,
+              e.direction = $direction,
+              e.size = $size
+            ON MATCH SET
+              e.subject = $subject,
+              e.body = $body,
+              e.sentDate = $sentDate,
+              e.direction = $direction,
+              e.size = $size
+            
+            // Create relationship: sender sent email
+            MERGE (sender)-[:WAS_SENT]->(e)
+            
+            // Create or merge recipients and relationships
+            WITH e
+            UNWIND $recipients AS recipientEmail
+            MERGE (recipient:User {email: recipientEmail})
+            ON CREATE SET recipient.createdAt = datetime()
+            MERGE (e)-[:WAS_SENT_TO]->(recipient)
+            
+            // Handle URLs if present
+            WITH e
+            UNWIND CASE WHEN $urls IS NOT NULL AND size($urls) > 0 THEN $urls ELSE [] END AS urlString
+            MERGE (url:URL {url: urlString})
+            ON CREATE SET url.createdAt = datetime()
+            MERGE (e)-[:CONTAINS_URL]->(url)
+            
+            RETURN e.messageId as messageId
+          `
+          
+          const result = await session.run(neo4jQuery, {
+            messageId: emailData.messageId,
+            senderEmail: emailData.sender,
+            subject: emailData.subject || 'No Subject',
+            body: emailData.body || '',
+            sentDate: emailData.timestamp,
+            direction: emailData.direction || 'inbound',
+            size: emailData.size || 0,
+            recipients: emailData.recipients || [],
+            urls: emailData.urls || []
+          })
+          
+          await session.close()
+          console.log('✅ WorkMail email successfully added to Neo4j graph:', emailData.messageId)
+        } catch (graphErr: any) {
+          console.error('❌ Failed to add WorkMail email to Neo4j graph:', graphErr.message)
+          // Don't fail the whole request if Neo4j fails - email is still in DynamoDB
+        }
         
         console.log('✅ WorkMail email processed')
         return NextResponse.json({
