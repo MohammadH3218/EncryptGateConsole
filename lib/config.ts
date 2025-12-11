@@ -120,6 +120,34 @@ export function validateOpenAIKey(key: string): boolean {
 }
 
 /**
+ * Check if we're running in a production/AWS environment
+ */
+function isProductionEnvironment(): boolean {
+  // Check for AWS execution environment (EC2, Lambda, ECS, etc.)
+  if (process.env.AWS_EXECUTION_ENV || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.ECS_CONTAINER_METADATA_URI) {
+    return true;
+  }
+  
+  // Check for EC2 instance metadata (non-blocking check)
+  // EC2 instances have this environment variable or can access metadata service
+  if (process.env.EC2_INSTANCE_ID || process.env.AWS_EC2_METADATA_SERVICE_ENDPOINT) {
+    return true;
+  }
+  
+  // Check for production Node environment
+  if (process.env.NODE_ENV === 'production') {
+    return true;
+  }
+  
+  // Check if we're explicitly told to use Parameter Store
+  if (process.env.USE_PARAMETER_STORE === 'true') {
+    return true;
+  }
+  
+  return false;
+}
+
+/**
  * Get Neo4j configuration from Parameter Store or environment variables
  */
 export async function getNeo4jConfig(): Promise<Neo4jConfig> {
@@ -130,19 +158,29 @@ export async function getNeo4jConfig(): Promise<Neo4jConfig> {
   }
 
   try {
-    // Try environment variables first (for local development)
-    if (process.env.NEO4J_URI && process.env.NEO4J_USER && process.env.NEO4J_PASSWORD) {
-      console.log('🔑 Using Neo4j config from environment variables');
-      const config = {
-        uri: process.env.NEO4J_URI,
-        user: process.env.NEO4J_USER,
-        password: process.env.NEO4J_PASSWORD,
-        encrypted: process.env.NEO4J_ENCRYPTED === 'true'
-      };
+    const isProduction = isProductionEnvironment();
+    
+    // In production, always use Parameter Store
+    // In development, use environment variables only if they're not pointing to localhost
+    if (!isProduction && process.env.NEO4J_URI && process.env.NEO4J_USER && process.env.NEO4J_PASSWORD) {
+      const envUri = process.env.NEO4J_URI.toLowerCase();
       
-      cachedNeo4jConfig = config;
-      neo4jFetchTime = Date.now();
-      return config;
+      // Skip environment variables if they point to localhost (likely stale config)
+      if (envUri.includes('localhost') || envUri.includes('127.0.0.1')) {
+        console.log('⚠️ Environment variables point to localhost, using Parameter Store instead');
+      } else {
+        console.log('🔑 Using Neo4j config from environment variables');
+        const config = {
+          uri: process.env.NEO4J_URI,
+          user: process.env.NEO4J_USER,
+          password: process.env.NEO4J_PASSWORD,
+          encrypted: process.env.NEO4J_ENCRYPTED === 'true'
+        };
+        
+        cachedNeo4jConfig = config;
+        neo4jFetchTime = Date.now();
+        return config;
+      }
     }
 
     // Fetch from Parameter Store
