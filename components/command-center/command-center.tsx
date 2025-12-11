@@ -3,7 +3,6 @@
 import { usePathname } from "next/navigation"
 import { Notifications } from "./notifications"
 import { ActionInbox } from "./action-inbox"
-import { CopilotShortcuts } from "./copilot-shortcuts"
 import { QueueSnapshot } from "./queue-snapshot"
 import { RecentItems } from "./recent-items"
 import { IocsPanel } from "./iocs-panel"
@@ -31,7 +30,6 @@ export function CommandCenter() {
       {/* Always-On Modules */}
       <Notifications />
       <ActionInbox />
-      <CopilotShortcuts />
       <QueueSnapshot />
       <RecentItems />
 
