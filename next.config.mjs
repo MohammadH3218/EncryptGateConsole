@@ -125,6 +125,14 @@ const nextConfig = {
         destination: '/api/orgs/:path*',
       },
       {
+        source: '/api/email/:path*',
+        destination: '/api/email/:path*',
+      },
+      {
+        source: '/api/investigations/:path*',
+        destination: '/api/investigations/:path*',
+      },
+      {
         source: '/api/:path*',
         destination: 'https://backend.console-encryptgate.net/api/:path*',
       },
