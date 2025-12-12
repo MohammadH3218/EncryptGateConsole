@@ -9,14 +9,14 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { z } from 'zod';
 import { runMultiAgentThreatDetection } from '@/lib/agents';
+import { extractOrgId, TABLES } from '@/lib/aws';
 
 //
 // ─── CONFIG ────────────────────────────────────────────────────────────────
 //
 const REGION             = process.env.AWS_REGION!;
-const ORG_ID             = process.env.ORGANIZATION_ID!;
 const EMAILS_TABLE       = process.env.EMAILS_TABLE_NAME!;
-const DETECTIONS_TABLE   = process.env.DETECTIONS_TABLE_NAME!;
+const DETECTIONS_TABLE   = process.env.DETECTIONS_TABLE_NAME! || TABLES.DETECTIONS;
 
 const ddb = new DynamoDBClient({ region: REGION });
 
@@ -96,9 +96,11 @@ export async function POST(request: Request) {
     }
 
     // 4) if a significant threat, create a detection record
-    if (analysis.threatLevel !== 'none' && analysis.threatScore > 30) {
+    // Increased threshold to 40 to reduce false positives
+    if (analysis.threatLevel !== 'none' && analysis.threatScore >= 40) {
       try {
-        await createSecurityDetection(payload, analysis);
+        const orgId = extractOrgId(request);
+        await createSecurityDetection(payload, analysis, orgId);
       } catch (err: any) {
         console.error('❌ Failed to create detection', err);
       }
@@ -226,9 +228,10 @@ async function updateEmailThreatStatus(
   let flaggedCategory: 'clean' | 'ai' | 'none' = 'none';
   let flaggedSeverity: 'low' | 'medium' | 'high' | 'critical' | undefined = undefined;
 
-  if (a.threatLevel === 'none' || (a.threatLevel === 'low' && a.threatScore < 30)) {
+  // Increased threshold to 40 to reduce false positives
+  if (a.threatLevel === 'none' || (a.threatLevel === 'low' && a.threatScore < 40)) {
     flaggedCategory = 'clean';
-  } else if (a.threatLevel !== 'none' && a.threatScore >= 30) {
+  } else if (a.threatLevel !== 'none' && a.threatScore >= 40) {
     flaggedCategory = 'ai';
     flaggedSeverity = a.threatLevel as 'low' | 'medium' | 'high' | 'critical';
   }
@@ -404,16 +407,26 @@ async function updateEmailThreatStatusDirect(
 
 async function createSecurityDetection(
   emailData: ThreatRequest,
-  a: ThreatAnalysis
+  a: ThreatAnalysis,
+  orgId: string | null
 ) {
-  const detectionId = `det-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  if (!orgId) {
+    console.warn('⚠️ Cannot create detection without orgId');
+    return;
+  }
 
+  const detectionId = `det-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const timestamp = new Date().toISOString();
+
+  // Use same structure as manual detections: detectionId + receivedAt as keys
   await ddb.send(
     new PutItemCommand({
       TableName: DETECTIONS_TABLE,
       Item: {
-        orgId:           { S: ORG_ID },
         detectionId:     { S: detectionId },
+        receivedAt:      { S: timestamp },
+        orgId:           { S: orgId },
+        organizationId:   { S: orgId }, // Support both field names for compatibility
         emailMessageId:  { S: emailData.messageId },
         severity:        { S: a.threatLevel },
         name:            { S: generateDetectionName(a) },
@@ -426,12 +439,13 @@ async function createSecurityDetection(
         recommendations: { S: JSON.stringify(generateRecommendations(a)) },
         threatScore:     { N: a.threatScore.toString() },
         confidence:      { N: a.confidence.toString() },
-        createdAt:       { S: new Date().toISOString() },
+        createdAt:       { S: timestamp },
+        manualFlag:      { BOOL: false }, // AI-flagged, not manual
       },
     })
   );
 
-  console.log(`🚨 Detection created ${detectionId} level=${a.threatLevel}`);
+  console.log(`🚨 Detection created ${detectionId} level=${a.threatLevel} for org=${orgId}`);
 }
 
 function generateDetectionName(a: ThreatAnalysis): string {

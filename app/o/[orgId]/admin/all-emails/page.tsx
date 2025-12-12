@@ -382,9 +382,10 @@ export default function AdminAllEmailsPage() {
           </Badge>
         );
       case "ai":
+        // Just show "AI" without severity for AI flags
         return (
           <Badge variant="destructive" className="bg-purple-600">
-            AI {severity && `(${severity.charAt(0).toUpperCase()}${severity.slice(1)})`}
+            AI
           </Badge>
         );
       case "clean":

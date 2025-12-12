@@ -275,7 +275,10 @@ export async function POST(req: Request) {
           console.log('🔍 Triggering threat detection for email:', emailData.messageId)
           const threatResponse = await fetch(`${BASE_URL}/api/threat-detection`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-org-id': ORG_ID, // Pass orgId in header for detection creation
+            },
             body: JSON.stringify({
               messageId: emailData.messageId,
               sender: emailData.sender,

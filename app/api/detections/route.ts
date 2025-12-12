@@ -33,6 +33,11 @@ export async function GET(request: Request) {
     const params: ScanCommandInput = {
       TableName: TABLES.DETECTIONS,
       Limit: limit,
+      // Filter by organization ID to only show detections for this org
+      FilterExpression: 'orgId = :orgId OR organizationId = :orgId',
+      ExpressionAttributeValues: {
+        ':orgId': { S: orgId },
+      },
     };
 
     if (lastKey) {
@@ -43,7 +48,7 @@ export async function GET(request: Request) {
       }
     }
 
-    console.log('🔍 Scanning DynamoDB for detections...');
+    console.log(`🔍 Scanning DynamoDB for detections (orgId: ${orgId})...`);
     const resp = await ddb.send(new ScanCommand(params));
     
     console.log(`✅ DynamoDB scan returned ${resp.Items?.length || 0} detection items`);
