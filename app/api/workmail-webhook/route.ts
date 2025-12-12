@@ -3,6 +3,7 @@ export const runtime = 'nodejs'
 import { NextResponse } from 'next/server'
 import {
   QueryCommand,
+  ScanCommand,
   PutItemCommand,
   GetItemCommand
 } from '@aws-sdk/client-dynamodb'
@@ -27,15 +28,46 @@ console.log('📧 Enhanced Webhook Handler initialized:', {
   AWS_REGION
 })
 
+// Helper function to look up orgId from CloudServices table
+async function lookupOrgIdFromWorkMail(workmailOrgId: string): Promise<string | null> {
+  try {
+    console.log('🔍 Looking up orgId for WorkMail organization:', workmailOrgId)
+    const csResp = await ddb.send(new ScanCommand({
+      TableName: CS_TABLE,
+      FilterExpression: 'organizationId = :orgId AND serviceType = :serviceType',
+      ExpressionAttributeValues: {
+        ':orgId': { S: workmailOrgId },
+        ':serviceType': { S: 'aws-workmail' }
+      },
+      Limit: 1
+    }))
+
+    if (csResp.Items && csResp.Items.length > 0) {
+      const foundOrgId = csResp.Items[0].orgId?.S
+      if (foundOrgId) {
+        console.log('✅ Found orgId from CloudServices:', foundOrgId)
+        return foundOrgId
+      }
+    }
+    console.warn(`⚠️ No CloudServices entry found for WorkMail org ${workmailOrgId}`)
+    return null
+  } catch (err) {
+    console.error('❌ Error looking up orgId from CloudServices:', err)
+    return null
+  }
+}
+
 // Enhanced schemas for different processing methods
 const S3ProcessedEmailSchema = z.object({
   messageId: z.string(),
   subject: z.string(),
   flowDirection: z.enum(['INBOUND', 'OUTBOUND']).optional(),
   orgId: z.string().optional(),
+  organizationId: z.string().optional(), // WorkMail organization ID for lookup
   envelope: z.object({
     mailFrom: z.string(),
-    recipients: z.array(z.string())
+    recipients: z.array(z.string()),
+    organizationId: z.string().optional() // Also might be in envelope
   }),
   timestamp: z.string(),
   raw: z.object({
@@ -240,8 +272,21 @@ export async function POST(req: Request) {
           s3Key: event.processingInfo.s3?.key
         })
 
-        // Extract orgId from event (use for all org-specific operations)
-        const orgId = event.orgId || ORG_ID
+        // Extract orgId by looking up WorkMail organization in CloudServices
+        let orgId = ORG_ID // Start with fallback
+        const workmailOrgId = event.organizationId || event.envelope?.organizationId
+
+        if (workmailOrgId) {
+          const lookedUpOrgId = await lookupOrgIdFromWorkMail(workmailOrgId)
+          if (lookedUpOrgId) {
+            orgId = lookedUpOrgId
+          } else {
+            console.log('⚠️ Could not find orgId for WorkMail org, using fallback:', ORG_ID)
+          }
+        } else {
+          console.log('⚠️ No WorkMail organizationId in event, using fallback:', ORG_ID)
+        }
+
         console.log('🏢 Using organization ID:', orgId)
 
         // Check monitoring status
@@ -440,8 +485,21 @@ export async function POST(req: Request) {
           hasContent: emailData.body.length > 10
         })
 
-        // Extract orgId from event (use for all org-specific operations)
-        const orgId = event.orgId || ORG_ID
+        // Extract orgId by looking up WorkMail organization in CloudServices
+        let orgId = ORG_ID // Start with fallback
+        const workmailOrgId = event.organizationId
+
+        if (workmailOrgId) {
+          const lookedUpOrgId = await lookupOrgIdFromWorkMail(workmailOrgId)
+          if (lookedUpOrgId) {
+            orgId = lookedUpOrgId
+          } else {
+            console.log('⚠️ Could not find orgId for WorkMail org, using fallback:', ORG_ID)
+          }
+        } else {
+          console.log('⚠️ No WorkMail organizationId in event, using fallback:', ORG_ID)
+        }
+
         console.log('🏢 Using organization ID:', orgId)
 
         // Apply same monitoring and storage logic as S3 path
