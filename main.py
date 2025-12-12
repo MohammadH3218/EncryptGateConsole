@@ -7,7 +7,6 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
 
-# Load environment variables
 load_dotenv()
 
 # Initialize the Flask app
