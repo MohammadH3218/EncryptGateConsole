@@ -120,17 +120,17 @@ export async function POST(request: Request) {
         severity = analysis.threatLevel || 'low';
         
         // Determine flaggedCategory based on threat analysis
-        // Increased threshold to 40 to reduce false positives
-        if (analysis.threatLevel === 'none' || (analysis.threatLevel === 'low' && threatScore < 40)) {
+        // Only flag medium, high, or critical threats to reduce false positives
+        if (analysis.threatLevel === 'none' || analysis.threatLevel === 'low') {
           flaggedCategory = 'clean';
-        } else if (analysis.threatLevel !== 'none' && threatScore >= 40) {
+        } else if (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical') {
           flaggedCategory = 'ai';
         }
 
         console.log(`✅ Threat detection completed: ${validated.messageId} - Level: ${severity}, Score: ${threatScore}, Flagged: ${flaggedCategory}`);
 
-        // Create detection if threat found (increased threshold to 40)
-        if (analysis.threatLevel !== 'none' && threatScore >= 40) {
+        // Create detection if threat found (only for medium+ threats)
+        if (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical') {
           detectionId = `det-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           
           const timestamp = new Date().toISOString();
