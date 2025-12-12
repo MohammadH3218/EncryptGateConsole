@@ -1,11 +1,9 @@
-version: '3.8'
-
 services:
   distilbert-service:
     build: .
     container_name: encryptgate-distilbert
     ports:
-      - "8000:8000"
+      - "8001:8000"
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
