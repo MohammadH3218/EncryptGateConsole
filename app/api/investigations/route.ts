@@ -9,12 +9,12 @@ import {
   UpdateItemCommand,
   ScanCommand,
 } from '@aws-sdk/client-dynamodb';
+import { extractOrgId } from '@/lib/aws';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
-const ORG_ID = process.env.ORGANIZATION_ID || 'default-org';
 const INVESTIGATIONS_TABLE = process.env.INVESTIGATIONS_TABLE_NAME || 'Investigations';
 
-console.log('🔍 Investigations API initialized with:', { REGION, ORG_ID, INVESTIGATIONS_TABLE });
+console.log('🔍 Investigations API initialized with:', { REGION, INVESTIGATIONS_TABLE });
 
 // DynamoDB client - use explicit credentials if available (for local dev)
 function getDynamoDBClient() {
@@ -35,8 +35,18 @@ const ddb = getDynamoDBClient();
 // GET: List investigations
 export async function GET(request: Request) {
   try {
-    console.log('🔍 GET /api/investigations - Loading investigations...');
-    
+    // Extract organization ID from request
+    const orgId = extractOrgId(request);
+    if (!orgId) {
+      return NextResponse.json({
+        ok: false,
+        error: 'MISSING_ORG_ID',
+        message: 'Organization ID is required'
+      }, { status: 400 });
+    }
+
+    console.log(`🔍 GET /api/investigations - Loading investigations for org: ${orgId}`);
+
     const url = new URL(request.url);
     const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '50')));
     const emailMessageId = url.searchParams.get('emailMessageId');
@@ -45,34 +55,24 @@ export async function GET(request: Request) {
     let queryParams: any = {
       TableName: INVESTIGATIONS_TABLE,
       Limit: limit,
+      // Always filter by organization
+      FilterExpression: '(orgId = :orgId OR organizationId = :orgId)',
+      ExpressionAttributeValues: {
+        ':orgId': { S: orgId }
+      }
     };
 
-    // If filtering by email, use query instead of scan
+    // If filtering by email, add to filter
     if (emailMessageId) {
-      // Use a GSI or scan with filter if no GSI exists
-      queryParams = {
-        TableName: INVESTIGATIONS_TABLE,
-        FilterExpression: 'emailMessageId = :emailMessageId',
-        ExpressionAttributeValues: {
-          ':emailMessageId': { S: emailMessageId }
-        },
-        Limit: limit,
-      };
+      queryParams.FilterExpression += ' AND emailMessageId = :emailMessageId';
+      queryParams.ExpressionAttributeValues[':emailMessageId'] = { S: emailMessageId };
     }
 
     // Add status filter if provided
     if (status) {
-      if (queryParams.FilterExpression) {
-        queryParams.FilterExpression += ' AND #status = :status';
-        queryParams.ExpressionAttributeValues[':status'] = { S: status };
-        queryParams.ExpressionAttributeNames = { '#status': 'status' };
-      } else {
-        queryParams.FilterExpression = '#status = :status';
-        queryParams.ExpressionAttributeValues = {
-          ':status': { S: status }
-        };
-        queryParams.ExpressionAttributeNames = { '#status': 'status' };
-      }
+      queryParams.FilterExpression += ' AND #status = :status';
+      queryParams.ExpressionAttributeValues[':status'] = { S: status };
+      queryParams.ExpressionAttributeNames = { '#status': 'status' };
     }
 
     const command = emailMessageId ? new ScanCommand(queryParams) : new ScanCommand(queryParams);

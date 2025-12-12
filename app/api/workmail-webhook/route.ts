@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { getDriver } from '@/lib/neo4j'
 import neo4j from 'neo4j-driver'
 
-const ORG_ID          = process.env.ORGANIZATION_ID      || 'org_f6f292857a7449bf'
+const ORG_ID          = process.env.ORGANIZATION_ID      || 'default-org' // Fallback only for local dev
 const CS_TABLE        = process.env.CLOUDSERVICES_TABLE  || 'CloudServices'
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees'
 const EMAILS_TABLE    = process.env.EMAILS_TABLE_NAME    || 'Emails'
@@ -80,21 +80,21 @@ const WorkMailMessageFlowSchema = z.object({
   }).optional()
 })
 
-async function isMonitoredEmployee(email: string): Promise<boolean> {
+async function isMonitoredEmployee(email: string, orgId: string): Promise<boolean> {
   try {
-    console.log(`🔍 Checking if ${email} is monitored...`)
-    
+    console.log(`🔍 Checking if ${email} is monitored in org ${orgId}...`)
+
     const resp = await ddb.send(new GetItemCommand({
       TableName: EMPLOYEES_TABLE,
       Key: {
-        orgId: { S: ORG_ID },
+        orgId: { S: orgId },
         email: { S: email }
       }
     }))
-    
+
     const isMonitored = Boolean(resp.Item)
     console.log(`${isMonitored ? '✅' : '❌'} ${email} is ${isMonitored ? '' : 'not '}monitored`)
-    
+
     return isMonitored
   } catch (err) {
     console.error('❌ Error checking monitored employee:', err)
@@ -239,13 +239,17 @@ export async function POST(req: Request) {
           s3Bucket: event.processingInfo.s3?.bucket,
           s3Key: event.processingInfo.s3?.key
         })
-        
+
+        // Extract orgId from event (use for all org-specific operations)
+        const orgId = event.orgId || ORG_ID
+        console.log('🏢 Using organization ID:', orgId)
+
         // Check monitoring status
-        const senderMonitored = await isMonitoredEmployee(emailData.sender)
+        const senderMonitored = await isMonitoredEmployee(emailData.sender, orgId)
         const recipientsMonitored = await Promise.all(
-          emailData.recipients.map(isMonitoredEmployee)
+          emailData.recipients.map(email => isMonitoredEmployee(email, orgId))
         )
-        
+
         const hasMonitoredParticipant = senderMonitored || recipientsMonitored.some(Boolean)
         
         // TEMPORARILY DISABLE MONITORING CHECK FOR DEBUGGING
@@ -272,12 +276,12 @@ export async function POST(req: Request) {
         // ALWAYS trigger threat detection for ALL emails (not just suspicious ones)
         // This ensures DistilBERT, VirusTotal, and Neo4j analysis runs for every email
         try {
-          console.log('🔍 Triggering threat detection for email:', emailData.messageId)
+          console.log('🔍 Triggering threat detection for email:', emailData.messageId, 'orgId:', orgId)
           const threatResponse = await fetch(`${BASE_URL}/api/threat-detection`, {
             method: 'POST',
-            headers: { 
+            headers: {
               'Content-Type': 'application/json',
-              'x-org-id': ORG_ID, // Pass orgId in header for detection creation
+              'x-org-id': orgId, // Pass orgId from event or fallback
             },
             body: JSON.stringify({
               messageId: emailData.messageId,
@@ -435,13 +439,17 @@ export async function POST(req: Request) {
           bodyLength: emailData.body.length,
           hasContent: emailData.body.length > 10
         })
-        
+
+        // Extract orgId from event (use for all org-specific operations)
+        const orgId = event.orgId || ORG_ID
+        console.log('🏢 Using organization ID:', orgId)
+
         // Apply same monitoring and storage logic as S3 path
-        const senderMonitored = await isMonitoredEmployee(emailData.sender)
+        const senderMonitored = await isMonitoredEmployee(emailData.sender, orgId)
         const recipientsMonitored = await Promise.all(
-          emailData.recipients.map(isMonitoredEmployee)
+          emailData.recipients.map(email => isMonitoredEmployee(email, orgId))
         )
-        
+
         const hasMonitoredParticipant = senderMonitored || recipientsMonitored.some(Boolean)
         
         // TEMPORARILY DISABLE MONITORING CHECK FOR DEBUGGING  
