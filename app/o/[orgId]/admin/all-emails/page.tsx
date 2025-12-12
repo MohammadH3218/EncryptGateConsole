@@ -643,8 +643,7 @@ export default function AdminAllEmailsPage() {
         flaggedBy: 'Security Analyst'
       };
 
-      // Pass orgId in header
-      const orgId = params.orgId as string;
+      // Pass orgId in header (already declared above)
       const emailUpdateResponse = await fetch(`/api/email/${encodeURIComponent(email.messageId)}`, {
         method: 'PATCH',
         headers: {
