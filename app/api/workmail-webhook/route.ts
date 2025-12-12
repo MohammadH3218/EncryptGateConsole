@@ -146,7 +146,7 @@ async function storeEmailInDynamoDB(emailData: any, userId: string): Promise<voi
       threatLevel: { S: 'none' },
       isPhishing: { BOOL: false },
       createdAt: { S: new Date().toISOString() },
-      flaggedCategory: { S: 'none' },
+      flaggedCategory: { S: 'clean' }, // Set initial state to 'clean' (will be updated after analysis)
       updatedAt: { S: new Date().toISOString() }
     }
 
