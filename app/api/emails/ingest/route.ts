@@ -80,22 +80,32 @@ export async function POST(request: Request) {
 
     console.log(`✅ Email stored: ${validated.messageId}`);
 
-    // Run threat detection
+    // Run threat detection for ALL emails (ensures flaggedCategory is set)
     let detectionCreated = false;
     let detectionId: string | null = null;
     let threatScore = 0;
     let severity: string = 'low';
+    let flaggedCategory: 'clean' | 'ai' | 'none' = 'none';
 
     try {
+      console.log(`🔍 Running threat detection for email: ${validated.messageId}`);
       const threatResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/threat-detection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messageId: validated.messageId,
+          sender: validated.from,
+          recipients: validated.to,
           subject: validated.subject,
-          from: validated.from,
-          body: validated.body || '',
-          headers: validated.headers || {},
+          body: validated.body || validated.htmlBody || '',
+          timestamp: validated.timestamp,
+          urls: [], // URLs would be extracted from body if needed
+          direction: 'inbound',
+          attachments: validated.attachments?.map(att => ({
+            filename: att.filename,
+            mimeType: att.contentType,
+            s3Key: att.s3Key,
+          })) || [],
         }),
       });
 
@@ -105,6 +115,15 @@ export async function POST(request: Request) {
 
         threatScore = analysis.threatScore || 0;
         severity = analysis.threatLevel || 'low';
+        
+        // Determine flaggedCategory based on threat analysis
+        if (analysis.threatLevel === 'none' || (analysis.threatLevel === 'low' && threatScore < 30)) {
+          flaggedCategory = 'clean';
+        } else if (analysis.threatLevel !== 'none' && threatScore >= 30) {
+          flaggedCategory = 'ai';
+        }
+
+        console.log(`✅ Threat detection completed: ${validated.messageId} - Level: ${severity}, Score: ${threatScore}, Flagged: ${flaggedCategory}`);
 
         // Create detection if threat found
         if (analysis.threatLevel !== 'none' && threatScore > 30) {
@@ -138,9 +157,13 @@ export async function POST(request: Request) {
           detectionCreated = true;
           console.log(`🚨 Detection created: ${detectionId} (${severity})`);
         }
+      } else {
+        const errorText = await threatResponse.text();
+        console.warn(`⚠️ Threat detection returned status ${threatResponse.status}: ${errorText}`);
       }
     } catch (threatError: any) {
-      console.warn('⚠️ Threat detection failed, continuing without detection:', threatError.message);
+      console.error('❌ Threat detection failed:', threatError.message);
+      // Continue without detection - email is still stored
     }
 
         // Update Neo4j graph directly

@@ -266,28 +266,45 @@ export async function POST(req: Request) {
         
         console.log('👤 Using userId for storage:', userId)
         
-        // Analyze for threats
-        const hasThreat = emailData.urls.length > 0 || containsSuspiciousKeywords(emailData.body)
-        
-        // Store email
+        // Store email first
         await storeEmailInDynamoDB(emailData, userId)
         
-        // Trigger threat detection if needed
-        if (hasThreat) {
-          try {
-            console.log('🔍 Triggering threat detection')
-            await fetch(`${BASE_URL}/api/threat-detection`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                ...emailData,
-                userId,
-                threatScore: emailData.urls.length * 20 + (containsSuspiciousKeywords(emailData.body) ? 30 : 0)
-              })
+        // ALWAYS trigger threat detection for ALL emails (not just suspicious ones)
+        // This ensures DistilBERT, VirusTotal, and Neo4j analysis runs for every email
+        try {
+          console.log('🔍 Triggering threat detection for email:', emailData.messageId)
+          const threatResponse = await fetch(`${BASE_URL}/api/threat-detection`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messageId: emailData.messageId,
+              sender: emailData.sender,
+              recipients: emailData.recipients,
+              subject: emailData.subject || 'No Subject',
+              body: emailData.body || '',
+              timestamp: emailData.timestamp,
+              urls: emailData.urls || [],
+              direction: emailData.direction || 'inbound',
+              attachments: [] // Attachments would need to be fetched from S3 if available
+            }),
+            // Don't wait for response - process asynchronously
+            signal: AbortSignal.timeout(60000) // 60 second timeout
+          })
+          
+          if (threatResponse.ok) {
+            const threatData = await threatResponse.json()
+            console.log('✅ Threat detection completed:', {
+              messageId: emailData.messageId,
+              threatLevel: threatData.analysis?.threatLevel,
+              threatScore: threatData.analysis?.threatScore,
+              flaggedCategory: threatData.analysis?.flaggedCategory
             })
-          } catch (threatErr) {
-            console.warn('⚠️ Threat detection call failed:', threatErr)
+          } else {
+            console.warn(`⚠️ Threat detection returned status ${threatResponse.status}`)
           }
+        } catch (threatErr: any) {
+          console.error('❌ Threat detection call failed:', threatErr.message)
+          // Don't fail the whole request - email is still stored
         }
 
         // Add email to Neo4j graph directly

@@ -62,15 +62,16 @@ export async function runDistilBERTAgent(
 ): Promise<DistilBERTResult> {
   try {
     const config = await getConfig();
-    const distilbertUrl = config.DISTILBERT_URL || process.env.DISTILBERT_URL;
+    const distilbertUrl = config.DISTILBERT_URL;
 
     if (!distilbertUrl) {
-      console.warn('[Agent 1] DistilBERT URL not configured, using fallback score');
+      console.warn('[Agent 1] ⚠️ DistilBERT URL not configured - check Parameter Store or environment variable');
+      console.warn('[Agent 1] Expected Parameter Store path: /encryptgate/distilbert-url');
       return {
         model_version: 'fallback',
         labels: [{ label: 'unknown', score: 0.5 }],
         phish_score: 0.5,
-        error: 'DistilBERT service not configured',
+        error: 'DistilBERT service not configured - URL missing',
       };
     }
 

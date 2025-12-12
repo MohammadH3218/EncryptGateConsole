@@ -241,6 +241,70 @@ export async function getNeo4jConfig(): Promise<Neo4jConfig> {
 }
 
 /**
+ * Get DistilBERT URL from Parameter Store or environment variable
+ */
+let cachedDistilBERTUrl: string | null = null;
+let distilBERTUrlFetchTime: number = 0;
+
+export async function getDistilBERTUrl(): Promise<string | null> {
+  // Check cache first
+  if (cachedDistilBERTUrl && Date.now() - distilBERTUrlFetchTime < CACHE_TTL) {
+    console.log('🔑 Using cached DistilBERT URL');
+    return cachedDistilBERTUrl;
+  }
+
+  try {
+    // Try environment variable first (for local development)
+    if (process.env.DISTILBERT_URL) {
+      console.log('🔑 Using DistilBERT URL from environment variable');
+      cachedDistilBERTUrl = process.env.DISTILBERT_URL;
+      distilBERTUrlFetchTime = Date.now();
+      return cachedDistilBERTUrl;
+    }
+
+    // Fetch from Parameter Store (if in production)
+    if (isProductionEnvironment()) {
+      console.log('🔑 Fetching DistilBERT URL from AWS Parameter Store...');
+      const command = new GetParameterCommand({
+        Name: '/encryptgate/distilbert-url',
+        WithDecryption: false
+      });
+
+      const response = await ssmClient.send(command);
+
+      if (!response.Parameter?.Value) {
+        console.warn('⚠️ DistilBERT URL not found in Parameter Store');
+        return null;
+      }
+
+      cachedDistilBERTUrl = response.Parameter.Value;
+      distilBERTUrlFetchTime = Date.now();
+
+      console.log('✅ DistilBERT URL successfully loaded from Parameter Store');
+      return cachedDistilBERTUrl;
+    }
+
+    // Not configured
+    console.warn('⚠️ DistilBERT URL not configured');
+    return null;
+
+  } catch (error: any) {
+    console.error('❌ Failed to get DistilBERT URL:', error);
+
+    if (error.name === 'ParameterNotFound') {
+      console.warn('⚠️ DistilBERT URL not found in Parameter Store (service may not be deployed)');
+      return null;
+    } else if (error.name === 'AccessDenied') {
+      console.error('Access denied to Parameter Store for DistilBERT URL');
+      return null;
+    } else {
+      console.error(`Failed to load DistilBERT URL: ${error.message}`);
+      return null;
+    }
+  }
+}
+
+/**
  * Get other configuration values
  */
 export async function getConfig() {
@@ -253,7 +317,7 @@ export async function getConfig() {
       region: process.env.AWS_REGION || 'us-east-1'
     },
     // DistilBERT service configuration
-    DISTILBERT_URL: process.env.DISTILBERT_URL || null,
+    DISTILBERT_URL: await getDistilBERTUrl(),
 
     // VirusTotal configuration
     VIRUSTOTAL_API_KEY: process.env.VIRUSTOTAL_API_KEY || await getVirusTotalApiKey(),

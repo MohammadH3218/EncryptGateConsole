@@ -221,50 +221,185 @@ async function updateEmailThreatStatus(
   messageId: string,
   a: ThreatAnalysis
 ) {
-  const updateExpression = `SET
-    threatLevel = :lvl,
-    threatScore = :score,
-    isPhishing = :phish,
-    isMalware = :mal,
-    isSpam = :spam,
-    threatIndicators = :inds,
-    threatReasoning = :reason,
-    threatConfidence = :conf,
-    analyzedAt = :now,
-    distilbert_score = :db_score,
-    vt_score = :vt_score,
-    context_score = :ctx_score,
-    model_version = :model,
-    vt_verdict = :vt_verdict`;
+  // Determine flaggedCategory based on threat level
+  // 'clean' for low/none threats, 'ai' for suspicious threats
+  let flaggedCategory: 'clean' | 'ai' | 'none' = 'none';
+  let flaggedSeverity: 'low' | 'medium' | 'high' | 'critical' | undefined = undefined;
 
-  const expressionValues: any = {
-    ':lvl': { S: a.threatLevel },
-    ':score': { N: a.threatScore.toString() },
-    ':phish': { BOOL: a.isPhishing },
-    ':mal': { BOOL: a.isMalware },
-    ':spam': { BOOL: a.isSpam },
-    ':inds': { S: JSON.stringify(a.indicators) },
-    ':reason': { S: a.reasoning },
-    ':conf': { N: a.confidence.toString() },
-    ':now': { S: new Date().toISOString() },
-    ':db_score': { N: (a.distilbert_score ?? 0).toString() },
-    ':vt_score': { N: (a.vt_score ?? 0).toString() },
-    ':ctx_score': { N: (a.context_score ?? 0).toString() },
-    ':model': { S: a.model_version || 'unknown' },
-    ':vt_verdict': { S: a.vt_verdict || 'UNKNOWN' },
-  };
+  if (a.threatLevel === 'none' || (a.threatLevel === 'low' && a.threatScore < 30)) {
+    flaggedCategory = 'clean';
+  } else if (a.threatLevel !== 'none' && a.threatScore >= 30) {
+    flaggedCategory = 'ai';
+    flaggedSeverity = a.threatLevel as 'low' | 'medium' | 'high' | 'critical';
+  }
 
-  await ddb.send(
-    new UpdateItemCommand({
-      TableName: EMAILS_TABLE,
-      Key: {
-        orgId: { S: ORG_ID },
-        messageId: { S: messageId },
-      },
-      UpdateExpression: updateExpression,
-      ExpressionAttributeValues: expressionValues,
-    })
-  );
+  // Use the email-helpers to update with correct table structure (userId + receivedAt)
+  try {
+    const { updateEmailAttributes, findEmailByMessageId } = await import('@/lib/email-helpers');
+    
+    // Find the email first to get the correct keys
+    const emailKey = await findEmailByMessageId(messageId);
+    if (!emailKey) {
+      console.warn(`⚠️ Email not found for threat status update: ${messageId}`);
+      // Fallback: try direct update with orgId + messageId (if table supports it)
+      await updateEmailThreatStatusDirect(messageId, a, flaggedCategory, flaggedSeverity);
+      return;
+    }
+
+    // Update flaggedCategory and severity using the helper
+    await updateEmailAttributes(messageId, {
+      flaggedCategory,
+      flaggedSeverity,
+      investigationStatus: flaggedCategory === 'ai' ? 'new' : undefined,
+    });
+
+    // Also update threat analysis fields directly
+    await updateEmailThreatStatusDirect(messageId, a, flaggedCategory, flaggedSeverity, emailKey);
+    
+    console.log(`✅ Email threat status updated: ${messageId} - flaggedCategory: ${flaggedCategory}, threatLevel: ${a.threatLevel}`);
+  } catch (error: any) {
+    console.error('❌ Failed to update email threat status:', error);
+    // Try direct update as fallback
+    await updateEmailThreatStatusDirect(messageId, a, flaggedCategory, flaggedSeverity);
+  }
+}
+
+// Direct update function for threat analysis fields
+async function updateEmailThreatStatusDirect(
+  messageId: string,
+  a: ThreatAnalysis,
+  flaggedCategory: 'clean' | 'ai' | 'none',
+  flaggedSeverity?: 'low' | 'medium' | 'high' | 'critical',
+  emailKey?: { userId: string; receivedAt: string }
+) {
+  // Try to find email if keys not provided
+  if (!emailKey) {
+    const { findEmailByMessageId } = await import('@/lib/email-helpers');
+    emailKey = await findEmailByMessageId(messageId);
+  }
+
+  if (emailKey) {
+    // Use userId + receivedAt keys (correct table structure)
+    const updateExpression = `SET
+      threatLevel = :lvl,
+      threatScore = :score,
+      isPhishing = :phish,
+      isMalware = :mal,
+      isSpam = :spam,
+      threatIndicators = :inds,
+      threatReasoning = :reason,
+      threatConfidence = :conf,
+      analyzedAt = :now,
+      distilbert_score = :db_score,
+      vt_score = :vt_score,
+      context_score = :ctx_score,
+      model_version = :model,
+      vt_verdict = :vt_verdict,
+      flaggedCategory = :flaggedCategory,
+      updatedAt = :updatedAt`;
+
+    const expressionValues: any = {
+      ':lvl': { S: a.threatLevel },
+      ':score': { N: a.threatScore.toString() },
+      ':phish': { BOOL: a.isPhishing },
+      ':mal': { BOOL: a.isMalware },
+      ':spam': { BOOL: a.isSpam },
+      ':inds': { S: JSON.stringify(a.indicators) },
+      ':reason': { S: a.reasoning },
+      ':conf': { N: a.confidence.toString() },
+      ':now': { S: new Date().toISOString() },
+      ':db_score': { N: (a.distilbert_score ?? 0).toString() },
+      ':vt_score': { N: (a.vt_score ?? 0).toString() },
+      ':ctx_score': { N: (a.context_score ?? 0).toString() },
+      ':model': { S: a.model_version || 'unknown' },
+      ':vt_verdict': { S: a.vt_verdict || 'UNKNOWN' },
+      ':flaggedCategory': { S: flaggedCategory },
+      ':updatedAt': { S: new Date().toISOString() },
+    };
+
+    if (flaggedSeverity) {
+      expressionValues[':flaggedSeverity'] = { S: flaggedSeverity };
+      // Add to update expression
+      const updateExpr = updateExpression.replace('updatedAt = :updatedAt', 'flaggedSeverity = :flaggedSeverity, updatedAt = :updatedAt');
+      await ddb.send(
+        new UpdateItemCommand({
+          TableName: EMAILS_TABLE,
+          Key: {
+            userId: { S: emailKey.userId },
+            receivedAt: { S: emailKey.receivedAt },
+          },
+          UpdateExpression: updateExpr,
+          ExpressionAttributeValues: expressionValues,
+        })
+      );
+    } else {
+      await ddb.send(
+        new UpdateItemCommand({
+          TableName: EMAILS_TABLE,
+          Key: {
+            userId: { S: emailKey.userId },
+            receivedAt: { S: emailKey.receivedAt },
+          },
+          UpdateExpression: updateExpression,
+          ExpressionAttributeValues: expressionValues,
+        })
+      );
+    }
+  } else {
+    // Fallback: try with orgId + messageId (if table supports it)
+    console.warn(`⚠️ Email not found by messageId, trying orgId + messageId: ${messageId}`);
+    const updateExpression = `SET
+      threatLevel = :lvl,
+      threatScore = :score,
+      isPhishing = :phish,
+      isMalware = :mal,
+      isSpam = :spam,
+      threatIndicators = :inds,
+      threatReasoning = :reason,
+      threatConfidence = :conf,
+      analyzedAt = :now,
+      distilbert_score = :db_score,
+      vt_score = :vt_score,
+      context_score = :ctx_score,
+      model_version = :model,
+      vt_verdict = :vt_verdict,
+      flaggedCategory = :flaggedCategory`;
+
+    const expressionValues: any = {
+      ':lvl': { S: a.threatLevel },
+      ':score': { N: a.threatScore.toString() },
+      ':phish': { BOOL: a.isPhishing },
+      ':mal': { BOOL: a.isMalware },
+      ':spam': { BOOL: a.isSpam },
+      ':inds': { S: JSON.stringify(a.indicators) },
+      ':reason': { S: a.reasoning },
+      ':conf': { N: a.confidence.toString() },
+      ':now': { S: new Date().toISOString() },
+      ':db_score': { N: (a.distilbert_score ?? 0).toString() },
+      ':vt_score': { N: (a.vt_score ?? 0).toString() },
+      ':ctx_score': { N: (a.context_score ?? 0).toString() },
+      ':model': { S: a.model_version || 'unknown' },
+      ':vt_verdict': { S: a.vt_verdict || 'UNKNOWN' },
+      ':flaggedCategory': { S: flaggedCategory },
+    };
+
+    try {
+      await ddb.send(
+        new UpdateItemCommand({
+          TableName: EMAILS_TABLE,
+          Key: {
+            orgId: { S: ORG_ID },
+            messageId: { S: messageId },
+          },
+          UpdateExpression: updateExpression,
+          ExpressionAttributeValues: expressionValues,
+        })
+      );
+    } catch (fallbackError: any) {
+      console.error('❌ Fallback update also failed:', fallbackError);
+      throw fallbackError;
+    }
+  }
 }
 
 async function createSecurityDetection(
