@@ -328,8 +328,9 @@ export async function POST(req: Request) {
         
         // ALWAYS trigger threat detection for ALL emails (not just suspicious ones)
         // This ensures DistilBERT, VirusTotal, and Neo4j analysis runs for every email
+        // IMPORTANT: Wait for threat detection to complete so email is properly flagged
         try {
-          console.log('🔍 Triggering threat detection for email:', emailData.messageId, 'orgId:', orgId)
+          console.log('🔍 Triggering threat detection for email:', emailData.messageId, 'orgId:', orgId, 'bodyLength:', emailData.body?.length || 0)
           const threatResponse = await fetch(`${BASE_URL}/api/threat-detection`, {
             method: 'POST',
             headers: {
@@ -347,24 +348,32 @@ export async function POST(req: Request) {
               direction: emailData.direction || 'inbound',
               attachments: [] // Attachments would need to be fetched from S3 if available
             }),
-            // Don't wait for response - process asynchronously
-            signal: AbortSignal.timeout(60000) // 60 second timeout
+            // Wait for response - increased timeout to ensure completion
+            signal: AbortSignal.timeout(120000) // 120 second timeout (2 minutes) for multi-agent system
           })
           
           if (threatResponse.ok) {
             const threatData = await threatResponse.json()
+            const analysis = threatData.analysis || threatData
             console.log('✅ Threat detection completed:', {
               messageId: emailData.messageId,
-              threatLevel: threatData.analysis?.threatLevel,
-              threatScore: threatData.analysis?.threatScore,
-              flaggedCategory: threatData.analysis?.flaggedCategory
+              threatLevel: analysis.threatLevel,
+              threatScore: analysis.threatScore,
+              flaggedCategory: analysis.flaggedCategory || (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical' ? 'ai' : 'clean'),
+              isPhishing: analysis.isPhishing,
+              isMalware: analysis.isMalware
             })
           } else {
-            console.warn(`⚠️ Threat detection returned status ${threatResponse.status}`)
+            const errorText = await threatResponse.text().catch(() => 'Unknown error')
+            console.error(`❌ Threat detection returned status ${threatResponse.status}:`, errorText)
           }
         } catch (threatErr: any) {
-          console.error('❌ Threat detection call failed:', threatErr.message)
-          // Don't fail the whole request - email is still stored
+          console.error('❌ Threat detection call failed:', {
+            message: threatErr.message,
+            name: threatErr.name,
+            messageId: emailData.messageId
+          })
+          // Don't fail the whole request - email is still stored, but log the error for debugging
         }
 
         // Add email to Neo4j graph directly
@@ -440,7 +449,7 @@ export async function POST(req: Request) {
           bodyLength: emailData.body.length,
           hasRealContent: emailData.body.length > 10 && !emailData.body.includes('No email content available'),
           userId: userId,
-          threatsDetected: hasThreat,
+          threatsDetected: false, // Threat detection runs asynchronously, will be updated later
           extractionMethod: event.processingInfo.extractionMethod
         })
         
