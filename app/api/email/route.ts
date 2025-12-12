@@ -101,7 +101,30 @@ export async function GET(request: Request) {
         }
 
         console.log(`🔍 Search scan iteration ${++scanCount}`);
-        const searchResp = await ddb.send(new ScanCommand(searchScanParams));
+        // Retry logic for credential errors
+        let searchResp;
+        let retries = 0;
+        const maxRetries = 3;
+        
+        while (retries < maxRetries) {
+          try {
+            searchResp = await ddb.send(new ScanCommand(searchScanParams));
+            break;
+          } catch (error: any) {
+            const awsError = handleAwsError(error, 'GET /api/email (search)');
+            if ((awsError.error === 'AWS_CREDENTIALS_EXPIRED' || awsError.error === 'AWS_ERROR') && retries < maxRetries - 1) {
+              retries++;
+              console.log(`⚠️ Credential error in search, retrying (${retries}/${maxRetries})...`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+              continue;
+            }
+            throw error;
+          }
+        }
+        
+        if (!searchResp) {
+          throw new Error('Failed to scan emails after retries');
+        }
 
         if (searchResp.Items) {
           // Filter items server-side based on search query
@@ -182,7 +205,30 @@ export async function GET(request: Request) {
         console.log(
           `📋 Scan iteration ${++scanCount}, current total: ${allScanResults.length}, target: ${neededItems}`,
         );
-        const resp = await ddb.send(new ScanCommand(scanParams));
+        // Retry logic for credential errors
+        let resp;
+        let retries = 0;
+        const maxRetries = 3;
+        
+        while (retries < maxRetries) {
+          try {
+            resp = await ddb.send(new ScanCommand(scanParams));
+            break;
+          } catch (error: any) {
+            const awsError = handleAwsError(error, 'GET /api/email');
+            if ((awsError.error === 'AWS_CREDENTIALS_EXPIRED' || awsError.error === 'AWS_ERROR') && retries < maxRetries - 1) {
+              retries++;
+              console.log(`⚠️ Credential error, retrying (${retries}/${maxRetries})...`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+              continue;
+            }
+            throw error;
+          }
+        }
+        
+        if (!resp) {
+          throw new Error('Failed to scan emails after retries');
+        }
 
         if (resp.Items) {
           allScanResults.push(...resp.Items);

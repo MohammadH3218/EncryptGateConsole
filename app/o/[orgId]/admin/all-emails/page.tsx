@@ -194,7 +194,13 @@ export default function AdminAllEmailsPage() {
         const apiUrl = `/api/email?${params}`;
         console.log('🔗 Fetching from:', apiUrl);
 
-        const res = await fetch(apiUrl);
+        // Pass orgId in header for proper filtering
+        const orgId = params.orgId as string;
+        const res = await fetch(apiUrl, {
+          headers: {
+            'x-org-id': orgId,
+          },
+        });
         console.log('📡 API Response status:', res.status);
 
         if (!res.ok) {
@@ -556,10 +562,13 @@ export default function AdminAllEmailsPage() {
         flaggedBy: 'Security Analyst'
       };
 
+      // Pass orgId in header
+      const orgId = params.orgId as string;
       const emailUpdateResponse = await fetch(`/api/email/${encodeURIComponent(email.messageId)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
+          'x-org-id': orgId,
         },
         body: JSON.stringify(updatePayload),
       });
@@ -608,10 +617,13 @@ export default function AdminAllEmailsPage() {
         return;
       }
 
+      // Pass orgId in header
+      const orgId = params.orgId as string;
       const response = await fetch(`/api/detections/${email.detectionId}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
+          'x-org-id': orgId,
         },
       });
 
@@ -631,10 +643,13 @@ export default function AdminAllEmailsPage() {
         flaggedBy: 'Security Analyst'
       };
 
+      // Pass orgId in header
+      const orgId = params.orgId as string;
       const emailUpdateResponse = await fetch(`/api/email/${encodeURIComponent(email.messageId)}`, {
         method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
+          'x-org-id': orgId,
         },
         body: JSON.stringify(updatePayload),
       });

@@ -49,9 +49,49 @@ export async function GET(request: Request) {
     }
 
     console.log(`🔍 Scanning DynamoDB for detections (orgId: ${orgId})...`);
-    const resp = await ddb.send(new ScanCommand(params));
+    console.log(`FilterExpression: orgId = :orgId OR organizationId = :orgId`);
+    
+    // Retry logic for credential errors
+    let resp;
+    let retries = 0;
+    const maxRetries = 3;
+    
+    while (retries < maxRetries) {
+      try {
+        resp = await ddb.send(new ScanCommand(params));
+        break; // Success, exit retry loop
+      } catch (error: any) {
+        const awsError = handleAwsError(error, 'GET /api/detections');
+        
+        // If it's a credential error and we have retries left, wait and retry
+        if ((awsError.error === 'AWS_CREDENTIALS_EXPIRED' || awsError.error === 'AWS_ERROR') && retries < maxRetries - 1) {
+          retries++;
+          console.log(`⚠️ Credential error detected, retrying (${retries}/${maxRetries})...`);
+          // Wait a bit for credentials to refresh
+          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+          continue;
+        }
+        
+        // If it's not a credential error or we're out of retries, throw
+        throw error;
+      }
+    }
+    
+    if (!resp) {
+      throw new Error('Failed to scan detections after retries');
+    }
     
     console.log(`✅ DynamoDB scan returned ${resp.Items?.length || 0} detection items`);
+    
+    // Log orgId values found in detections for debugging
+    if (resp.Items && resp.Items.length > 0) {
+      const orgIds = resp.Items.map(item => ({
+        orgId: item.orgId?.S,
+        organizationId: item.organizationId?.S,
+        detectionId: item.detectionId?.S,
+      }));
+      console.log(`📊 Sample detection orgIds:`, orgIds.slice(0, 3));
+    }
 
     if (!resp.Items || resp.Items.length === 0) {
       console.log('ℹ️ No detections found, returning empty array');
@@ -155,7 +195,29 @@ export async function POST(request: Request) {
       emailMessageId: body.emailMessageId 
     });
     
-    await ddb.send(new PutItemCommand(putCommand));
+    // Retry logic for credential errors
+    let retries = 0;
+    const maxRetries = 3;
+    
+    while (retries < maxRetries) {
+      try {
+        await ddb.send(new PutItemCommand(putCommand));
+        break; // Success, exit retry loop
+      } catch (error: any) {
+        const awsError = handleAwsError(error, 'POST /api/detections');
+        
+        // If it's a credential error and we have retries left, wait and retry
+        if ((awsError.error === 'AWS_CREDENTIALS_EXPIRED' || awsError.error === 'AWS_ERROR') && retries < maxRetries - 1) {
+          retries++;
+          console.log(`⚠️ Credential error creating detection, retrying (${retries}/${maxRetries})...`);
+          await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+          continue;
+        }
+        
+        // If it's not a credential error or we're out of retries, throw
+        throw error;
+      }
+    }
 
     console.log('✅ Manual detection created successfully:', detectionId);
 
