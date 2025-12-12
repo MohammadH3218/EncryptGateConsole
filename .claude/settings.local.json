@@ -34,7 +34,11 @@
       "Bash(then echo '=== .env.local exists ===')",
       "Bash(else echo \".env.local not found\")",
       "Bash(fi)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(base64:*)",
+      "Bash(tar:*)",
+      "Bash(BUCKET_NAME=\"encryptgate-temp-deploy-12345\")"
     ],
     "deny": [],
     "ask": []

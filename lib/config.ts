@@ -243,7 +243,7 @@ export async function getNeo4jConfig(): Promise<Neo4jConfig> {
 /**
  * Get other configuration values
  */
-export function getConfig() {
+export async function getConfig() {
   return {
     openai: {
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -251,8 +251,78 @@ export function getConfig() {
     },
     aws: {
       region: process.env.AWS_REGION || 'us-east-1'
-    }
+    },
+    // DistilBERT service configuration
+    DISTILBERT_URL: process.env.DISTILBERT_URL || null,
+
+    // VirusTotal configuration
+    VIRUSTOTAL_API_KEY: process.env.VIRUSTOTAL_API_KEY || await getVirusTotalApiKey(),
+    VIRUSTOTAL_BASE: process.env.VIRUSTOTAL_BASE || 'https://www.virustotal.com/api/v3'
   };
+}
+
+/**
+ * Get VirusTotal API key from Parameter Store or environment variable
+ */
+let cachedVTKey: string | null = null;
+let vtKeyFetchTime: number = 0;
+
+export async function getVirusTotalApiKey(): Promise<string | null> {
+  // Check cache first
+  if (cachedVTKey && Date.now() - vtKeyFetchTime < CACHE_TTL) {
+    console.log('🔑 Using cached VirusTotal key');
+    return cachedVTKey;
+  }
+
+  try {
+    // Try environment variable first (for local development)
+    if (process.env.VIRUSTOTAL_API_KEY) {
+      console.log('🔑 Using VirusTotal key from environment variable');
+      cachedVTKey = process.env.VIRUSTOTAL_API_KEY;
+      vtKeyFetchTime = Date.now();
+      return cachedVTKey;
+    }
+
+    // Fetch from Parameter Store (if in production)
+    if (isProductionEnvironment()) {
+      console.log('🔑 Fetching VirusTotal key from AWS Parameter Store...');
+      const command = new GetParameterCommand({
+        Name: 'encryptgate-virustotal-key',
+        WithDecryption: true
+      });
+
+      const response = await ssmClient.send(command);
+
+      if (!response.Parameter?.Value) {
+        console.warn('⚠️ VirusTotal API key not found in Parameter Store');
+        return null;
+      }
+
+      cachedVTKey = response.Parameter.Value;
+      vtKeyFetchTime = Date.now();
+
+      console.log('✅ VirusTotal key successfully loaded from Parameter Store');
+      return cachedVTKey;
+    }
+
+    // Not configured
+    console.warn('⚠️ VirusTotal API key not configured');
+    return null;
+
+  } catch (error: any) {
+    console.error('❌ Failed to get VirusTotal API key:', error);
+
+    if (error.name === 'ParameterNotFound') {
+      console.warn('⚠️ VirusTotal API key not found in Parameter Store (optional service)');
+      return null;
+    } else if (error.name === 'AccessDenied') {
+      console.error('Access denied to Parameter Store for VirusTotal key');
+      return null;
+    } else {
+      console.error(`Failed to load VirusTotal API key: ${error.message}`);
+      return null;
+    }
+  }
 }
 
 /**
@@ -274,10 +344,20 @@ export function clearNeo4jConfigCache(): void {
 }
 
 /**
+ * Clear the cached VirusTotal API key (useful for error recovery)
+ */
+export function clearVirusTotalKeyCache(): void {
+  cachedVTKey = null;
+  vtKeyFetchTime = 0;
+  console.log('🗑️ VirusTotal API key cache cleared');
+}
+
+/**
  * Clear all cached configuration
  */
 export function clearAllCache(): void {
   clearApiKeyCache();
   clearNeo4jConfigCache();
+  clearVirusTotalKeyCache();
   console.log('🗑️ All configuration cache cleared');
 }

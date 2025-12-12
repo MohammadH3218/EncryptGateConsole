@@ -8,6 +8,7 @@ import {
   PutItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { z } from 'zod';
+import { runMultiAgentThreatDetection } from '@/lib/agents';
 
 //
 // ─── CONFIG ────────────────────────────────────────────────────────────────
@@ -16,9 +17,6 @@ const REGION             = process.env.AWS_REGION!;
 const ORG_ID             = process.env.ORGANIZATION_ID!;
 const EMAILS_TABLE       = process.env.EMAILS_TABLE_NAME!;
 const DETECTIONS_TABLE   = process.env.DETECTIONS_TABLE_NAME!;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL   = "gpt-4o-mini";
-const OPENAI_URL     = 'https://api.openai.com/v1/chat/completions';
 
 const ddb = new DynamoDBClient({ region: REGION });
 
@@ -30,12 +28,20 @@ const ThreatRequestSchema = z
     messageId:  z.string().nonempty(),
     sender:     z.string().email(),
     recipients: z.array(z.string().email()).min(1),
-    subject:    z.string().optional(),
-    body:       z.string().optional(),
+    subject:    z.string().optional().default(''),
+    body:       z.string().optional().default(''),
     timestamp:  z
       .string()
       .refine((d) => !isNaN(Date.parse(d)), { message: 'Invalid ISO timestamp' }),
-    urls:       z.array(z.string()).optional(),
+    urls:       z.array(z.string()).optional().default([]),
+    direction:  z.enum(['inbound', 'outbound']).optional().default('inbound'),
+    senderIP:   z.string().optional(), // Sender IP address for VirusTotal analysis
+    attachments: z.array(z.object({
+      filename: z.string(),
+      mimeType: z.string().optional(),
+      buffer:   z.any().optional(), // Buffer data (if available)
+      s3Key:    z.string().optional(), // Or S3 key reference
+    })).optional().default([]),
   })
   .passthrough(); // allow extra fields
 
@@ -50,36 +56,16 @@ interface ThreatAnalysis {
   indicators:  string[];
   reasoning:   string;
   confidence:  number;
+  // New fields from multi-agent system
+  distilbert_score?: number;
+  vt_score?: number;
+  context_score?: number;
+  model_version?: string;
+  vt_verdict?: string;
 }
 
 //
-// ─── THREAT ANALYSIS SYSTEM PROMPT ───────────────────────────────────────────
-//
-const THREAT_ANALYSIS_PROMPT = `You are an advanced email security analyst. Analyze the provided email content and metadata to determine potential threats.
-
-Consider these factors:
-1. Sender reputation and domain analysis
-2. Subject line patterns (urgency, typos, suspicious claims)
-3. Email body content (phishing indicators, malicious links, social engineering)
-4. URL analysis (suspicious domains, URL shorteners, typosquatting)
-5. Context and timing patterns
-
-Respond with a JSON object containing:
-{
-  "threatLevel": "none|low|medium|high|critical",
-  "threatScore": 0-100,
-  "isPhishing": boolean,
-  "isMalware": boolean,
-  "isSpam": boolean,
-  "indicators": ["list", "of", "threat", "indicators"],
-  "reasoning": "detailed explanation of the analysis",
-  "confidence": 0-100
-}
-
-Be thorough but avoid false positives for legitimate business emails.`;
-
-//
-// ─── POST: ANALYZE EMAIL THREAT ──────────────────────────────────────────────
+// ─── POST: ANALYZE EMAIL THREAT (MULTI-AGENT SYSTEM) ─────────────────────────
 //
 export async function POST(request: Request) {
   // 1) parse & validate
@@ -94,12 +80,13 @@ export async function POST(request: Request) {
     );
   }
 
-  console.log(`🔍 Analyzing threat for email: ${payload.messageId}`);
+  console.log(`🔍 [MULTI-AGENT] Analyzing threat for email: ${payload.messageId}`);
+  console.log(`   From: ${payload.sender} | To: ${payload.recipients.join(', ')}`);
 
   try {
-    // 2) perform threat analysis using LLM
-    const analysis = await analyzeThreatWithLLM(payload);
-    
+    // 2) Run multi-agent threat detection
+    const analysis = await analyzeWithMultiAgentSystem(payload);
+
     // 3) update the original email's threat status
     try {
       await updateEmailThreatStatus(payload.messageId, analysis);
@@ -117,8 +104,9 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log(`✅ Threat analysis complete: ${analysis.threatLevel} (${analysis.threatScore})`);
-    
+    console.log(`✅ Multi-agent analysis complete: ${analysis.threatLevel} (${analysis.threatScore})`);
+    console.log(`   DistilBERT: ${(analysis.distilbert_score! * 100).toFixed(1)}% | VT: ${(analysis.vt_score! * 100).toFixed(1)}% | Context: ${(analysis.context_score! * 100).toFixed(1)}%`);
+
     // 5) return to caller
     return NextResponse.json({ success: true, analysis });
   } catch (err: any) {
@@ -131,155 +119,99 @@ export async function POST(request: Request) {
 }
 
 //
-// ─── LLM-BASED THREAT ANALYSIS ───────────────────────────────────────────────
+// ─── MULTI-AGENT THREAT ANALYSIS ─────────────────────────────────────────────
 //
-async function analyzeThreatWithLLM(emailData: ThreatRequest): Promise<ThreatAnalysis> {
-  if (!OPENAI_API_KEY) {
-    console.warn('OPENAI_API_KEY not configured, falling back to rule-based analysis');
-    return fallbackThreatAnalysis(emailData);
-  }
-
-  const emailContent = `
-Email Analysis Request:
-
-Sender: ${emailData.sender}
-Recipients: ${emailData.recipients.join(', ')}
-Subject: ${emailData.subject || 'No Subject'}
-Timestamp: ${emailData.timestamp}
-
-Body:
-${emailData.body || 'No body content'}
-
-URLs Found:
-${emailData.urls?.join('\n') || 'No URLs detected'}
-
-Please analyze this email for security threats and respond with the requested JSON format.
-`;
-
+async function analyzeWithMultiAgentSystem(emailData: ThreatRequest): Promise<ThreatAnalysis> {
   try {
-    const response = await fetch(OPENAI_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        'Content-Type': 'application/json',
+    // Prepare attachment data (if available)
+    // Note: In production, you may need to fetch from S3 if only s3Key is provided
+    const attachments = (emailData.attachments || [])
+      .filter(att => att.buffer)
+      .map(att => ({
+        buffer: Buffer.isBuffer(att.buffer) ? att.buffer : Buffer.from(att.buffer),
+        filename: att.filename,
+        mimeType: att.mimeType,
+      }));
+
+    // Run multi-agent detection
+    const result = await runMultiAgentThreatDetection(
+      {
+        subject: emailData.subject || '',
+        body: emailData.body || '',
+        sender: emailData.sender,
+        recipients: emailData.recipients,
+        urls: emailData.urls || [],
+        messageId: emailData.messageId,
+        sentDate: emailData.timestamp,
+        direction: emailData.direction || 'inbound',
+        senderIP: emailData.senderIP, // Pass sender IP for VirusTotal domain/IP analysis
       },
-      body: JSON.stringify({
-        model: OPENAI_MODEL,
-        messages: [
-          { role: 'system', content: THREAT_ANALYSIS_PROMPT },
-          { role: 'user', content: emailContent },
-        ],
-        temperature: 0.1, // Low temperature for consistent analysis
-        max_tokens: 1000,
-      }),
+      attachments
+    );
+
+    // Convert to ThreatAnalysis format
+    const indicators: string[] = [];
+
+    // Add DistilBERT indicators
+    if (result.distilbert_result.phish_score > 0.5) {
+      const topLabels = result.distilbert_result.labels.slice(0, 3);
+      topLabels.forEach(label => {
+        if (label.score > 0.3) {
+          indicators.push(`DistilBERT: ${label.label} (${(label.score * 100).toFixed(1)}%)`);
+        }
+      });
+    }
+
+    // Add VirusTotal indicators
+    if (result.vt_result.aggregate_verdict !== 'CLEAN' && result.vt_result.aggregate_verdict !== 'UNKNOWN') {
+      indicators.push(`VirusTotal: ${result.vt_result.aggregate_verdict} (${result.vt_result.attachments_scanned} attachments)`);
+    }
+
+    // Add graph context indicators
+    result.graph_result.findings.forEach(finding => {
+      indicators.push(`Context: ${finding}`);
     });
 
-    if (!response.ok) {
-      throw new Error(`LLM API error: ${response.status}`);
-    }
+    // Determine malware and spam flags
+    const isMalware = result.vt_result.aggregate_verdict === 'MALICIOUS' ||
+                      result.vt_result.aggregate_verdict === 'SUSPICIOUS';
 
-    const data = await response.json();
-    const content = data.choices[0]?.message?.content || '';
-    
-    // Parse JSON response
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('Invalid LLM response format');
-    }
+    const isSpam = result.final_score >= 30 && result.final_score < 50 && !result.is_phishing;
 
-    const analysisResult = JSON.parse(jsonMatch[0]);
-    
-    // Validate and sanitize the response
     return {
-      threatLevel: analysisResult.threatLevel || 'low',
-      threatScore: Math.min(100, Math.max(0, analysisResult.threatScore || 10)),
-      isPhishing: Boolean(analysisResult.isPhishing),
-      isMalware: Boolean(analysisResult.isMalware),
-      isSpam: Boolean(analysisResult.isSpam),
-      indicators: Array.isArray(analysisResult.indicators) ? analysisResult.indicators : [],
-      reasoning: analysisResult.reasoning || 'Automated threat analysis completed',
-      confidence: Math.min(100, Math.max(0, analysisResult.confidence || 50)),
+      threatLevel: result.threat_level,
+      threatScore: result.final_score,
+      isPhishing: result.is_phishing,
+      isMalware,
+      isSpam,
+      indicators,
+      reasoning: result.copilot_result.explanation,
+      confidence: result.copilot_result.confidence,
+      distilbert_score: result.distilbert_score,
+      vt_score: result.vt_score,
+      context_score: result.context_score,
+      model_version: result.model_version,
+      vt_verdict: result.vt_result.aggregate_verdict,
     };
-  } catch (error) {
-    console.error('LLM analysis error:', error);
-    
-    // Fallback to rule-based analysis
-    return fallbackThreatAnalysis(emailData);
+
+  } catch (error: any) {
+    console.error('Multi-agent system error:', error);
+
+    // Fallback to neutral assessment on error
+    return {
+      threatLevel: 'low',
+      threatScore: 20,
+      isPhishing: false,
+      isMalware: false,
+      isSpam: false,
+      indicators: ['Error in multi-agent analysis'],
+      reasoning: `Multi-agent system error: ${error.message}. Manual review recommended.`,
+      confidence: 30,
+      distilbert_score: 0.2,
+      vt_score: 0.2,
+      context_score: 0.2,
+    };
   }
-}
-
-//
-// ─── FALLBACK RULE-BASED ANALYSIS ────────────────────────────────────────────
-//
-function fallbackThreatAnalysis(emailData: ThreatRequest): ThreatAnalysis {
-  const suspiciousKeywords = [
-    'urgent', 'immediate action', 'verify account', 'suspended',
-    'click here', 'update payment', 'confirm identity', 'tax refund',
-    'prize', 'winner', 'congratulations', 'limited time', 'act now'
-  ];
-
-  const phishingDomains = [
-    'bit.ly', 'tinyurl.com', 'goo.gl', 't.co' // URL shorteners
-  ];
-
-  let threatScore = 0;
-  const indicators: string[] = [];
-  let isPhishing = false;
-  let isSpam = false;
-
-  const subject = emailData.subject?.toLowerCase() || '';
-  const body = emailData.body?.toLowerCase() || '';
-  const urls = emailData.urls || [];
-
-  // Check for suspicious keywords
-  suspiciousKeywords.forEach(keyword => {
-    if (subject.includes(keyword) || body.includes(keyword)) {
-      threatScore += 15;
-      indicators.push(`Suspicious keyword: ${keyword}`);
-    }
-  });
-
-  // Check sender domain
-  const senderDomain = emailData.sender.split('@')[1];
-  if (senderDomain && (senderDomain.includes('temp') || senderDomain.includes('fake'))) {
-    threatScore += 25;
-    indicators.push('Suspicious sender domain');
-  }
-
-  // Check URLs
-  urls.forEach(url => {
-    phishingDomains.forEach(domain => {
-      if (url.includes(domain)) {
-        threatScore += 20;
-        indicators.push('URL shortener detected');
-        isPhishing = true;
-      }
-    });
-  });
-
-  // Urgency indicators
-  if (subject.includes('urgent') || subject.includes('immediate')) {
-    threatScore += 10;
-    indicators.push('Urgency language detected');
-  }
-
-  // Determine threat level
-  let threatLevel: ThreatAnalysis['threatLevel'] = 'none';
-  if (threatScore >= 70) threatLevel = 'critical';
-  else if (threatScore >= 50) threatLevel = 'high';
-  else if (threatScore >= 30) threatLevel = 'medium';
-  else if (threatScore >= 10) threatLevel = 'low';
-
-  return {
-    threatLevel,
-    threatScore: Math.min(100, threatScore),
-    isPhishing,
-    isMalware: false, // Basic analysis doesn't detect malware
-    isSpam: isSpam || threatScore >= 20,
-    indicators,
-    reasoning: 'Automated rule-based analysis completed due to LLM unavailability',
-    confidence: 60, // Lower confidence for rule-based analysis
-  };
 }
 
 //
@@ -289,34 +221,48 @@ async function updateEmailThreatStatus(
   messageId: string,
   a: ThreatAnalysis
 ) {
+  const updateExpression = `SET
+    threatLevel = :lvl,
+    threatScore = :score,
+    isPhishing = :phish,
+    isMalware = :mal,
+    isSpam = :spam,
+    threatIndicators = :inds,
+    threatReasoning = :reason,
+    threatConfidence = :conf,
+    analyzedAt = :now,
+    distilbert_score = :db_score,
+    vt_score = :vt_score,
+    context_score = :ctx_score,
+    model_version = :model,
+    vt_verdict = :vt_verdict`;
+
+  const expressionValues: any = {
+    ':lvl': { S: a.threatLevel },
+    ':score': { N: a.threatScore.toString() },
+    ':phish': { BOOL: a.isPhishing },
+    ':mal': { BOOL: a.isMalware },
+    ':spam': { BOOL: a.isSpam },
+    ':inds': { S: JSON.stringify(a.indicators) },
+    ':reason': { S: a.reasoning },
+    ':conf': { N: a.confidence.toString() },
+    ':now': { S: new Date().toISOString() },
+    ':db_score': { N: (a.distilbert_score ?? 0).toString() },
+    ':vt_score': { N: (a.vt_score ?? 0).toString() },
+    ':ctx_score': { N: (a.context_score ?? 0).toString() },
+    ':model': { S: a.model_version || 'unknown' },
+    ':vt_verdict': { S: a.vt_verdict || 'UNKNOWN' },
+  };
+
   await ddb.send(
     new UpdateItemCommand({
       TableName: EMAILS_TABLE,
       Key: {
-        orgId:     { S: ORG_ID },
+        orgId: { S: ORG_ID },
         messageId: { S: messageId },
       },
-      UpdateExpression:
-        `SET threatLevel       = :lvl,
-             threatScore       = :score,
-             isPhishing        = :phish,
-             isMalware         = :mal,
-             isSpam            = :spam,
-             threatIndicators  = :inds,
-             threatReasoning   = :reason,
-             threatConfidence  = :conf,
-             analyzedAt        = :now`,
-      ExpressionAttributeValues: {
-        ':lvl':  { S: a.threatLevel },
-        ':score':{ N: a.threatScore.toString() },
-        ':phish':{ BOOL: a.isPhishing },
-        ':mal':  { BOOL: a.isMalware },
-        ':spam': { BOOL: a.isSpam },
-        ':inds': { S: JSON.stringify(a.indicators) },
-        ':reason': { S: a.reasoning },
-        ':conf': { N: a.confidence.toString() },
-        ':now':  { S: new Date().toISOString() },
-      },
+      UpdateExpression: updateExpression,
+      ExpressionAttributeValues: expressionValues,
     })
   );
 }
