@@ -108,29 +108,35 @@ export async function POST(request: Request) {
     // 4) if a significant threat, create a detection record
     // Only create detections for medium, high, or critical threats (score >= 45)
     if (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical') {
-      try {
-        if (!orgId) {
-          console.error('❌ Cannot create detection: orgId not found in request');
-          console.log('Request URL:', request.url);
-          console.log('Request headers:', Object.fromEntries(request.headers.entries()));
-          console.log('Available headers:', Array.from(request.headers.keys()));
-        } else {
-          console.log(`🚨 Creating detection for AI-flagged email: ${payload.messageId}, orgId: ${orgId}, severity: ${analysis.threatLevel}`);
-          const detectionId = await createSecurityDetection(payload, analysis, orgId);
-          console.log(`✅ Detection created successfully: ${detectionId} for email: ${payload.messageId}`);
+      // CRITICAL: orgId is required - NO FALLBACKS
+      if (!orgId) {
+        const errorMsg = '❌ CRITICAL: Cannot create detection - orgId not found in request. Webhook must pass x-org-id header.';
+        console.error(errorMsg, {
+          requestUrl: request.url,
+          requestHeaders: Object.fromEntries(request.headers.entries()),
+          availableHeaders: Array.from(request.headers.keys()),
+          emailMessageId: payload.messageId,
+          threatLevel: analysis.threatLevel
+        });
+        throw new Error(errorMsg);
+      }
 
-          // Link the email to the detection
-          if (detectionId) {
-            try {
-              const { updateEmailAttributes } = await import('@/lib/email-helpers');
-              await updateEmailAttributes(payload.messageId, {
-                detectionId: detectionId,
-                investigationStatus: 'new',
-              });
-              console.log(`✅ Email linked to detection: ${detectionId}`);
-            } catch (linkError: any) {
-              console.error('❌ Failed to link email to detection:', linkError);
-            }
+      try {
+        console.log(`🚨 Creating detection for AI-flagged email: ${payload.messageId}, orgId: ${orgId}, severity: ${analysis.threatLevel}`);
+        const detectionId = await createSecurityDetection(payload, analysis, orgId);
+        console.log(`✅ Detection created successfully: ${detectionId} for email: ${payload.messageId}`);
+
+        // Link the email to the detection
+        if (detectionId) {
+          try {
+            const { updateEmailAttributes } = await import('@/lib/email-helpers');
+            await updateEmailAttributes(payload.messageId, {
+              detectionId: detectionId,
+              investigationStatus: 'new',
+            });
+            console.log(`✅ Email linked to detection: ${detectionId}`);
+          } catch (linkError: any) {
+            console.error('❌ Failed to link email to detection:', linkError);
           }
         }
       } catch (err: any) {
@@ -140,7 +146,9 @@ export async function POST(request: Request) {
           stack: err.stack,
           emailMessageId: payload.messageId,
           threatLevel: analysis.threatLevel,
+          orgId: orgId
         });
+        throw err; // Re-throw to ensure error is propagated
       }
     } else {
       console.log(`ℹ️ Email ${payload.messageId} scored ${analysis.threatScore} (${analysis.threatLevel}) - below detection threshold`);

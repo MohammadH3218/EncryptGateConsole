@@ -273,6 +273,7 @@ export async function POST(req: Request) {
         })
 
         // Extract orgId by looking up WorkMail organization in CloudServices
+        // CRITICAL: Must always retrieve orgId from CloudServices - NO FALLBACKS
         console.log('🔍 Event payload check:', {
           hasOrganizationId: !!event.organizationId,
           hasEnvelopeOrgId: !!event.envelope?.organizationId,
@@ -281,21 +282,28 @@ export async function POST(req: Request) {
           eventKeys: Object.keys(event)
         })
 
-        let orgId = ORG_ID // Start with fallback
         const workmailOrgId = event.organizationId || event.envelope?.organizationId
-
-        if (workmailOrgId) {
-          const lookedUpOrgId = await lookupOrgIdFromWorkMail(workmailOrgId)
-          if (lookedUpOrgId) {
-            orgId = lookedUpOrgId
-          } else {
-            console.log('⚠️ Could not find orgId for WorkMail org, using fallback:', ORG_ID)
-          }
-        } else {
-          console.log('⚠️ No WorkMail organizationId in event, using fallback:', ORG_ID)
+        if (!workmailOrgId) {
+          const errorMsg = '❌ CRITICAL: No WorkMail organizationId in event payload. Lambda must pass organizationId.'
+          console.error(errorMsg, {
+            eventKeys: Object.keys(event),
+            hasEnvelope: !!event.envelope,
+            envelopeKeys: event.envelope ? Object.keys(event.envelope) : []
+          })
+          throw new Error(errorMsg)
         }
 
-        console.log('🏢 Using organization ID:', orgId)
+        const orgId = await lookupOrgIdFromWorkMail(workmailOrgId)
+        if (!orgId) {
+          const errorMsg = `❌ CRITICAL: Could not find orgId in CloudServices for WorkMail organization: ${workmailOrgId}`
+          console.error(errorMsg, {
+            workmailOrgId,
+            searchedTable: CS_TABLE
+          })
+          throw new Error(errorMsg)
+        }
+
+        console.log('✅ Successfully retrieved organization ID:', orgId, 'from WorkMail org:', workmailOrgId)
 
         // Check monitoring status
         const senderMonitored = await isMonitoredEmployee(emailData.sender, orgId)
@@ -503,19 +511,28 @@ export async function POST(req: Request) {
         })
 
         // Extract orgId by looking up WorkMail organization in CloudServices
-        let orgId = ORG_ID // Start with fallback
+        // CRITICAL: Must always retrieve orgId from CloudServices - NO FALLBACKS
         const workmailOrgId = event.organizationId
-
-        if (workmailOrgId) {
-          const lookedUpOrgId = await lookupOrgIdFromWorkMail(workmailOrgId)
-          if (lookedUpOrgId) {
-            orgId = lookedUpOrgId
-          } else {
-            console.log('⚠️ Could not find orgId for WorkMail org, using fallback:', ORG_ID)
-          }
-        } else {
-          console.log('⚠️ No WorkMail organizationId in event, using fallback:', ORG_ID)
+        if (!workmailOrgId) {
+          const errorMsg = '❌ CRITICAL: No WorkMail organizationId in WorkMail event payload'
+          console.error(errorMsg, {
+            eventKeys: Object.keys(event),
+            hasEnvelope: !!event.envelope
+          })
+          throw new Error(errorMsg)
         }
+
+        const orgId = await lookupOrgIdFromWorkMail(workmailOrgId)
+        if (!orgId) {
+          const errorMsg = `❌ CRITICAL: Could not find orgId in CloudServices for WorkMail organization: ${workmailOrgId}`
+          console.error(errorMsg, {
+            workmailOrgId,
+            searchedTable: CS_TABLE
+          })
+          throw new Error(errorMsg)
+        }
+
+        console.log('✅ Successfully retrieved organization ID:', orgId, 'from WorkMail org:', workmailOrgId)
 
         console.log('🏢 Using organization ID:', orgId)
 
@@ -655,10 +672,9 @@ export async function POST(req: Request) {
 export async function GET() {
   console.log('🏥 Health check - Enhanced Email Webhook')
   try {
-    await ddb.send(new QueryCommand({
+    // Health check: Just verify CloudServices table is accessible
+    await ddb.send(new ScanCommand({
       TableName: CS_TABLE,
-      KeyConditionExpression: 'orgId = :orgId',
-      ExpressionAttributeValues: { ':orgId': { S: ORG_ID } },
       Limit: 1
     }))
     
