@@ -373,7 +373,13 @@ export default function AdminDetectionsPage() {
       }
 
       console.log("🚨 Loading detections...");
-      const response = await fetch(`/api/detections?${params}`);
+      // Pass orgId in header so API can filter correctly
+      const orgId = params.orgId as string;
+      const response = await fetch(`/api/detections?${params}`, {
+        headers: {
+          'x-org-id': orgId,
+        },
+      });
 
       if (!response.ok) {
         const errorData = await response.json();

@@ -121,6 +121,7 @@ export default function OrgAwareDashboardPage() {
         headers: {
           ...(token && { "Authorization": `Bearer ${token}` }),
           "Content-Type": "application/json",
+          "x-org-id": orgId, // Pass orgId for proper filtering
         },
       })
       
@@ -143,6 +144,7 @@ export default function OrgAwareDashboardPage() {
         headers: {
           ...(token && { "Authorization": `Bearer ${token}` }),
           "Content-Type": "application/json",
+          "x-org-id": orgId, // Pass orgId for proper filtering
         },
       })
       

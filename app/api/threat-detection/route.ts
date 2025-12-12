@@ -100,10 +100,26 @@ export async function POST(request: Request) {
     if (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical') {
       try {
         const orgId = extractOrgId(request);
-        await createSecurityDetection(payload, analysis, orgId);
+        if (!orgId) {
+          console.warn('⚠️ Cannot create detection: orgId not found in request');
+          console.log('Request URL:', request.url);
+          console.log('Request headers:', Object.fromEntries(request.headers.entries()));
+        } else {
+          console.log(`🚨 Creating detection for AI-flagged email: ${payload.messageId}, orgId: ${orgId}, severity: ${analysis.threatLevel}`);
+          await createSecurityDetection(payload, analysis, orgId);
+          console.log(`✅ Detection created successfully for email: ${payload.messageId}`);
+        }
       } catch (err: any) {
-        console.error('❌ Failed to create detection', err);
+        console.error('❌ Failed to create detection:', err);
+        console.error('Error details:', {
+          message: err.message,
+          stack: err.stack,
+          emailMessageId: payload.messageId,
+          threatLevel: analysis.threatLevel,
+        });
       }
+    } else {
+      console.log(`ℹ️ Email ${payload.messageId} scored ${analysis.threatScore} (${analysis.threatLevel}) - below detection threshold`);
     }
 
     console.log(`✅ Multi-agent analysis complete: ${analysis.threatLevel} (${analysis.threatScore})`);
@@ -421,33 +437,57 @@ async function createSecurityDetection(
   const timestamp = new Date().toISOString();
 
   // Use same structure as manual detections: detectionId + receivedAt as keys
-  await ddb.send(
-    new PutItemCommand({
-      TableName: DETECTIONS_TABLE,
-      Item: {
-        detectionId:     { S: detectionId },
-        receivedAt:      { S: timestamp },
-        orgId:           { S: orgId },
-        organizationId:   { S: orgId }, // Support both field names for compatibility
-        emailMessageId:  { S: emailData.messageId },
-        severity:        { S: a.threatLevel },
-        name:            { S: generateDetectionName(a) },
-        status:          { S: 'new' },
-        assignedTo:      { S: '[]' },
-        sentBy:          { S: emailData.sender },
-        timestamp:       { S: emailData.timestamp },
-        description:     { S: a.reasoning },
-        indicators:      { S: JSON.stringify(a.indicators) },
-        recommendations: { S: JSON.stringify(generateRecommendations(a)) },
-        threatScore:     { N: a.threatScore.toString() },
-        confidence:      { N: a.confidence.toString() },
-        createdAt:       { S: timestamp },
-        manualFlag:      { BOOL: false }, // AI-flagged, not manual
-      },
-    })
-  );
+  const detectionItem = {
+    detectionId:     { S: detectionId },
+    receivedAt:      { S: timestamp },
+    orgId:           { S: orgId },
+    organizationId:   { S: orgId }, // Support both field names for compatibility
+    emailMessageId:  { S: emailData.messageId },
+    severity:        { S: a.threatLevel },
+    name:            { S: generateDetectionName(a) },
+    status:          { S: 'new' },
+    assignedTo:      { S: '[]' },
+    sentBy:          { S: emailData.sender },
+    timestamp:       { S: emailData.timestamp },
+    description:     { S: a.reasoning },
+    indicators:      { S: JSON.stringify(a.indicators) },
+    recommendations: { S: JSON.stringify(generateRecommendations(a)) },
+    threatScore:     { N: a.threatScore.toString() },
+    confidence:      { N: a.confidence.toString() },
+    createdAt:       { S: timestamp },
+    manualFlag:      { BOOL: false }, // AI-flagged, not manual
+  };
 
-  console.log(`🚨 Detection created ${detectionId} level=${a.threatLevel} for org=${orgId}`);
+  // Retry logic for credential errors
+  let retries = 0;
+  const maxRetries = 3;
+  
+  while (retries < maxRetries) {
+    try {
+      await ddb.send(new PutItemCommand({
+        TableName: DETECTIONS_TABLE,
+        Item: detectionItem,
+      }));
+      console.log(`🚨 Detection created ${detectionId} level=${a.threatLevel} for org=${orgId}`);
+      return; // Success, exit
+    } catch (error: any) {
+      const { handleAwsError } = await import('@/lib/aws');
+      const awsError = handleAwsError(error, 'createSecurityDetection');
+      
+      // If it's a credential error and we have retries left, wait and retry
+      if ((awsError.error === 'AWS_CREDENTIALS_EXPIRED' || awsError.error === 'AWS_ERROR') && retries < maxRetries - 1) {
+        retries++;
+        console.log(`⚠️ Credential error creating detection, retrying (${retries}/${maxRetries})...`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * retries));
+        continue;
+      }
+      
+      // If it's not a credential error or we're out of retries, throw
+      throw error;
+    }
+  }
+  
+  console.error(`❌ Failed to create detection after ${maxRetries} retries`);
 }
 
 function generateDetectionName(a: ThreatAnalysis): string {
