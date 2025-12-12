@@ -11,7 +11,7 @@ import { z } from 'zod'
 import { getDriver } from '@/lib/neo4j'
 import neo4j from 'neo4j-driver'
 
-const ORG_ID          = process.env.ORGANIZATION_ID      || 'default-org'
+const ORG_ID          = process.env.ORGANIZATION_ID      || 'org_f6f292857a7449bf'
 const CS_TABLE        = process.env.CLOUDSERVICES_TABLE  || 'CloudServices'
 const EMPLOYEES_TABLE = process.env.EMPLOYEES_TABLE_NAME || 'Employees'
 const EMAILS_TABLE    = process.env.EMAILS_TABLE_NAME    || 'Emails'
