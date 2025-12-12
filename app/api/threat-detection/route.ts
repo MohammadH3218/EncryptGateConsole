@@ -83,6 +83,16 @@ export async function POST(request: Request) {
   console.log(`🔍 [MULTI-AGENT] Analyzing threat for email: ${payload.messageId}`);
   console.log(`   From: ${payload.sender} | To: ${payload.recipients.join(', ')}`);
 
+  // Extract orgId early for logging and detection creation
+  const orgId = extractOrgId(request);
+  console.log(`🏢 Extracted orgId from request:`, {
+    orgId: orgId || 'NOT FOUND',
+    hasXOrgIdHeader: request.headers.get('x-org-id'),
+    xOrgIdValue: request.headers.get('x-org-id'),
+    requestUrl: request.url,
+    allHeaders: Object.fromEntries(request.headers.entries())
+  });
+
   try {
     // 2) Run multi-agent threat detection
     const analysis = await analyzeWithMultiAgentSystem(payload);
@@ -99,11 +109,11 @@ export async function POST(request: Request) {
     // Only create detections for medium, high, or critical threats (score >= 45)
     if (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical') {
       try {
-        const orgId = extractOrgId(request);
         if (!orgId) {
-          console.warn('⚠️ Cannot create detection: orgId not found in request');
+          console.error('❌ Cannot create detection: orgId not found in request');
           console.log('Request URL:', request.url);
           console.log('Request headers:', Object.fromEntries(request.headers.entries()));
+          console.log('Available headers:', Array.from(request.headers.keys()));
         } else {
           console.log(`🚨 Creating detection for AI-flagged email: ${payload.messageId}, orgId: ${orgId}, severity: ${analysis.threatLevel}`);
           const detectionId = await createSecurityDetection(payload, analysis, orgId);
@@ -418,22 +428,10 @@ async function updateEmailThreatStatusDirect(
       ':flaggedCategory': { S: flaggedCategory },
     };
 
-    try {
-      await ddb.send(
-        new UpdateItemCommand({
-          TableName: EMAILS_TABLE,
-          Key: {
-            orgId: { S: ORG_ID },
-            messageId: { S: messageId },
-          },
-          UpdateExpression: updateExpression,
-          ExpressionAttributeValues: expressionValues,
-        })
-      );
-    } catch (fallbackError: any) {
-      console.error('❌ Fallback update also failed:', fallbackError);
-      throw fallbackError;
-    }
+    // This fallback path should not be used - email should be found by messageId
+    // If we reach here, we can't update the email without orgId
+    console.error('❌ Cannot update email: emailKey not found and orgId not available in fallback path');
+    console.warn('⚠️ Email threat status update skipped - email not found by messageId:', messageId);
   }
 }
 
