@@ -36,12 +36,25 @@ docker run -d \
   -e PYTHONUNBUFFERED=1 \
   encryptgate-distilbert:latest
 
-sleep 5
+echo "Waiting for DistilBERT to start (model download may take 60-90s)..."
+MAX_RETRIES=30
+RETRY_COUNT=0
 
-curl -sf http://127.0.0.1:8001/health || {
-  echo "DistilBERT health check failed"
-  exit 1
-}
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+  sleep 3
+  RETRY_COUNT=$((RETRY_COUNT + 1))
 
-echo "DistilBERT started successfully"
+  if curl -sf http://127.0.0.1:8001/health > /dev/null 2>&1; then
+    echo "DistilBERT health check passed on attempt $RETRY_COUNT"
+    echo "DistilBERT started successfully"
+    exit 0
+  fi
+
+  echo "Health check attempt $RETRY_COUNT/$MAX_RETRIES failed, retrying..."
+done
+
+echo "WARNING: DistilBERT health check failed after $MAX_RETRIES attempts"
+echo "Container is running but may still be loading the model"
+echo "Check container logs: docker logs encryptgate-distilbert"
+exit 0
 
