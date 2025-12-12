@@ -38,7 +38,13 @@
       "Bash(tree:*)",
       "Bash(base64:*)",
       "Bash(tar:*)",
-      "Bash(BUCKET_NAME=\"encryptgate-temp-deploy-12345\")"
+      "Bash(BUCKET_NAME=\"encryptgate-temp-deploy-12345\")",
+      "Bash(if [ -f distilbert-deploy-20251212-132527.zip ])",
+      "Bash(then unzip -l distilbert-deploy-20251212-132527.zip)",
+      "Bash(unzip:*)",
+      "Bash(echo:*)",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File set-distilbert-config.ps1)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []
