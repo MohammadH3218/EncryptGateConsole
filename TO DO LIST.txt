@@ -1,0 +1,9 @@
+TO DO:
+- Find trained llm model for email security and detection
+- Implement model and test to see if it will detect suspicious email
+- Integrate file scanning with virus total api
+- Integrate email search off databases, and other security api/websites (virustotal might do some already) and fill the rest of the meatadata on investigation page
+- Implement RAG if not already for the graph
+- Vector each user so we can have behavorial detection
+- Research any other techniques to improve graph/ai/llm
+- Final touches/missing stuff (UI, specific features, etc)
