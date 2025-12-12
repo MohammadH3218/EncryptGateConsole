@@ -96,8 +96,8 @@ export async function POST(request: Request) {
     }
 
     // 4) if a significant threat, create a detection record
-    // Increased threshold to 40 to reduce false positives
-    if (analysis.threatLevel !== 'none' && analysis.threatScore >= 40) {
+    // Only create detections for medium, high, or critical threats (score >= 45)
+    if (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical') {
       try {
         const orgId = extractOrgId(request);
         await createSecurityDetection(payload, analysis, orgId);
@@ -225,15 +225,17 @@ async function updateEmailThreatStatus(
 ) {
   // Determine flaggedCategory based on threat level
   // 'clean' for low/none threats, 'ai' for suspicious threats
+  // Only flag medium, high, or critical threats to reduce false positives
   let flaggedCategory: 'clean' | 'ai' | 'none' = 'none';
   let flaggedSeverity: 'low' | 'medium' | 'high' | 'critical' | undefined = undefined;
 
-  // Increased threshold to 40 to reduce false positives
-  if (a.threatLevel === 'none' || (a.threatLevel === 'low' && a.threatScore < 40)) {
+  // Only flag if threat level is medium or higher (score >= 45)
+  // This prevents low-threat emails from being flagged while still catching suspicious ones
+  if (a.threatLevel === 'none' || a.threatLevel === 'low') {
     flaggedCategory = 'clean';
-  } else if (a.threatLevel !== 'none' && a.threatScore >= 40) {
+  } else if (a.threatLevel === 'medium' || a.threatLevel === 'high' || a.threatLevel === 'critical') {
     flaggedCategory = 'ai';
-    flaggedSeverity = a.threatLevel as 'low' | 'medium' | 'high' | 'critical';
+    flaggedSeverity = a.threatLevel as 'medium' | 'high' | 'critical';
   }
 
   // Use the email-helpers to update with correct table structure (userId + receivedAt)

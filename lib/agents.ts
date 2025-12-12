@@ -526,21 +526,19 @@ export function fuseRiskScores(
   const scoreOutOf100 = Math.round(clampedScore * 100);
 
   // Determine threat level
-  // Increased thresholds to reduce false positives
+  // Adjusted thresholds: require higher scores for medium+ to reduce false positives
+  // But still allow flagging of suspicious emails
   let threatLevel: string;
-  if (scoreOutOf100 < 40) {
+  if (scoreOutOf100 < 20) {
+    threatLevel = 'none';
+  } else if (scoreOutOf100 < 45) {
     threatLevel = 'low';
-  } else if (scoreOutOf100 < 60) {
+  } else if (scoreOutOf100 < 70) {
     threatLevel = 'medium';
-  } else if (scoreOutOf100 < 80) {
+  } else if (scoreOutOf100 < 85) {
     threatLevel = 'high';
   } else {
     threatLevel = 'critical';
-  }
-
-  // Special case: if no threat detected at all
-  if (scoreOutOf100 < 30) {
-    threatLevel = 'none';
   }
 
   return {
