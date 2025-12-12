@@ -61,7 +61,10 @@
       "Bash(Namespace=aws:elasticbeanstalk:application:environment,OptionName=FLASK_ENV,Value=production)",
       "Bash(Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_REGION,Value=us-east-1 )",
       "Bash(Namespace=aws:elasticbeanstalk:application:environment,OptionName=CLOUDSERVICES_TABLE,Value=CloudServices)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(cd:*)",
+      "Bash(head:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

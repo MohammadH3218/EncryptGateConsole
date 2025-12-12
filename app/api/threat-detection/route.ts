@@ -106,8 +106,22 @@ export async function POST(request: Request) {
           console.log('Request headers:', Object.fromEntries(request.headers.entries()));
         } else {
           console.log(`🚨 Creating detection for AI-flagged email: ${payload.messageId}, orgId: ${orgId}, severity: ${analysis.threatLevel}`);
-          await createSecurityDetection(payload, analysis, orgId);
-          console.log(`✅ Detection created successfully for email: ${payload.messageId}`);
+          const detectionId = await createSecurityDetection(payload, analysis, orgId);
+          console.log(`✅ Detection created successfully: ${detectionId} for email: ${payload.messageId}`);
+
+          // Link the email to the detection
+          if (detectionId) {
+            try {
+              const { updateEmailAttributes } = await import('@/lib/email-helpers');
+              await updateEmailAttributes(payload.messageId, {
+                detectionId: detectionId,
+                investigationStatus: 'new',
+              });
+              console.log(`✅ Email linked to detection: ${detectionId}`);
+            } catch (linkError: any) {
+              console.error('❌ Failed to link email to detection:', linkError);
+            }
+          }
         }
       } catch (err: any) {
         console.error('❌ Failed to create detection:', err);
@@ -427,10 +441,10 @@ async function createSecurityDetection(
   emailData: ThreatRequest,
   a: ThreatAnalysis,
   orgId: string | null
-) {
+): Promise<string | null> {
   if (!orgId) {
     console.warn('⚠️ Cannot create detection without orgId');
-    return;
+    return null;
   }
 
   const detectionId = `det-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -461,7 +475,7 @@ async function createSecurityDetection(
   // Retry logic for credential errors
   let retries = 0;
   const maxRetries = 3;
-  
+
   while (retries < maxRetries) {
     try {
       await ddb.send(new PutItemCommand({
@@ -469,11 +483,11 @@ async function createSecurityDetection(
         Item: detectionItem,
       }));
       console.log(`🚨 Detection created ${detectionId} level=${a.threatLevel} for org=${orgId}`);
-      return; // Success, exit
+      return detectionId; // Return the detectionId on success
     } catch (error: any) {
       const { handleAwsError } = await import('@/lib/aws');
       const awsError = handleAwsError(error, 'createSecurityDetection');
-      
+
       // If it's a credential error and we have retries left, wait and retry
       if ((awsError.error === 'AWS_CREDENTIALS_EXPIRED' || awsError.error === 'AWS_ERROR') && retries < maxRetries - 1) {
         retries++;
@@ -481,13 +495,14 @@ async function createSecurityDetection(
         await new Promise(resolve => setTimeout(resolve, 1000 * retries));
         continue;
       }
-      
+
       // If it's not a credential error or we're out of retries, throw
       throw error;
     }
   }
-  
+
   console.error(`❌ Failed to create detection after ${maxRetries} retries`);
+  return null;
 }
 
 function generateDetectionName(a: ThreatAnalysis): string {
