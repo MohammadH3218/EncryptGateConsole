@@ -50,6 +50,7 @@ export async function GET(request: Request) {
 
     console.log(`🔍 Scanning DynamoDB for detections (orgId: ${orgId})...`);
     console.log(`FilterExpression: orgId = :orgId OR organizationId = :orgId`);
+    console.log(`ExpressionAttributeValues:`, { ':orgId': { S: orgId } });
     
     // Retry logic for credential errors
     let resp;

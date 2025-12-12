@@ -364,18 +364,19 @@ export default function AdminDetectionsPage() {
     setError(null);
 
     try {
-      const params = new URLSearchParams({
+      const queryParams = new URLSearchParams({
         limit: itemsPerPage.toString(),
       });
 
       if (!reset && lastKey) {
-        params.append("lastKey", lastKey);
+        queryParams.append("lastKey", lastKey);
       }
 
       console.log("🚨 Loading detections...");
       // Pass orgId in header so API can filter correctly
       const orgId = params.orgId as string;
-      const response = await fetch(`/api/detections?${params}`, {
+      console.log(`📡 Fetching detections with orgId: ${orgId}`);
+      const response = await fetch(`/api/detections?${queryParams}`, {
         headers: {
           'x-org-id': orgId,
         },
