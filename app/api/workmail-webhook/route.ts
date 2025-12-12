@@ -273,6 +273,14 @@ export async function POST(req: Request) {
         })
 
         // Extract orgId by looking up WorkMail organization in CloudServices
+        console.log('🔍 Event payload check:', {
+          hasOrganizationId: !!event.organizationId,
+          hasEnvelopeOrgId: !!event.envelope?.organizationId,
+          organizationIdValue: event.organizationId,
+          envelopeOrgIdValue: event.envelope?.organizationId,
+          eventKeys: Object.keys(event)
+        })
+
         let orgId = ORG_ID // Start with fallback
         const workmailOrgId = event.organizationId || event.envelope?.organizationId
 

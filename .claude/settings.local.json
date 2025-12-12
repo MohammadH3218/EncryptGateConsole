@@ -64,7 +64,10 @@
       "Bash(grep:*)",
       "Bash(cd:*)",
       "Bash(head:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(powershell.exe -Command \"Compress-Archive -Path ''lambda-update.mjs'' -DestinationPath ''lambda-deployment.zip'' -Force\")",
+      "Bash(move /Y lambda-update.mjs index.mjs)",
+      "Bash(powershell.exe -Command \"Compress-Archive -Path ''index.mjs'' -DestinationPath ''lambda-deployment.zip'' -Force\")"
     ],
     "deny": [],
     "ask": []
