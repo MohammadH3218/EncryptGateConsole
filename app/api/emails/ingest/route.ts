@@ -91,7 +91,10 @@ export async function POST(request: Request) {
       console.log(`🔍 Running threat detection for email: ${validated.messageId}`);
       const threatResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/threat-detection`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-org-id': emailOrgId, // Pass orgId in header for detection creation
+        },
         body: JSON.stringify({
           messageId: validated.messageId,
           sender: validated.from,
@@ -117,21 +120,25 @@ export async function POST(request: Request) {
         severity = analysis.threatLevel || 'low';
         
         // Determine flaggedCategory based on threat analysis
-        if (analysis.threatLevel === 'none' || (analysis.threatLevel === 'low' && threatScore < 30)) {
+        // Increased threshold to 40 to reduce false positives
+        if (analysis.threatLevel === 'none' || (analysis.threatLevel === 'low' && threatScore < 40)) {
           flaggedCategory = 'clean';
-        } else if (analysis.threatLevel !== 'none' && threatScore >= 30) {
+        } else if (analysis.threatLevel !== 'none' && threatScore >= 40) {
           flaggedCategory = 'ai';
         }
 
         console.log(`✅ Threat detection completed: ${validated.messageId} - Level: ${severity}, Score: ${threatScore}, Flagged: ${flaggedCategory}`);
 
-        // Create detection if threat found
-        if (analysis.threatLevel !== 'none' && threatScore > 30) {
+        // Create detection if threat found (increased threshold to 40)
+        if (analysis.threatLevel !== 'none' && threatScore >= 40) {
           detectionId = `det-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
           
+          const timestamp = new Date().toISOString();
           const detectionItem: Record<string, any> = {
             detectionId: { S: detectionId },
-            organizationId: { S: emailOrgId },
+            receivedAt: { S: timestamp }, // Add receivedAt for proper table structure
+            orgId: { S: emailOrgId }, // Use orgId for consistency
+            organizationId: { S: emailOrgId }, // Keep both for compatibility
             emailMessageId: { S: validated.messageId },
             severity: { S: severity },
             status: { S: 'new' },
@@ -143,7 +150,7 @@ export async function POST(request: Request) {
             recommendations: { S: JSON.stringify(analysis.recommendations || []) },
             threatScore: { N: threatScore.toString() },
             confidence: { N: (analysis.confidence || 50).toString() },
-            createdAt: { S: new Date().toISOString() },
+            createdAt: { S: timestamp },
             timestamp: { S: validated.timestamp },
             manualFlag: { BOOL: false },
           };

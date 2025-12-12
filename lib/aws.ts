@@ -14,7 +14,10 @@ import { SESClient } from "@aws-sdk/client-ses"
 const AWS_ACCESS_KEY_ID = process.env.ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID
 const AWS_SECRET_ACCESS_KEY = process.env.SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY
 
-let credentials
+const region = process.env.AWS_REGION || process.env.REGION || "us-east-1"
+
+// Configure credentials - let SDK handle automatic refresh
+let credentials: any
 if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
   console.log('[AWS] Using explicit AWS credentials from environment variables')
   credentials = {
@@ -22,34 +25,29 @@ if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
     secretAccessKey: AWS_SECRET_ACCESS_KEY,
   }
 } else {
-  console.log('[AWS] Using AWS credential provider chain (default)')
-  try {
-    credentials = fromNodeProviderChain({
-      // Timeout for credential provider calls
-      timeout: 5000,
-    })
-  } catch (error) {
-    console.error('[AWS] Failed to initialize credential provider chain:', error)
-    throw new Error('AWS credentials not configured. Please set ACCESS_KEY_ID and SECRET_ACCESS_KEY environment variables, or ensure IAM role is properly configured.')
-  }
+  console.log('[AWS] Using AWS credential provider chain (default) - will auto-refresh')
+  // Use provider chain - SDK will automatically refresh expired credentials
+  credentials = fromNodeProviderChain({
+    timeout: 10000, // Increased timeout for credential refresh
+  })
 }
-
-const region = process.env.AWS_REGION || process.env.REGION || "us-east-1"
 
 // Log credential configuration status
 console.log('[AWS] Configuration:', {
   region,
-  credentialSource: AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY ? 'environment_variables' : 'provider_chain',
+  credentialSource: AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY ? 'environment_variables' : 'provider_chain_auto_refresh',
   hasAccessKey: !!AWS_ACCESS_KEY_ID,
   hasSecretKey: !!AWS_SECRET_ACCESS_KEY,
 })
 
 // Create AWS service clients with credentials
+// The SDK will automatically refresh credentials when they expire
 export const ddb = new DynamoDBClient({ 
   region, 
   credentials,
-  // Add retry configuration for better reliability
-  maxAttempts: 3,
+  // Add retry configuration for better reliability with credential refresh
+  maxAttempts: 5, // Increased attempts to allow for credential refresh
+  retryMode: 'adaptive', // Use adaptive retry mode for better handling of credential refresh
 })
 
 // Optional: Test credentials on first use (lazy validation)
@@ -72,20 +70,23 @@ export async function validateCredentials(): Promise<boolean> {
 
 export const cognitoClient = new CognitoIdentityProviderClient({ 
   region, 
-  credentials: credentials as any,
-  maxAttempts: 3,
+  credentials,
+  maxAttempts: 5,
+  retryMode: 'adaptive',
 })
 
 export const workMailClient = new WorkMailClient({ 
   region, 
-  credentials: credentials as any,
-  maxAttempts: 3,
+  credentials,
+  maxAttempts: 5,
+  retryMode: 'adaptive',
 })
 
 export const sesClient = new SESClient({ 
   region, 
-  credentials: credentials as any,
-  maxAttempts: 3,
+  credentials,
+  maxAttempts: 5,
+  retryMode: 'adaptive',
 })
 
 // Helper function to handle AWS errors consistently

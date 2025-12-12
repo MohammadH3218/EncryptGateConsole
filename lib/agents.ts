@@ -526,19 +526,20 @@ export function fuseRiskScores(
   const scoreOutOf100 = Math.round(clampedScore * 100);
 
   // Determine threat level
+  // Increased thresholds to reduce false positives
   let threatLevel: string;
-  if (scoreOutOf100 < 30) {
+  if (scoreOutOf100 < 40) {
     threatLevel = 'low';
-  } else if (scoreOutOf100 < 50) {
+  } else if (scoreOutOf100 < 60) {
     threatLevel = 'medium';
-  } else if (scoreOutOf100 < 70) {
+  } else if (scoreOutOf100 < 80) {
     threatLevel = 'high';
   } else {
     threatLevel = 'critical';
   }
 
   // Special case: if no threat detected at all
-  if (scoreOutOf100 < 20) {
+  if (scoreOutOf100 < 30) {
     threatLevel = 'none';
   }
 
