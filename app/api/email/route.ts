@@ -315,6 +315,12 @@ export async function GET(request: Request) {
         flaggedBy: item.flaggedBy?.S,
         investigationNotes: item.investigationNotes?.S,
         updatedAt: item.updatedAt?.S,
+        // VirusTotal data
+        vt_score: item.vt_score?.N ? Number(item.vt_score.N) : undefined,
+        vt_verdict: item.vt_verdict?.S,
+        distilbert_score: item.distilbert_score?.N ? Number(item.distilbert_score.N) : undefined,
+        context_score: item.context_score?.N ? Number(item.context_score.N) : undefined,
+        threatIndicators: item.threatIndicators?.S ? JSON.parse(item.threatIndicators.S) : undefined,
       };
 
       console.log(`📄 Processing email ${index + 1}:`, {

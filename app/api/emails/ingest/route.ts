@@ -43,6 +43,7 @@ export async function POST(request: Request) {
     console.log(`📧 Ingesting email: ${validated.messageId} for org: ${emailOrgId}`);
 
     // Store email in DynamoDB
+    // Set initial flaggedCategory to 'clean' (will be updated after threat detection)
     const emailItem: Record<string, any> = {
       messageId: { S: validated.messageId },
       organizationId: { S: emailOrgId },
@@ -54,6 +55,7 @@ export async function POST(request: Request) {
       htmlBody: { S: validated.htmlBody || '' },
       timestamp: { S: validated.timestamp },
       createdAt: { S: new Date().toISOString() },
+      flaggedCategory: { S: 'clean' }, // Set initial state to 'clean' (will be updated after analysis)
     };
 
     if (validated.cc && validated.cc.length > 0) {
@@ -89,6 +91,12 @@ export async function POST(request: Request) {
 
     try {
       console.log(`🔍 Running threat detection for email: ${validated.messageId}`);
+      
+      // Extract URLs from email body for VirusTotal scanning
+      const emailBody = validated.body || validated.htmlBody || '';
+      const extractedUrls = extractURLs(emailBody);
+      console.log(`🔗 Extracted ${extractedUrls.length} URLs from email body`);
+      
       const threatResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/threat-detection`, {
         method: 'POST',
         headers: { 
@@ -100,9 +108,9 @@ export async function POST(request: Request) {
           sender: validated.from,
           recipients: validated.to,
           subject: validated.subject,
-          body: validated.body || validated.htmlBody || '',
+          body: emailBody,
           timestamp: validated.timestamp,
-          urls: [], // URLs would be extracted from body if needed
+          urls: extractedUrls, // Extract URLs for VirusTotal scanning
           direction: 'inbound',
           attachments: validated.attachments?.map(att => ({
             filename: att.filename,

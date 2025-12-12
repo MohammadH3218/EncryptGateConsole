@@ -43,7 +43,9 @@ import {
   Clock,
   AlertCircle,
   Copy,
-  FileText
+  FileText,
+  CheckCircle2,
+  XCircle
 } from "lucide-react"
 
 interface Email {
@@ -73,6 +75,13 @@ interface Email {
   flaggedBy?: string
   investigationNotes?: string
   updatedAt?: string
+  
+  // VirusTotal data
+  vt_score?: number
+  vt_verdict?: string
+  distilbert_score?: number
+  context_score?: number
+  threatIndicators?: string[]
 }
 
 interface EmailsResponse {
@@ -1287,6 +1296,97 @@ export default function AdminAllEmailsPage() {
                             </Button>
                           </div>
                         </div>
+                        
+                        {/* VirusTotal Security Checks */}
+                        {(selectedEmail.vt_score !== undefined || selectedEmail.vt_verdict || selectedEmail.threatIndicators?.some((ind: string) => ind.includes('VirusTotal'))) && (
+                          <div className="pt-4 border-t border-[#2a2a2a]">
+                            <label className="text-sm font-medium text-gray-400 mb-3 block flex items-center gap-2">
+                              <Shield className="h-4 w-4" />
+                              VirusTotal Security Checks
+                            </label>
+                            <div className="space-y-3">
+                              {selectedEmail.vt_verdict && (
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-400">Overall Verdict:</span>
+                                  <Badge
+                                    variant={
+                                      selectedEmail.vt_verdict === 'MALICIOUS' ? 'destructive' :
+                                      selectedEmail.vt_verdict === 'SUSPICIOUS' ? 'secondary' :
+                                      'outline'
+                                    }
+                                    className={
+                                      selectedEmail.vt_verdict === 'MALICIOUS' ? 'bg-red-600' :
+                                      selectedEmail.vt_verdict === 'SUSPICIOUS' ? 'bg-yellow-600' :
+                                      'bg-green-600/30 text-green-400 border-green-500/30'
+                                    }
+                                  >
+                                    {selectedEmail.vt_verdict === 'CLEAN' ? (
+                                      <><CheckCircle2 className="h-3 w-3 mr-1" /> CLEAN</>
+                                    ) : selectedEmail.vt_verdict === 'MALICIOUS' ? (
+                                      <><AlertTriangle className="h-3 w-3 mr-1" /> MALICIOUS</>
+                                    ) : (
+                                      <><AlertCircle className="h-3 w-3 mr-1" /> SUSPICIOUS</>
+                                    )}
+                                  </Badge>
+                                </div>
+                              )}
+                              {selectedEmail.vt_score !== undefined && (
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs text-gray-400">Threat Score:</span>
+                                  <span className={`text-xs font-medium ${
+                                    selectedEmail.vt_score > 0.7 ? 'text-red-400' :
+                                    selectedEmail.vt_score > 0.4 ? 'text-yellow-400' :
+                                    'text-green-400'
+                                  }`}>
+                                    {(selectedEmail.vt_score * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                              )}
+                              {selectedEmail.threatIndicators && selectedEmail.threatIndicators.length > 0 && (
+                                <div className="mt-2">
+                                  <span className="text-xs text-gray-400 block mb-2">Checks Performed:</span>
+                                  <div className="space-y-1.5">
+                                    {selectedEmail.threatIndicators
+                                      .filter((ind: string) => ind.includes('VirusTotal'))
+                                      .map((indicator: string, idx: number) => {
+                                        const isClean = indicator.includes('CLEAN') || indicator.includes('UNKNOWN');
+                                        const isMalicious = indicator.includes('MALICIOUS');
+                                        const isSuspicious = indicator.includes('SUSPICIOUS');
+                                        return (
+                                          <div 
+                                            key={idx} 
+                                            className={`text-xs text-gray-300 bg-[#0f0f0f] p-2 rounded border ${
+                                              isMalicious ? 'border-red-500/30 bg-red-900/10' :
+                                              isSuspicious ? 'border-yellow-500/30 bg-yellow-900/10' :
+                                              'border-[#2a2a2a]'
+                                            } flex items-center gap-2`}
+                                          >
+                                            {isClean ? (
+                                              <CheckCircle2 className="h-3 w-3 text-green-400 flex-shrink-0" />
+                                            ) : isMalicious ? (
+                                              <XCircle className="h-3 w-3 text-red-400 flex-shrink-0" />
+                                            ) : (
+                                              <AlertCircle className="h-3 w-3 text-yellow-400 flex-shrink-0" />
+                                            )}
+                                            <span className="flex-1">{indicator.replace('VirusTotal: ', '')}</span>
+                                          </div>
+                                        );
+                                      })}
+                                  </div>
+                                </div>
+                              )}
+                              {(!selectedEmail.threatIndicators || selectedEmail.threatIndicators.filter((ind: string) => ind.includes('VirusTotal')).length === 0) && (
+                                <div className="text-xs text-gray-500 italic bg-[#0f0f0f] p-2 rounded border border-[#2a2a2a]">
+                                  {selectedEmail.attachments && selectedEmail.attachments.length > 0
+                                    ? '✓ Attachments scanned'
+                                    : selectedEmail.urls && selectedEmail.urls.length > 0
+                                    ? '✓ URL domains checked'
+                                    : '✓ Sender domain checked'}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </CardContent>
                     </Card>
                   </div>

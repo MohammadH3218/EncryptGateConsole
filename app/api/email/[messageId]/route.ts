@@ -268,6 +268,12 @@ export async function GET(
       detectionId: item.detectionId?.S,
       threatLevel: item.threatLevel?.S,
       flagged: ["ai", "manual"].includes(item.flaggedCategory?.S || ""),
+      // VirusTotal data
+      vt_score: item.vt_score?.N ? Number(item.vt_score.N) : undefined,
+      vt_verdict: item.vt_verdict?.S,
+      distilbert_score: item.distilbert_score?.N ? Number(item.distilbert_score.N) : undefined,
+      context_score: item.context_score?.N ? Number(item.context_score.N) : undefined,
+      threatIndicators: item.threatIndicators?.S ? JSON.parse(item.threatIndicators.S) : undefined,
     };
 
     return NextResponse.json({ ok: true, email });
