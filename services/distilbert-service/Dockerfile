@@ -10,14 +10,15 @@ RUN apt-get update && apt-get install -y gcc g++ curl && rm -rf /var/lib/apt/lis
 
 # Install Python dependencies (CPU-only PyTorch to save space)
 RUN pip install --no-cache-dir \
-  fastapi==0.104.1 \
-  "uvicorn[standard]==0.24.0" \
-  transformers==4.35.0 \
-  pydantic==2.5.0 \
-  python-multipart==0.0.6
+  fastapi==0.109.0 \
+  "uvicorn[standard]==0.27.0" \
+  transformers==4.37.2 \
+  pydantic==2.5.3 \
+  python-multipart==0.0.9 \
+  safetensors==0.4.2
 
 # Install CPU-only PyTorch (much smaller than CUDA version)
-RUN pip install --no-cache-dir torch==2.1.0 --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir torch==2.2.0 --index-url https://download.pytorch.org/whl/cpu
 
 # Copy application code
 COPY main.py .
