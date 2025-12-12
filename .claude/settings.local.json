@@ -67,7 +67,14 @@
       "Bash(wc:*)",
       "Bash(powershell.exe -Command \"Compress-Archive -Path ''lambda-update.mjs'' -DestinationPath ''lambda-deployment.zip'' -Force\")",
       "Bash(move /Y lambda-update.mjs index.mjs)",
-      "Bash(powershell.exe -Command \"Compress-Archive -Path ''index.mjs'' -DestinationPath ''lambda-deployment.zip'' -Force\")"
+      "Bash(powershell.exe -Command \"Compress-Archive -Path ''index.mjs'' -DestinationPath ''lambda-deployment.zip'' -Force\")",
+      "Bash(MSYS_NO_PATHCONV=1 aws logs describe-log-streams:*)",
+      "Bash(MSYS_NO_PATHCONV=1 aws logs get-log-events:*)",
+      "Bash(MSYS_NO_PATHCONV=1 aws logs:*)",
+      "Bash(powershell.exe -Command \"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; aws logs filter-log-events --log-group-name ''/aws/lambda/console-encryptgate-webhook-workmail'' --start-time 1734012000000 --max-items 50 --output json\")",
+      "Bash(MSYS_NO_PATHCONV=1 powershell.exe:*)",
+      "Bash(MSYS_NO_PATHCONV=1 LANG=en_US.UTF-8 aws logs filter-log-events:*)",
+      "Bash(iconv:*)"
     ],
     "deny": [],
     "ask": []
