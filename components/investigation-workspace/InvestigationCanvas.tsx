@@ -15,6 +15,7 @@ import {
   Brain,
   Bug,
   Activity,
+  ExternalLink,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -148,7 +149,7 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
   }, [email.urls])
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Threat Overview */}
       <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
         <CardHeader>
@@ -332,8 +333,16 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
           <CardContent>
             <ul className="space-y-2">
               {urls.map((url: string, idx: number) => (
-                <li key={idx} className="p-3 rounded-lg bg-[#1f1f1f] border border-white/10 font-mono text-xs text-gray-300 break-all">
-                  {url}
+                <li key={idx} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-[#1f1f1f] border border-white/10">
+                  <span className="font-mono text-xs text-gray-300 break-all flex-1">{url}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs bg-blue-600/10 border-blue-500/30 text-blue-400 hover:bg-blue-600/20 hover:border-blue-500/50 shrink-0"
+                  >
+                    <ExternalLink className="w-3 h-3 mr-1.5" />
+                    Open in Playground
+                  </Button>
                 </li>
               ))}
             </ul>

@@ -1,5 +1,6 @@
 // app/api/investigate/chat/route.ts
 export const runtime = 'nodejs';
+export const maxDuration = 120; // 120 seconds (2 minutes) to allow for complex queries
 
 import { NextResponse } from 'next/server';
 import { askInvestigationAssistant } from '@/lib/neo4j';

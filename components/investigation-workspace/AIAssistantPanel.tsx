@@ -135,7 +135,28 @@ export function AIAssistantPanel({ emailId, onQuery }: AIAssistantPanelProps) {
       const endTime = performance.now()
       console.log(`⏱️ [Investigation Assistant] API call took ${(endTime - startTime).toFixed(0)}ms`)
 
-      const data = await response.json()
+      // Check if response is OK before parsing JSON
+      if (!response.ok) {
+        console.error('❌ [Investigation Assistant] HTTP error:', response.status, response.statusText)
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+      }
+
+      // Get response text first to handle JSON parse errors gracefully
+      const responseText = await response.text()
+
+      if (!responseText || responseText.trim() === '') {
+        console.error('❌ [Investigation Assistant] Empty response received')
+        throw new Error('Empty response from server')
+      }
+
+      let data: any
+      try {
+        data = JSON.parse(responseText)
+      } catch (parseError) {
+        console.error('❌ [Investigation Assistant] JSON parse error:', parseError)
+        console.error('Response text (first 500 chars):', responseText.substring(0, 500))
+        throw new Error('Invalid JSON response from server. The query may have timed out.')
+      }
 
       console.log('📨 [Investigation Assistant] Response received:', {
         status: response.status,
