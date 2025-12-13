@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
-import { AlertTriangle, ArrowLeft, Ban, CheckCircle, Loader2, Send } from "lucide-react"
+import { AlertTriangle, ArrowLeft, Ban, CheckCircle, Loader2, Send, Shield, RefreshCw } from "lucide-react"
+import { AppLayout } from "@/components/app-layout"
+import { FadeInSection } from "@/components/fade-in-section"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { InvestigationCanvas } from "@/components/investigation-workspace/InvestigationCanvas"
-import { EmailSummaryPanel } from "@/components/investigation-workspace/EmailSummaryPanel"
-import { AIAssistantPanel } from "@/components/investigation-workspace/AIAssistantPanel"
-import { TopNavigation } from "@/components/investigation-workspace/TopNavigation"
 import type { EmailDetails, InvestigationSummary } from "@/components/investigation-workspace/types"
 
 const GRAPH_TRIGGERS = ["sender", "recipient", "emails", "campaign", "graph", "relationship"]
@@ -159,63 +158,76 @@ export default function AdminInvestigatePage() {
 
   if (loading) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="relative mb-6">
-            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-teal to-electric-blue/40 border border-border flex items-center justify-center mx-auto">
-              <Loader2 className="w-8 h-8 text-foreground animate-spin" />
+      <AppLayout notificationsCount={0}>
+        <FadeInSection>
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center">
+              <RefreshCw className="w-12 h-12 text-white animate-spin mx-auto mb-4" />
+              <p className="text-white font-medium mb-2">Loading investigation...</p>
+              <p className="text-gray-400 text-sm">Retrieving email data and security analysis</p>
             </div>
           </div>
-          <p className="text-foreground font-medium mb-2">Loading investigation...</p>
-          <p className="text-muted-foreground text-sm">Retrieving email data and security analysis</p>
-        </div>
-      </div>
+        </FadeInSection>
+      </AppLayout>
     )
   }
 
   if (error || !emailData) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-background">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 rounded-full bg-red-600/10 border border-red-600/20 flex items-center justify-center mx-auto mb-4">
-            <AlertTriangle className="w-8 h-8 text-danger" />
+      <AppLayout notificationsCount={0}>
+        <FadeInSection>
+          <div className="flex items-center justify-center py-12">
+            <div className="text-center max-w-md">
+              <div className="w-16 h-16 rounded-full bg-red-600/10 border border-red-600/20 flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle className="w-8 h-8 text-red-400" />
+              </div>
+              <h2 className="text-xl font-semibold text-white mb-2">Unable to Load Email Data</h2>
+              <p className="text-gray-400 text-sm mb-4">
+                {error || "The requested email could not be found. If this keeps happening, retry or contact an admin."}
+              </p>
+              <div className="bg-[#1f1f1f] border border-white/10 rounded-lg p-3 mb-4">
+                <p className="text-xs text-gray-400 font-mono break-all">{emailId}</p>
+              </div>
+              <Button
+                onClick={() => router.back()}
+                variant="outline"
+                className="bg-[#1f1f1f] border-white/10 text-white hover:bg-[#2a2a2a]"
+              >
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Go Back
+              </Button>
+            </div>
           </div>
-          <h2 className="text-xl font-semibold text-foreground mb-2">Unable to Load Email Data</h2>
-          <p className="text-muted-foreground text-sm mb-4">
-            {error || "The requested email could not be found. If this keeps happening, retry or contact an admin."}
-          </p>
-          <div className="glass-card border border-border rounded-lg p-3 mb-4">
-            <p className="text-xs text-muted-foreground font-mono break-all">{emailId}</p>
-          </div>
-          <Button
-            onClick={() => router.back()}
-            variant="outline"
-            className="border-border text-foreground hover:bg-secondary/60"
-          >
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Go Back
-          </Button>
-        </div>
-      </div>
+        </FadeInSection>
+      </AppLayout>
     )
   }
 
   return (
-    <div className="h-screen w-screen bg-background flex flex-col overflow-hidden" data-investigation-page>
-      <TopNavigation
-        subject={emailData.subject || "Investigation"}
-        status={investigation?.status || emailData.investigationStatus}
-        priority={investigation?.priority || emailData.flaggedSeverity}
-        direction={emailData.direction}
-        onSubmit={() => setSubmitDialogOpen(true)}
-      />
+    <AppLayout notificationsCount={investigation?.status === "new" ? 1 : 0}>
+      <FadeInSection>
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-2xl font-bold flex items-center gap-2 text-white">
+                <Shield className="h-6 w-6 text-white" />
+                Investigation: {emailData.subject || "No Subject"}
+              </h2>
+              <p className="text-gray-400 mt-1">
+                Email from {emailData.sender} • Received {new Date(emailData.timestamp).toLocaleDateString()}
+              </p>
+            </div>
+            <Button
+              onClick={() => setSubmitDialogOpen(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Send className="w-4 h-4 mr-2" />
+              Submit Investigation
+            </Button>
+          </div>
 
-      <div className="flex-1 h-0 flex">
-        <div className="w-[26%] min-w-[320px] border-r border-border/50 bg-black/40">
-          <EmailSummaryPanel email={emailData} investigation={investigation} />
-        </div>
-
-        <div className="flex-1 overflow-hidden">
+          {/* Main Investigation Content */}
           <InvestigationCanvas
             email={emailData}
             investigation={investigation}
@@ -224,17 +236,14 @@ export default function AdminInvestigatePage() {
             activeQuery={activeQuery}
           />
         </div>
+      </FadeInSection>
 
-        <div className="w-[24%] min-w-[280px] border-l border-border/50 bg-black/40">
-          <AIAssistantPanel emailId={emailId} onQuery={handleAssistantQuery} />
-        </div>
-      </div>
-
+      {/* Submit Investigation Dialog */}
       <Dialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
-        <DialogContent className="bg-background border-border text-foreground max-w-md">
+        <DialogContent className="bg-[#0f0f0f] border-white/10 text-white max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-xl font-semibold text-foreground">Submit Investigation</DialogTitle>
-            <DialogDescription className="text-muted-foreground">
+            <DialogTitle className="text-xl font-semibold text-white">Submit Investigation</DialogTitle>
+            <DialogDescription className="text-gray-400">
               Choose an action for this email investigation
             </DialogDescription>
           </DialogHeader>
@@ -243,36 +252,36 @@ export default function AdminInvestigatePage() {
             <Button
               onClick={() => handleSubmitAction("block")}
               disabled={submitting}
-              className="w-full justify-start bg-danger/10 hover:bg-danger/20 text-danger border border-danger/30 h-auto py-4"
+              className="w-full justify-start bg-red-900/20 hover:bg-red-900/40 text-red-300 border border-red-600/30 h-auto py-4"
             >
               <Ban className="w-5 h-5 mr-3" />
               <div className="flex-1 text-left">
                 <div className="font-semibold">Block Email</div>
-                <div className="text-xs text-danger/80 mt-1">Block this email and sender from future delivery</div>
+                <div className="text-xs text-red-400/80 mt-1">Block this email and sender from future delivery</div>
               </div>
             </Button>
 
             <Button
               onClick={() => handleSubmitAction("allow")}
               disabled={submitting}
-              className="w-full justify-start bg-cyber-green/10 hover:bg-cyber-green/20 text-cyber-green border border-cyber-green/30 h-auto py-4"
+              className="w-full justify-start bg-green-900/20 hover:bg-green-900/40 text-green-300 border border-green-600/30 h-auto py-4"
             >
               <CheckCircle className="w-5 h-5 mr-3" />
               <div className="flex-1 text-left">
                 <div className="font-semibold">Allow Email</div>
-                <div className="text-xs text-cyber-green/80 mt-1">Mark this email as safe</div>
+                <div className="text-xs text-green-400/80 mt-1">Mark this email as safe</div>
               </div>
             </Button>
 
             <Button
               onClick={() => handleSubmitAction("push")}
               disabled={submitting}
-              className="w-full justify-start bg-secondary/50 hover:bg-secondary/60 text-foreground border border-border/60 h-auto py-4"
+              className="w-full justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a] text-white border border-white/20 h-auto py-4"
             >
               <Send className="w-5 h-5 mr-3" />
               <div className="flex-1 text-left">
                 <div className="font-semibold">Push to Admin</div>
-                <div className="text-xs text-muted-foreground mt-1">Escalate this investigation to admin review</div>
+                <div className="text-xs text-gray-400 mt-1">Escalate this investigation to admin review</div>
               </div>
             </Button>
           </div>
@@ -282,13 +291,13 @@ export default function AdminInvestigatePage() {
               variant="ghost"
               onClick={() => setSubmitDialogOpen(false)}
               disabled={submitting}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-gray-400 hover:text-white hover:bg-[#2a2a2a]"
             >
               Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </AppLayout>
   )
 }

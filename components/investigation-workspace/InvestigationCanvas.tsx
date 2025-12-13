@@ -34,7 +34,7 @@ function ThreatScoreGauge({ score, confidence }: { score?: number; confidence?: 
   const displayScore = score || 0
   const displayConfidence = confidence || 0
 
-  const scoreColor = displayScore >= 70 ? "text-red-500" : displayScore >= 45 ? "text-orange-500" : "text-yellow-500"
+  const scoreColor = displayScore >= 70 ? "text-red-400" : displayScore >= 45 ? "text-orange-400" : "text-yellow-400"
   const scoreLabel = displayScore >= 70 ? "High Risk" : displayScore >= 45 ? "Medium Risk" : "Low Risk"
 
   return (
@@ -48,7 +48,7 @@ function ThreatScoreGauge({ score, confidence }: { score?: number; confidence?: 
             stroke="currentColor"
             strokeWidth="8"
             fill="none"
-            className="text-border/30"
+            className="text-white/10"
           />
           <circle
             cx="56"
@@ -64,7 +64,7 @@ function ThreatScoreGauge({ score, confidence }: { score?: number; confidence?: 
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className={cn("text-3xl font-bold", scoreColor)}>{displayScore}</span>
-          <span className="text-xs text-muted-foreground">threat score</span>
+          <span className="text-xs text-gray-400">threat score</span>
         </div>
       </div>
       <div className="flex-1">
@@ -72,10 +72,10 @@ function ThreatScoreGauge({ score, confidence }: { score?: number; confidence?: 
           <Shield className={cn("w-5 h-5", scoreColor)} />
           <span className={cn("font-semibold text-lg", scoreColor)}>{scoreLabel}</span>
         </div>
-        <div className="text-sm text-muted-foreground mb-1">
-          Confidence: <span className="text-foreground font-medium">{displayConfidence}%</span>
+        <div className="text-sm text-gray-400 mb-1">
+          Confidence: <span className="text-white font-medium">{displayConfidence}%</span>
         </div>
-        <div className="text-sm text-muted-foreground">
+        <div className="text-sm text-gray-400">
           Multi-agent AI analysis
         </div>
       </div>
@@ -131,20 +131,20 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
   }, [email.urls])
 
   return (
-    <div className="h-full overflow-y-auto bg-background p-6 space-y-6">
+    <div className="space-y-6">
       {/* Threat Overview */}
-      <Card className="glass-card border-border/50">
+      <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-foreground">Threat Overview</CardTitle>
+            <CardTitle className="text-white">Threat Overview</CardTitle>
             <Badge className={cn(
               "text-xs",
               threatLevel === "critical" || threatLevel === "high"
-                ? "bg-red-500/10 text-red-500 border-red-500/30"
+                ? "bg-red-600"
                 : threatLevel === "medium"
-                ? "bg-orange-500/10 text-orange-500 border-orange-500/30"
-                : "bg-green-500/10 text-green-500 border-green-500/30"
-            )}>
+                ? "bg-amber-600 text-white"
+                : "border-green-500 text-green-500"
+            )} variant={threatLevel === "critical" || threatLevel === "high" || threatLevel === "medium" ? "destructive" : "outline"}>
               {threatLevel.toUpperCase()} RISK
             </Badge>
           </div>
@@ -154,64 +154,64 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
 
           {/* Security Signals */}
           <div className="space-y-3">
-            <p className="text-xs text-muted-foreground font-medium">Security Signals</p>
+            <p className="text-xs text-gray-400 font-medium">Security Signals</p>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Phishing Detection</span>
+                  <span className="text-sm text-gray-400">Phishing Detection</span>
                   {isPhishing ? (
-                    <Badge className="bg-red-500/10 text-red-500 border-red-500/30 text-xs">
+                    <Badge variant="destructive" className="bg-red-600 text-xs">
                       Detected
                     </Badge>
                   ) : (
-                    <Badge className="bg-green-500/10 text-green-500 border-green-500/30 text-xs">
+                    <Badge variant="outline" className="border-green-500 text-green-500 text-xs">
                       Clean
                     </Badge>
                   )}
                 </div>
-                <div className="text-xs text-foreground/70">
+                <div className="text-xs text-gray-300">
                   {isPhishing ? "Phishing attempt identified" : "No phishing indicators"}
                 </div>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Malware Scan</span>
+                  <span className="text-sm text-gray-400">Malware Scan</span>
                   {vtVerdict === "MALICIOUS" ? (
-                    <Badge className="bg-red-500/10 text-red-500 border-red-500/30 text-xs">
+                    <Badge variant="destructive" className="bg-red-600 text-xs">
                       MALICIOUS
                     </Badge>
                   ) : vtVerdict === "SUSPICIOUS" ? (
-                    <Badge className="bg-orange-500/10 text-orange-500 border-orange-500/30 text-xs">
+                    <Badge variant="destructive" className="bg-amber-600 text-white text-xs">
                       SUSPICIOUS
                     </Badge>
                   ) : (
-                    <Badge className="bg-green-500/10 text-green-500 border-green-500/30 text-xs">
+                    <Badge variant="outline" className="border-green-500 text-green-500 text-xs">
                       Clean
                     </Badge>
                   )}
                 </div>
-                <div className="text-xs text-foreground/70">
+                <div className="text-xs text-gray-300">
                   VirusTotal: {vtVerdict}
                 </div>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">DistilBERT Score</span>
-                  <span className="text-sm text-foreground font-medium">{distilbertScore}%</span>
+                  <span className="text-sm text-gray-400">DistilBERT Score</span>
+                  <span className="text-sm text-white font-medium">{distilbertScore}%</span>
                 </div>
-                <div className="text-xs text-foreground/70">
+                <div className="text-xs text-gray-300">
                   AI phishing classifier
                 </div>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">Context Score</span>
-                  <span className="text-sm text-foreground font-medium">{contextScore}%</span>
+                  <span className="text-sm text-gray-400">Context Score</span>
+                  <span className="text-sm text-white font-medium">{contextScore}%</span>
                 </div>
-                <div className="text-xs text-foreground/70">
+                <div className="text-xs text-gray-300">
                   Graph analysis score
                 </div>
               </div>
@@ -221,18 +221,18 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
       </Card>
 
       {/* AI Threat Analysis */}
-      <Card className="glass-card border-border/50">
+      <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Brain className="w-5 h-5 text-foreground/70" />
-              <CardTitle className="text-foreground">AI Threat Analysis</CardTitle>
+              <Brain className="w-5 h-5 text-gray-400" />
+              <CardTitle className="text-white">AI Threat Analysis</CardTitle>
             </div>
             <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowFullAnalysis(!showFullAnalysis)}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-gray-400 hover:text-white hover:bg-[#2a2a2a]"
             >
               {showFullAnalysis ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </Button>
@@ -240,8 +240,8 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
         </CardHeader>
         {showFullAnalysis && (
           <CardContent>
-            <div className="bg-muted/20 border border-border/50 rounded-lg p-4">
-              <p className="text-sm text-foreground/90 leading-relaxed whitespace-pre-wrap">
+            <div className="bg-[#1f1f1f] border border-white/10 rounded-lg p-4">
+              <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">
                 {threatReasoning}
               </p>
             </div>
@@ -251,14 +251,14 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
 
       {/* Threat Indicators */}
       {indicators.length > 0 && (
-        <Card className="glass-card border-border/50">
+        <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Eye className="w-5 h-5 text-foreground/70" />
-                <CardTitle className="text-foreground">Threat Indicators</CardTitle>
+                <Eye className="w-5 h-5 text-gray-400" />
+                <CardTitle className="text-white">Threat Indicators</CardTitle>
               </div>
-              <Badge variant="outline" className="text-foreground/70 border-border/50">
+              <Badge variant="outline" className="text-gray-400 border-white/10">
                 {indicators.length} found
               </Badge>
             </div>
@@ -266,9 +266,9 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
           <CardContent>
             <ul className="space-y-2">
               {indicators.map((indicator: string, idx: number) => (
-                <li key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-muted/20 border border-border/50">
-                  <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
-                  <span className="text-sm text-foreground/90">{indicator}</span>
+                <li key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-[#1f1f1f] border border-white/10">
+                  <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                  <span className="text-sm text-gray-300">{indicator}</span>
                 </li>
               ))}
             </ul>
@@ -278,19 +278,19 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
 
       {/* Recommended Actions */}
       {recommendations.length > 0 && (
-        <Card className="glass-card border-border/50">
+        <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
             <div className="flex items-center gap-2">
-              <Shield className="w-5 h-5 text-foreground/70" />
-              <CardTitle className="text-foreground">Recommended Actions</CardTitle>
+              <Shield className="w-5 h-5 text-gray-400" />
+              <CardTitle className="text-white">Recommended Actions</CardTitle>
             </div>
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
               {recommendations.map((rec: string, idx: number) => (
-                <li key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-muted/20 border border-border/50">
-                  <CheckCircle className="w-4 h-4 text-foreground/50 mt-0.5 shrink-0" />
-                  <span className="text-sm text-foreground/90">{rec}</span>
+                <li key={idx} className="flex items-start gap-3 p-3 rounded-lg bg-[#1f1f1f] border border-white/10">
+                  <CheckCircle className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
+                  <span className="text-sm text-gray-300">{rec}</span>
                 </li>
               ))}
             </ul>
@@ -300,14 +300,14 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
 
       {/* URLs Found */}
       {urls.length > 0 && (
-        <Card className="glass-card border-border/50">
+        <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
           <CardHeader>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Link className="w-5 h-5 text-foreground/70" />
-                <CardTitle className="text-foreground">URLs Found</CardTitle>
+                <Link className="w-5 h-5 text-gray-400" />
+                <CardTitle className="text-white">URLs Found</CardTitle>
               </div>
-              <Badge variant="outline" className="text-foreground/70 border-border/50">
+              <Badge variant="outline" className="text-gray-400 border-white/10">
                 {urls.length} URL{urls.length > 1 ? 's' : ''}
               </Badge>
             </div>
@@ -315,7 +315,7 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
           <CardContent>
             <ul className="space-y-2">
               {urls.map((url: string, idx: number) => (
-                <li key={idx} className="p-3 rounded-lg bg-muted/20 border border-border/50 font-mono text-xs text-foreground/80 break-all">
+                <li key={idx} className="p-3 rounded-lg bg-[#1f1f1f] border border-white/10 font-mono text-xs text-gray-300 break-all">
                   {url}
                 </li>
               ))}
@@ -325,15 +325,15 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
       )}
 
       {/* Message Content */}
-      <Card className="glass-card border-border/50">
+      <Card className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300">
         <CardHeader>
           <div className="flex items-center gap-2">
-            <FileText className="w-5 h-5 text-foreground/70" />
-            <CardTitle className="text-foreground">Message Content</CardTitle>
+            <FileText className="w-5 h-5 text-gray-400" />
+            <CardTitle className="text-white">Message Content</CardTitle>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="bg-muted/20 border border-border/50 rounded-lg overflow-hidden">
+          <div className="bg-[#1f1f1f] border border-white/10 rounded-lg overflow-hidden">
             {email.bodyHtml ? (
               <iframe
                 srcDoc={email.bodyHtml}
@@ -342,7 +342,7 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
                 sandbox="allow-same-origin"
               />
             ) : (
-              <pre className="text-sm text-foreground/80 p-4 overflow-x-auto whitespace-pre-wrap">
+              <pre className="text-sm text-gray-300 p-4 overflow-x-auto whitespace-pre-wrap">
                 {email.body || "No content"}
               </pre>
             )}
