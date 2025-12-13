@@ -196,10 +196,12 @@ export function extractOrgId(request: Request, fallback?: string): string | null
 // Export table names with proper fallbacks
 export const TABLES = {
   ORGANIZATIONS: process.env.ORGANIZATIONS_TABLE_NAME || "Organizations",
-  USERS: process.env.USERS_TABLE_NAME || "SecurityTeamUsers", 
+  USERS: process.env.USERS_TABLE_NAME || "SecurityTeamUsers",
   CLOUDSERVICES: process.env.CLOUDSERVICES_TABLE_NAME || "CloudServices",
   EMAILS: process.env.EMAILS_TABLE_NAME || "Emails",
   DETECTIONS: process.env.DETECTIONS_TABLE_NAME || "Detections",
   ENDPOINTS: process.env.ENDPOINTS_TABLE_NAME || "Endpoints",
   ENDPOINT_EVENTS: process.env.ENDPOINT_EVENTS_TABLE_NAME || "EndpointEvents",
+  PUSHED_REQUESTS: process.env.PUSHED_REQUESTS_TABLE_NAME || "PushedRequests",
+  BLOCK_LIST: process.env.BLOCK_LIST_TABLE_NAME || "BlockList",
 } as const
