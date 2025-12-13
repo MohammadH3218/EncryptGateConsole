@@ -6,8 +6,9 @@ import { getNeo4jConfig, getOpenAIApiKey } from './config'
 // === Constants ===
 const MAX_RESULTS_TO_RETURN    = 50
 const MAX_RESULTS_FOR_SUMMARY  = 20
-const MAX_RETRY_ATTEMPTS       = 10
-const LLM_TIMEOUT_MS           = 30_000
+const MAX_RETRY_ATTEMPTS       = 5  // Reduced from 10 to prevent timeouts
+const LLM_TIMEOUT_MS           = 20_000  // Reduced from 30s to 20s
+const TOTAL_QUERY_TIMEOUT_MS   = 90_000  // 90 seconds total timeout for entire query
 const OPENAI_MODEL            = process.env.OPENAI_MODEL || "gpt-4o-mini"
 const OPENAI_URL              = 'https://api.openai.com/v1/chat/completions'
 
@@ -744,8 +745,44 @@ Provide a clear analysis in context.
   }
 }
 
+// === Timeout Wrapper ===
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string
+): Promise<T> {
+  let timeoutHandle: NodeJS.Timeout
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(errorMessage))
+    }, timeoutMs)
+  })
+
+  try {
+    return await Promise.race([promise, timeoutPromise])
+  } finally {
+    clearTimeout(timeoutHandle!)
+  }
+}
+
 // === Main Entry Point ===
 export async function askInvestigationAssistant(
+  question: string,
+  messageId: string
+): Promise<string> {
+  // Wrap entire function with timeout
+  return withTimeout(
+    askInvestigationAssistantInternal(question, messageId),
+    TOTAL_QUERY_TIMEOUT_MS,
+    `Query timed out after ${TOTAL_QUERY_TIMEOUT_MS / 1000} seconds. The question may be too complex. Try simplifying your query or asking something more specific.`
+  ).catch((error) => {
+    console.error('❌ Investigation Assistant timeout or error:', error)
+    return error.message || 'Query failed due to timeout or error.'
+  })
+}
+
+async function askInvestigationAssistantInternal(
   question: string,
   messageId: string
 ): Promise<string> {
@@ -774,6 +811,14 @@ export async function askInvestigationAssistant(
 
     const attempts: string[] = []
     const errors:   string[] = []
+    const startTime = Date.now()
+
+    // Helper to check if we're running out of time
+    const isNearTimeout = () => {
+      const elapsed = Date.now() - startTime
+      // Leave 30 seconds buffer for final summary
+      return elapsed > (TOTAL_QUERY_TIMEOUT_MS - 30000)
+    }
 
     // 1) Special‐case "most emails to recipient"
     const [type,data] = analyzeQuestion(question, scenario)
@@ -792,6 +837,11 @@ export async function askInvestigationAssistant(
 
     // 2) General flow with retries
     for (let i = 1; i <= MAX_RETRY_ATTEMPTS; i++) {
+      // Check if we're running out of time before attempting another retry
+      if (i > 1 && isNearTimeout()) {
+        console.log(`⏱️ Stopping retry loop early (attempt ${i}) to avoid timeout`)
+        break
+      }
       let q: string
       if (i === 1) {
         q = await generateCypher(question, scenario, schemaOverview)

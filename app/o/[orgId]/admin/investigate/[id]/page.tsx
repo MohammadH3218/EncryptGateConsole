@@ -295,8 +295,8 @@ export default function AdminInvestigatePage() {
     <div className="min-h-screen bg-[#0f0f0f]">
       {/* Top Navigation Bar */}
       <div className="border-b border-white/10 bg-[#0f0f0f] sticky top-0 z-50">
-        <div className="px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
+        <div className="px-6 py-3 flex justify-between items-center">
+          <div className="flex items-center gap-3">
             <Button
               onClick={() => router.back()}
               variant="ghost"
@@ -306,15 +306,10 @@ export default function AdminInvestigatePage() {
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back
             </Button>
-            <div>
-              <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                <Shield className="h-5 w-5" />
-                {emailData.subject || "No Subject"}
-              </h1>
-              <p className="text-sm text-gray-400">
-                From {emailData.sender} • {new Date(emailData.timestamp).toLocaleDateString()}
-              </p>
-            </div>
+            <h1 className="text-lg font-bold text-white flex items-center gap-2">
+              <Shield className="h-5 w-5" />
+              Investigation
+            </h1>
           </div>
           <Button
             onClick={() => setSubmitDialogOpen(true)}
@@ -327,18 +322,18 @@ export default function AdminInvestigatePage() {
       </div>
 
       {/* Main Content - Split View */}
-      <div className="flex h-[calc(100vh-73px)]">
+      <div className="flex h-[calc(100vh-57px)]">
         {/* Investigation Content - Left Side */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
           {/* Email Information Card */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Email Details */}
-            <div className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300 rounded-lg border border-white/10 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Shield className="w-5 h-5 text-blue-400" />
+            <div className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300 rounded-lg border border-white/10 p-4">
+              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-blue-400" />
                 Email Information
               </h3>
-              <div className="space-y-4">
+              <div className="space-y-2.5">
                 <div>
                   <label className="text-xs font-medium text-gray-400 uppercase tracking-wide">Subject</label>
                   <p className="text-sm text-white mt-1 break-words">{emailData.subject || 'No Subject'}</p>
@@ -383,12 +378,12 @@ export default function AdminInvestigatePage() {
             </div>
 
             {/* Status & Security */}
-            <div className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300 rounded-lg border border-white/10 p-6">
-              <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                <Shield className="w-5 h-5 text-blue-400" />
+            <div className="bg-[#0f0f0f] border-none text-white hover:bg-[#1f1f1f] transition-all duration-300 rounded-lg border border-white/10 p-4">
+              <h3 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
+                <Shield className="w-4 h-4 text-blue-400" />
                 Status & Security
               </h3>
-              <div className="space-y-4">
+              <div className="space-y-2.5">
                 <div>
                   <label className="text-xs font-medium text-gray-400 uppercase tracking-wide">Investigation Status</label>
                   <div className="mt-1">
