@@ -208,7 +208,7 @@ export default function AdminInvestigatePage() {
       let response
 
       if (action === "block") {
-        response = await fetch(`/api/email/${encodeURIComponent(emailData.messageId)}/block`, {
+        response = await fetch(`/api/email/block`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-org-id": orgId },
           body: JSON.stringify({
@@ -219,7 +219,7 @@ export default function AdminInvestigatePage() {
           }),
         })
       } else if (action === "allow") {
-        response = await fetch(`/api/email/${encodeURIComponent(emailData.messageId)}/allow`, {
+        response = await fetch(`/api/email/allow`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-org-id": orgId },
           body: JSON.stringify({

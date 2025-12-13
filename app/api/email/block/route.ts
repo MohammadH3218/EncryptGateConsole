@@ -5,18 +5,6 @@ import { getDriver } from '@/lib/neo4j';
 
 export const runtime = 'nodejs';
 
-// Handle OPTIONS for CORS
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
-}
-
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 'CloudServices';
 
 // Helper function to normalize messageId (remove angle brackets if present)
@@ -83,38 +71,26 @@ async function getWorkMailConfig(orgId: string) {
 }
 
 /**
- * POST /api/email/[messageId]/block
+ * POST /api/email/block
  * Block an email and its sender
+ * messageId and sender should be passed in the request body
  */
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ messageId: string }> }
-) {
+export async function POST(request: Request) {
   try {
-    const { messageId: rawMessageId } = await params;
-    
-    // Handle URL decoding - try multiple times if needed
-    let messageId = rawMessageId;
-    try {
-      // Try decoding once
-      messageId = decodeURIComponent(rawMessageId);
-      // If it still looks encoded, try again
-      if (messageId.includes('%')) {
-        messageId = decodeURIComponent(messageId);
-      }
-    } catch (decodeError) {
-      // If decoding fails, use raw messageId
-      console.warn(`⚠️ Failed to decode messageId, using raw: ${rawMessageId}`);
-      messageId = rawMessageId;
-    }
-    
     const body = await request.json();
-    const { sender, reason, orgId: bodyOrgId } = body;
+    const { messageId, sender, reason, orgId: bodyOrgId } = body;
+
+    if (!messageId) {
+      return NextResponse.json(
+        { error: 'messageId is required in request body' },
+        { status: 400 }
+      );
+    }
 
     // Extract orgId from request or body
     const orgId = bodyOrgId || extractOrgId(request) || 'default-org';
 
-    console.log(`🚫 Blocking email - Raw: ${rawMessageId}, Decoded: ${messageId}, sender: ${sender}, orgId: ${orgId}`);
+    console.log(`🚫 Blocking email: ${messageId}, sender: ${sender}, orgId: ${orgId}`);
 
     // Get all variations to try (handles encoding issues)
     const variations = getMessageIdVariations(messageId);
@@ -232,7 +208,7 @@ export async function POST(
       });
 
       await session.close();
-      console.log(`✅ Neo4j updated successfully for ${messageId}`);
+      console.log(`✅ Neo4j updated successfully for ${foundMessageId}`);
     } catch (neo4jError) {
       console.error('⚠️ Failed to update Neo4j (continuing anyway):', neo4jError);
     }
@@ -310,11 +286,11 @@ export async function POST(
       }
     }
 
-    console.log(`✅ Email blocked successfully: ${messageId}`);
+    console.log(`✅ Email blocked successfully: ${foundMessageId}`);
 
     return NextResponse.json({
       success: true,
-      messageId,
+      messageId: foundMessageId,
       sender,
       blocked: true,
       blockedAt: new Date().toISOString(),

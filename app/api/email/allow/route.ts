@@ -5,18 +5,6 @@ import { getDriver } from '@/lib/neo4j';
 
 export const runtime = 'nodejs';
 
-// Handle OPTIONS for CORS
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
-}
-
 // Helper function to normalize messageId (remove angle brackets if present)
 function normalizeMessageId(messageId: string): string {
   return messageId.replace(/^<|>$/g, '');
@@ -51,36 +39,24 @@ function getMessageIdVariations(messageId: string): string[] {
 }
 
 /**
- * POST /api/email/[messageId]/allow
+ * POST /api/email/allow
  * Allow a specific email - mark as clean (not AI-flagged)
  * Updates both DynamoDB and Neo4j
+ * messageId should be passed in the request body
  */
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ messageId: string }> }
-) {
+export async function POST(request: Request) {
   try {
-    const { messageId: rawMessageId } = await params;
-    
-    // Handle URL decoding - try multiple times if needed
-    let messageId = rawMessageId;
-    try {
-      // Try decoding once
-      messageId = decodeURIComponent(rawMessageId);
-      // If it still looks encoded, try again
-      if (messageId.includes('%')) {
-        messageId = decodeURIComponent(messageId);
-      }
-    } catch (decodeError) {
-      // If decoding fails, use raw messageId
-      console.warn(`⚠️ Failed to decode messageId, using raw: ${rawMessageId}`);
-      messageId = rawMessageId;
-    }
-    
     const body = await request.json();
-    const { reason } = body;
+    const { messageId, reason } = body;
 
-    console.log(`✅ Allowing email - Raw: ${rawMessageId}, Decoded: ${messageId}`);
+    if (!messageId) {
+      return NextResponse.json(
+        { error: 'messageId is required in request body' },
+        { status: 400 }
+      );
+    }
+
+    console.log(`✅ Allowing email: ${messageId}`);
 
     // Get all variations to try (handles encoding issues)
     const variations = getMessageIdVariations(messageId);
@@ -202,17 +178,17 @@ export async function POST(
       });
 
       await session.close();
-      console.log(`✅ Neo4j updated successfully for ${messageId}`);
+      console.log(`✅ Neo4j updated successfully for ${foundMessageId}`);
     } catch (neo4jError) {
       console.error('⚠️ Failed to update Neo4j (continuing anyway):', neo4jError);
       // Don't fail the request if Neo4j update fails
     }
 
-    console.log(`✅ Email allowed successfully: ${messageId}`);
+    console.log(`✅ Email allowed successfully: ${foundMessageId}`);
 
     return NextResponse.json({
       success: true,
-      messageId,
+      messageId: foundMessageId,
       sender,
       allowed: true,
       status: 'clean',
