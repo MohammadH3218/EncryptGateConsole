@@ -93,25 +93,45 @@ export async function POST(request: Request) {
     console.log(`🚫 Blocking email: ${messageId}, sender: ${sender}, orgId: ${orgId}`);
 
     // Get all variations to try (handles encoding issues)
-    const variations = getMessageIdVariations(messageId);
+    const variations: string[] = [];
+    
+    // Add original first
+    variations.push(messageId);
+    
+    // Normalize (remove angle brackets)
     const normalizedId = normalizeMessageId(messageId);
-    if (normalizedId !== messageId && !variations.includes(normalizedId)) {
+    if (normalizedId !== messageId) {
       variations.push(normalizedId);
     }
     
-    // Also try with/without angle brackets
-    const withBrackets = messageId.startsWith('<') ? messageId : `<${messageId}>`;
-    const withoutBrackets = normalizeMessageId(messageId);
-    if (!variations.includes(withBrackets)) variations.push(withBrackets);
-    if (!variations.includes(withoutBrackets) && withoutBrackets !== messageId) {
-      variations.push(withoutBrackets);
+    // Try with angle brackets if not already there
+    if (!messageId.startsWith('<')) {
+      variations.push(`<${messageId}>`);
     }
+    if (!normalizedId.startsWith('<')) {
+      variations.push(`<${normalizedId}>`);
+    }
+    
+    // Try encoding variations
+    const encodingVariations = getMessageIdVariations(messageId);
+    variations.push(...encodingVariations);
+    
+    // Also try encoding variations of normalized version
+    const normalizedEncodingVariations = getMessageIdVariations(normalizedId);
+    normalizedEncodingVariations.forEach(v => {
+      if (!variations.includes(v)) variations.push(v);
+    });
+    
+    // Remove duplicates
+    const uniqueVariations = [...new Set(variations)];
+    
+    console.log(`🔍 Will try ${uniqueVariations.length} messageId variations:`, uniqueVariations.slice(0, 5).map(v => v.substring(0, 50) + '...'));
 
     // Try each variation to find the email
     let emailKey: any = null;
     let foundMessageId = messageId;
 
-    for (const variant of variations) {
+    for (const variant of uniqueVariations) {
       try {
         const findEmailCommand = new ScanCommand({
           TableName: TABLES.EMAILS,
@@ -119,8 +139,8 @@ export async function POST(request: Request) {
           ExpressionAttributeValues: {
             ':messageId': { S: variant }
           },
-          ProjectionExpression: 'userId, receivedAt, timestamp, createdAt',
-          Limit: 1
+          ProjectionExpression: 'userId, receivedAt, timestamp, createdAt, messageId',
+          Limit: 10  // Increase limit for debugging
         });
 
         const findResult = await ddb.send(findEmailCommand);
@@ -129,6 +149,7 @@ export async function POST(request: Request) {
           emailKey = findResult.Items[0];
           foundMessageId = variant;
           console.log(`✅ Found email with messageId variant: ${variant}`);
+          console.log(`📧 Stored messageId in DB: ${emailKey.messageId?.S}`);
           break;
         }
       } catch (scanError: any) {
@@ -138,9 +159,30 @@ export async function POST(request: Request) {
     }
 
     if (!emailKey) {
-      console.error(`❌ Email not found with any variant. Tried: ${variations.join(', ')}`);
+      // Try a broader scan to see what messageIds actually exist
+      try {
+        // Try scanning a few items to see messageId format
+        const sampleScan = new ScanCommand({
+          TableName: TABLES.EMAILS,
+          ProjectionExpression: 'messageId',
+          Limit: 10
+        });
+        const sampleResult = await ddb.send(sampleScan);
+        if (sampleResult.Items && sampleResult.Items.length > 0) {
+          console.log(`🔍 Sample messageIds in DB (first 10):`);
+          sampleResult.Items.forEach((item, idx) => {
+            const msgId = item.messageId?.S || 'MISSING';
+            const matches = msgId.includes('CAF5CD5F9koKTTu') ? ' ⭐ MATCHES' : '';
+            console.log(`  ${idx + 1}. "${msgId.substring(0, 80)}${msgId.length > 80 ? '...' : ''}"${matches}`);
+          });
+        }
+      } catch (broadError) {
+        console.warn('Could not perform sample scan:', broadError);
+      }
+
+      console.error(`❌ Email not found with any variant. Tried: ${uniqueVariations.join(', ')}`);
       return NextResponse.json(
-        { error: 'Email not found', messageId },
+        { error: 'Email not found', messageId, triedVariations: uniqueVariations.slice(0, 10) },
         { status: 404 }
       );
     }
