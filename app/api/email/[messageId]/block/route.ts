@@ -7,6 +7,39 @@ export const runtime = 'nodejs';
 
 const CS_TABLE = process.env.CLOUDSERVICES_TABLE_NAME || 'CloudServices';
 
+// Helper function to normalize messageId (remove angle brackets if present)
+function normalizeMessageId(messageId: string): string {
+  return messageId.replace(/^<|>$/g, '');
+}
+
+// Helper function to try multiple messageId variations (handles encoding issues)
+function getMessageIdVariations(messageId: string): string[] {
+  const variations: string[] = [messageId];
+  
+  // Try with spaces replaced by underscores
+  if (messageId.includes(' ')) {
+    variations.push(messageId.replace(/ /g, '_'));
+  }
+  
+  // Try with underscores replaced by spaces
+  if (messageId.includes('_')) {
+    variations.push(messageId.replace(/_/g, ' '));
+  }
+  
+  // Try with plus signs replaced by underscores
+  if (messageId.includes('+')) {
+    variations.push(messageId.replace(/\+/g, '_'));
+  }
+  
+  // Try with underscores replaced by plus signs
+  if (messageId.includes('_')) {
+    variations.push(messageId.replace(/_/g, '+'));
+  }
+  
+  // Remove duplicates
+  return [...new Set(variations)];
+}
+
 /**
  * Helper function to get WorkMail configuration from DynamoDB
  */
@@ -48,7 +81,7 @@ export async function POST(
   try {
     const { messageId: rawMessageId } = await params;
     // Decode the messageId in case it's URL encoded
-    const messageId = decodeURIComponent(rawMessageId);
+    let messageId = decodeURIComponent(rawMessageId);
     const body = await request.json();
     const { sender, reason, orgId: bodyOrgId } = body;
 
@@ -57,28 +90,59 @@ export async function POST(
 
     console.log(`🚫 Blocking email: ${messageId}, sender: ${sender}, orgId: ${orgId}`);
 
-    // Find the email - try multiple possible key structures
-    const findEmailCommand = new ScanCommand({
-      TableName: TABLES.EMAILS,
-      FilterExpression: 'messageId = :messageId',
-      ExpressionAttributeValues: {
-        ':messageId': { S: messageId }
-      },
-      ProjectionExpression: 'userId, receivedAt, timestamp, createdAt',
-      Limit: 1
-    });
+    // Get all variations to try (handles encoding issues)
+    const variations = getMessageIdVariations(messageId);
+    const normalizedId = normalizeMessageId(messageId);
+    if (normalizedId !== messageId && !variations.includes(normalizedId)) {
+      variations.push(normalizedId);
+    }
+    
+    // Also try with/without angle brackets
+    const withBrackets = messageId.startsWith('<') ? messageId : `<${messageId}>`;
+    const withoutBrackets = normalizeMessageId(messageId);
+    if (!variations.includes(withBrackets)) variations.push(withBrackets);
+    if (!variations.includes(withoutBrackets) && withoutBrackets !== messageId) {
+      variations.push(withoutBrackets);
+    }
 
-    const findResult = await ddb.send(findEmailCommand);
+    // Try each variation to find the email
+    let emailKey: any = null;
+    let foundMessageId = messageId;
 
-    if (!findResult.Items || findResult.Items.length === 0) {
-      console.error(`❌ Email not found: ${messageId}`);
+    for (const variant of variations) {
+      try {
+        const findEmailCommand = new ScanCommand({
+          TableName: TABLES.EMAILS,
+          FilterExpression: 'messageId = :messageId',
+          ExpressionAttributeValues: {
+            ':messageId': { S: variant }
+          },
+          ProjectionExpression: 'userId, receivedAt, timestamp, createdAt',
+          Limit: 1
+        });
+
+        const findResult = await ddb.send(findEmailCommand);
+
+        if (findResult.Items && findResult.Items.length > 0) {
+          emailKey = findResult.Items[0];
+          foundMessageId = variant;
+          console.log(`✅ Found email with messageId variant: ${variant}`);
+          break;
+        }
+      } catch (scanError: any) {
+        console.warn(`⚠️ Error scanning for variant ${variant}:`, scanError.message);
+        continue;
+      }
+    }
+
+    if (!emailKey) {
+      console.error(`❌ Email not found with any variant. Tried: ${variations.join(', ')}`);
       return NextResponse.json(
         { error: 'Email not found', messageId },
         { status: 404 }
       );
     }
 
-    const emailKey = findResult.Items[0];
     const userId = emailKey.userId?.S;
     const receivedAt = emailKey.receivedAt?.S || emailKey.timestamp?.S || emailKey.createdAt?.S;
     
@@ -135,7 +199,7 @@ export async function POST(
       `;
 
       await session.run(neo4jUpdateQuery, {
-        messageId,
+        messageId: foundMessageId,
         blockedAt: new Date().toISOString(),
         reason: reason || 'Blocked from investigation',
         updatedAt: new Date().toISOString()
@@ -178,7 +242,7 @@ export async function POST(
               blockedAt: { S: now },
               blockedBy: { S: 'investigation' },
               reason: { S: reason || 'Blocked from investigation' },
-              messageId: { S: messageId },
+              messageId: { S: foundMessageId },
               status: { S: 'active' },
               createdAt: { S: now },
               updatedAt: { S: now }
