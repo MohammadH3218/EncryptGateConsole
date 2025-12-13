@@ -137,24 +137,177 @@ export async function POST(request: Request) {
         const sampleScan = new ScanCommand({
           TableName: TABLES.EMAILS,
           ProjectionExpression: 'messageId',
-          Limit: 10
+          Limit: 50  // Increased to find the specific email
         });
         const sampleResult = await ddb.send(sampleScan);
         if (sampleResult.Items && sampleResult.Items.length > 0) {
-          console.log(`🔍 Sample messageIds in DB (first 10):`);
+          console.log(`🔍 Sample messageIds in DB (first 50):`);
+          let foundMatch = false;
           sampleResult.Items.forEach((item, idx) => {
             const msgId = item.messageId?.S || 'MISSING';
-            const matches = msgId.includes('CAF5CD5F9koKTTu') ? ' ⭐ MATCHES' : '';
-            console.log(`  ${idx + 1}. "${msgId.substring(0, 80)}${msgId.length > 80 ? '...' : ''}"${matches}`);
+            const matches = msgId.includes('CAF5CD5F9koKTTu') ? ' ⭐ MATCHES!' : '';
+            if (msgId.includes('CAF5CD5F9koKTTu')) foundMatch = true;
+            console.log(`  ${idx + 1}. "${msgId}"${matches}`);
           });
+          if (!foundMatch) {
+            console.log(`⚠️ Email with messageId containing 'CAF5CD5F9koKTTu' not found in sample`);
+            console.log(`ℹ️ This email might only exist in Neo4j, not DynamoDB`);
+          }
         }
       } catch (broadError) {
         console.warn('Could not perform sample scan:', broadError);
       }
 
-      console.error(`❌ Email not found with any variant. Tried: ${uniqueVariations.join(', ')}`);
+      // If email exists in Neo4j but not DynamoDB, we can still update Neo4j
+      console.log(`⚠️ Email not found in DynamoDB, checking if it exists in Neo4j...`);
+      try {
+        const driver = await getDriver();
+        const session = driver.session();
+        
+        // Try all variations in Neo4j
+        let neo4jEmailFound = false;
+        let neo4jMessageId = uniqueVariations[0];
+        
+        for (const variant of uniqueVariations) {
+          try {
+            const neo4jCheckQuery = `MATCH (e:Email {messageId: $messageId}) RETURN e LIMIT 1`;
+            const neo4jResult = await session.run(neo4jCheckQuery, { messageId: variant });
+            
+            if (neo4jResult.records.length > 0) {
+              neo4jEmailFound = true;
+              neo4jMessageId = variant;
+              console.log(`✅ Email found in Neo4j with messageId variant: ${variant}`);
+              break;
+            }
+          } catch (checkError) {
+            console.warn(`⚠️ Error checking Neo4j variant ${variant}:`, checkError);
+            continue;
+          }
+        }
+        
+        if (neo4jEmailFound) {
+          console.log(`✅ Email found in Neo4j but not in DynamoDB - will get info from Neo4j and create/update DynamoDB`);
+          
+          try {
+            // Get email details from Neo4j including sender and recipient
+            const neo4jGetQuery = `
+              MATCH (sender:User)-[:WAS_SENT]->(e:Email {messageId: $messageId})
+              OPTIONAL MATCH (e)-[:WAS_SENT_TO]->(recipient:User)
+              RETURN e, sender.email AS senderEmail, collect(recipient.email) AS recipientEmails
+              LIMIT 1
+            `;
+            
+            const neo4jGetResult = await session.run(neo4jGetQuery, { messageId: neo4jMessageId });
+            
+            if (neo4jGetResult.records.length > 0) {
+              const record = neo4jGetResult.records[0];
+              const emailNode = record.get('e').properties;
+              const senderEmail = record.get('senderEmail');
+              const recipientEmails = record.get('recipientEmails') || [];
+              
+              // Get sentDate from email node (could be sentDate, sentAt, or timestamp)
+              const sentDate = emailNode.sentDate || emailNode.sentAt || emailNode.timestamp || new Date().toISOString();
+              
+              // Determine userId: for inbound emails, use first recipient; for outbound, use sender
+              // Default to first recipient if available, otherwise sender
+              const userId = recipientEmails.length > 0 ? recipientEmails[0] : senderEmail;
+              
+              console.log(`📧 Got email info from Neo4j: userId=${userId}, receivedAt=${sentDate}, sender=${senderEmail}`);
+              
+              // Try to create or update email in DynamoDB
+              try {
+                const updateEmailCommand = new UpdateItemCommand({
+                  TableName: TABLES.EMAILS,
+                  Key: {
+                    userId: { S: userId },
+                    receivedAt: { S: sentDate }
+                  },
+                  UpdateExpression: 'SET #allowed = :allowed, #allowedAt = :allowedAt, #allowedReason = :allowedReason, #status = :status, #flaggedCategory = :flaggedCategory, #flaggedStatus = :flaggedStatus, #messageId = :messageId, #sender = :sender, #subject = :subject, #updatedAt = :updatedAt',
+                  ExpressionAttributeNames: {
+                    '#allowed': 'allowed',
+                    '#allowedAt': 'allowedAt',
+                    '#allowedReason': 'allowedReason',
+                    '#status': 'status',
+                    '#flaggedCategory': 'flaggedCategory',
+                    '#flaggedStatus': 'flaggedStatus',
+                    '#messageId': 'messageId',
+                    '#sender': 'sender',
+                    '#subject': 'subject',
+                    '#updatedAt': 'updatedAt'
+                  },
+                  ExpressionAttributeValues: {
+                    ':allowed': { BOOL: true },
+                    ':allowedAt': { S: new Date().toISOString() },
+                    ':allowedReason': { S: reason || 'Allowed from investigation - marked as clean' },
+                    ':status': { S: 'clean' },
+                    ':flaggedCategory': { S: 'clean' },
+                    ':flaggedStatus': { S: 'clean' },
+                    ':messageId': { S: neo4jMessageId },
+                    ':sender': { S: senderEmail || '' },
+                    ':subject': { S: emailNode.subject || 'No Subject' },
+                    ':updatedAt': { S: new Date().toISOString() }
+                  }
+                });
+                
+                await ddb.send(updateEmailCommand);
+                console.log(`✅ Email created/updated in DynamoDB`);
+              } catch (dynamoError: any) {
+                console.warn(`⚠️ Failed to create/update email in DynamoDB:`, dynamoError.message);
+                // Continue to update Neo4j anyway
+              }
+              
+              // Update Neo4j
+              const neo4jUpdateQuery = `
+                MATCH (e:Email {messageId: $messageId})
+                SET e.allowed = true,
+                    e.allowedAt = datetime($allowedAt),
+                    e.allowedReason = $reason,
+                    e.status = 'clean',
+                    e.flaggedCategory = 'clean',
+                    e.flaggedStatus = 'clean',
+                    e.updatedAt = datetime($updatedAt)
+                RETURN e
+              `;
+
+              await session.run(neo4jUpdateQuery, {
+                messageId: neo4jMessageId,
+                allowedAt: new Date().toISOString(),
+                reason: reason || 'Allowed from investigation - marked as clean',
+                updatedAt: new Date().toISOString()
+              });
+
+              await session.close();
+              console.log(`✅ Neo4j updated successfully`);
+
+              return NextResponse.json({
+                success: true,
+                messageId: neo4jMessageId,
+                allowed: true,
+                status: 'clean',
+                flaggedCategory: 'clean',
+                flaggedStatus: 'clean',
+                allowedAt: new Date().toISOString()
+              });
+            } else {
+              await session.close();
+              throw new Error('Could not get email details from Neo4j');
+            }
+          } catch (neo4jUpdateError) {
+            await session.close();
+            console.error('❌ Failed to update Neo4j:', neo4jUpdateError);
+            throw neo4jUpdateError;
+          }
+        } else {
+          await session.close();
+          console.log(`❌ Email not found in Neo4j either`);
+        }
+      } catch (neo4jCheckError) {
+        console.warn('Could not check Neo4j:', neo4jCheckError);
+      }
+
+      console.error(`❌ Email not found with any variant in DynamoDB. Tried: ${uniqueVariations.slice(0, 5).join(', ')}...`);
       return NextResponse.json(
-        { error: 'Email not found', messageId, triedVariations: uniqueVariations.slice(0, 10) },
+        { error: 'Email not found in DynamoDB', messageId, triedVariations: uniqueVariations.slice(0, 10) },
         { status: 404 }
       );
     }
