@@ -87,14 +87,31 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
   const [showFullAnalysis, setShowFullAnalysis] = useState(true)
 
   // Extract detection data
-  const threatScore = email.threatScore || 0
-  const confidence = email.threatConfidence || email.confidence || 0
-  const threatLevel = email.threatLevel || "none"
-  const isPhishing = email.isPhishing || false
-  const isMalware = email.isMalware || false
   const distilbertScore = email.distilbert_score !== undefined ? (email.distilbert_score * 100).toFixed(1) : "N/A"
   const vtScore = email.vt_score !== undefined ? (email.vt_score * 100).toFixed(1) : "N/A"
   const contextScore = email.context_score !== undefined ? (email.context_score * 100).toFixed(1) : "N/A"
+
+  // Calculate threat score (use provided score, or calculate from available scores)
+  let calculatedThreatScore = email.threatScore || 0
+  if (calculatedThreatScore === 0 && email.distilbert_score !== undefined) {
+    // If no threat score but we have distilbert score, use it
+    calculatedThreatScore = Math.round(email.distilbert_score * 100)
+  }
+  const threatScore = calculatedThreatScore
+
+  const confidence = email.threatConfidence || email.confidence || 0
+
+  // Determine threat level based on actual scores
+  let calculatedThreatLevel = email.threatLevel || "none"
+  if (calculatedThreatLevel === "none" && threatScore > 0) {
+    if (threatScore >= 70) calculatedThreatLevel = "high"
+    else if (threatScore >= 45) calculatedThreatLevel = "medium"
+    else calculatedThreatLevel = "low"
+  }
+  const threatLevel = calculatedThreatLevel
+
+  const isPhishing = email.isPhishing || false
+  const isMalware = email.isMalware || false
   const vtVerdict = email.vt_verdict || "UNKNOWN"
 
   // Parse indicators and recommendations
