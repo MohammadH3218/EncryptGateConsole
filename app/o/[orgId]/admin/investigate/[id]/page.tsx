@@ -210,29 +210,32 @@ export default function AdminInvestigatePage() {
       if (action === "block") {
         response = await fetch(`/api/email/${encodeURIComponent(emailData.messageId)}/block`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-org-id": orgId },
           body: JSON.stringify({
             messageId: emailData.messageId,
             sender: emailData.sender,
+            orgId: orgId,
             reason: "Blocked from investigation",
           }),
         })
       } else if (action === "allow") {
         response = await fetch(`/api/email/${encodeURIComponent(emailData.messageId)}/allow`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-org-id": orgId },
           body: JSON.stringify({
             messageId: emailData.messageId,
+            orgId: orgId,
             reason: "Allowed from investigation",
           }),
         })
       } else if (action === "push") {
         response = await fetch(`/api/admin/pushed-requests`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", "x-org-id": orgId },
           body: JSON.stringify({
             emailMessageId: emailData.messageId,
             investigationId: investigation?.investigationId,
+            orgId: orgId,
             reason: "Pushed from investigation",
             priority: investigation?.priority || "medium",
           }),
@@ -625,7 +628,7 @@ export default function AdminInvestigatePage() {
             <Button
               onClick={() => handleSubmitAction("block")}
               disabled={submitting}
-              className="w-full justify-start bg-red-900/20 hover:bg-red-900/40 text-red-300 border border-red-600/30 h-auto py-4"
+              className="w-full justify-start hover:bg-red-900/10 text-red-300 border border-red-600/30 h-auto py-4 bg-transparent shadow-none"
             >
               <Ban className="w-5 h-5 mr-3" />
               <div className="flex-1 text-left">
@@ -637,7 +640,7 @@ export default function AdminInvestigatePage() {
             <Button
               onClick={() => handleSubmitAction("allow")}
               disabled={submitting}
-              className="w-full justify-start bg-green-900/20 hover:bg-green-900/40 text-green-300 border border-green-600/30 h-auto py-4"
+              className="w-full justify-start hover:bg-green-900/10 text-green-300 border border-green-600/30 h-auto py-4 bg-transparent shadow-none"
             >
               <CheckCircle className="w-5 h-5 mr-3" />
               <div className="flex-1 text-left">
@@ -649,7 +652,7 @@ export default function AdminInvestigatePage() {
             <Button
               onClick={() => handleSubmitAction("push")}
               disabled={submitting}
-              className="w-full justify-start bg-[#1f1f1f] hover:bg-[#2a2a2a] text-white border border-white/20 h-auto py-4"
+              className="w-full justify-start hover:bg-[#2a2a2a] text-white border border-white/20 h-auto py-4 bg-transparent shadow-none"
             >
               <Send className="w-5 h-5 mr-3" />
               <div className="flex-1 text-left">
