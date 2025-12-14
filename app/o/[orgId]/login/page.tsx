@@ -205,6 +205,10 @@ export default function OrgAwareLoginPage() {
         } else if (challengeName === "MFA_SETUP") {
           if (result.secretCode) {
             setMfaSecretCode(result.secretCode)
+            // Update session to the new one returned from associate_software_token
+            if (result.session) {
+              setSession(result.session)
+            }
             setShowMFASetup(true)
           } else {
             setShowMFA(true) // Fallback
@@ -309,6 +313,10 @@ export default function OrgAwareLoginPage() {
         } else if (challengeName === "MFA_SETUP") {
           if (result.secretCode) {
             setMfaSecretCode(result.secretCode)
+            // Update session to the new one returned from associate_software_token
+            if (result.session) {
+              setSession(result.session)
+            }
             setShowMFASetup(true)
           } else {
             setShowMFA(true)
