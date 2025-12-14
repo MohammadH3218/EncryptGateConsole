@@ -201,29 +201,34 @@ export default function AdminInvestigatePage() {
   }
 
   async function handleSubmitAction(action: "block" | "allow" | "push") {
-    if (!emailData?.messageId) return
+    if (!emailData?.messageId) {
+      console.error("❌ Cannot submit: emailData.messageId is missing")
+      setError("Email message ID is missing")
+      return
+    }
 
     setSubmitting(true)
     try {
       let response
+      const encodedMessageId = encodeURIComponent(emailData.messageId)
+
+      console.log(`🔄 Submitting ${action} action for email:`, emailData.messageId)
 
       if (action === "block") {
-        response = await fetch(`/api/email/block`, {
+        response = await fetch(`/api/email/${encodedMessageId}/block`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-org-id": orgId },
           body: JSON.stringify({
-            messageId: emailData.messageId,
             sender: emailData.sender,
             orgId: orgId,
             reason: "Blocked from investigation",
           }),
         })
       } else if (action === "allow") {
-        response = await fetch(`/api/email/allow`, {
+        response = await fetch(`/api/email/${encodedMessageId}/allow`, {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-org-id": orgId },
           body: JSON.stringify({
-            messageId: emailData.messageId,
             orgId: orgId,
             reason: "Allowed from investigation",
           }),
@@ -243,13 +248,19 @@ export default function AdminInvestigatePage() {
       }
 
       if (response && response.ok) {
+        const result = await response.json()
+        console.log(`✅ ${action} action successful:`, result)
         setSubmitDialogOpen(false)
         setTimeout(() => window.location.reload(), 800)
       } else {
-        throw new Error(`Failed to ${action} email`)
+        const errorData = await response?.json().catch(() => null)
+        const errorMessage = errorData?.error || errorData?.details || `Failed to ${action} email`
+        console.error(`❌ ${action} action failed:`, errorData)
+        throw new Error(errorMessage)
       }
     } catch (err: any) {
-      setError(err.message)
+      console.error(`❌ Error in ${action} action:`, err)
+      setError(err.message || `Failed to ${action} email`)
     } finally {
       setSubmitting(false)
     }
