@@ -74,7 +74,13 @@
       "Bash(powershell.exe -Command \"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; aws logs filter-log-events --log-group-name ''/aws/lambda/console-encryptgate-webhook-workmail'' --start-time 1734012000000 --max-items 50 --output json\")",
       "Bash(MSYS_NO_PATHCONV=1 powershell.exe:*)",
       "Bash(MSYS_NO_PATHCONV=1 LANG=en_US.UTF-8 aws logs filter-log-events:*)",
-      "Bash(iconv:*)"
+      "Bash(iconv:*)",
+      "Bash(AttributeName=id,AttributeType=S )",
+      "Bash(AttributeName=orgId,AttributeType=S )",
+      "Bash(AttributeName=id,KeyType=HASH )",
+      "Bash(\"[{\"\"IndexName\"\":\"\"OrgIdIndex\"\",\"\"KeySchema\"\":[{\"\"AttributeName\"\":\"\"orgId\"\",\"\"KeyType\"\":\"\"HASH\"\"}],\"\"Projection\"\":{\"\"ProjectionType\"\":\"\"ALL\"\"},\"\"ProvisionedThroughput\"\":{\"\"ReadCapacityUnits\"\":5,\"\"WriteCapacityUnits\"\":5}}]\" )",
+      "Bash(AttributeName=senderEmail,AttributeType=S )",
+      "Bash(\"[{\"\"IndexName\"\":\"\"OrgIdSenderIndex\"\",\"\"KeySchema\"\":[{\"\"AttributeName\"\":\"\"orgId\"\",\"\"KeyType\"\":\"\"HASH\"\"},{\"\"AttributeName\"\":\"\"senderEmail\"\",\"\"KeyType\"\":\"\"RANGE\"\"}],\"\"Projection\"\":{\"\"ProjectionType\"\":\"\"ALL\"\"},\"\"ProvisionedThroughput\"\":{\"\"ReadCapacityUnits\"\":5,\"\"WriteCapacityUnits\"\":5}}]\" )"
     ],
     "deny": [],
     "ask": []
