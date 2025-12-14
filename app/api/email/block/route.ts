@@ -283,7 +283,8 @@ export async function POST(request: Request) {
               console.warn(`⚠️ Failed to create/update email in DynamoDB:`, dynamoError.message);
               // Continue to update Neo4j and BlockList anyway
             }
-            
+
+          try {
             // Update Neo4j
             const neo4jUpdateQuery = `
               MATCH (e:Email {messageId: $messageId})
@@ -371,6 +372,7 @@ export async function POST(request: Request) {
           await session.close();
           console.log(`❌ Email not found in Neo4j either`);
         }
+        } // Close if (neo4jEmailFound)
       } catch (neo4jCheckError) {
         console.warn('Could not check Neo4j:', neo4jCheckError);
       }
