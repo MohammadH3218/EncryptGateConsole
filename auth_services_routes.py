@@ -1165,7 +1165,14 @@ def confirm_mfa_setup_endpoint():
         
         try:
             # Step 1: Verify the software token to confirm MFA setup
-            logger.info("Step 1: Verifying software token for MFA setup")
+            logger.info(f"Step 1: Verifying software token for MFA setup with session (length: {len(session) if session else 0})")
+            logger.info(f"Code received: {code} (length: {len(code) if code else 0})")
+            
+            # Ensure code is exactly 6 digits (strip whitespace)
+            code = code.strip()
+            if not code.isdigit() or len(code) != 6:
+                logger.error(f"Invalid code format: {code}")
+                return jsonify({"detail": "MFA code must be exactly 6 digits"}), 400
             
             verify_params = {
                 "Session": session,
@@ -1177,7 +1184,8 @@ def confirm_mfa_setup_endpoint():
             logger.info(f"Token verification response: {verify_response.get('Status')}")
             
             if verify_response.get("Status") != "SUCCESS":
-                return jsonify({"detail": "Invalid MFA code. Please check your authenticator app and try again."}), 400
+                logger.warning(f"Token verification failed with status: {verify_response.get('Status')}")
+                return jsonify({"detail": "Invalid MFA code. Please check your authenticator app and ensure the code hasn't expired (they change every 30 seconds)."}), 400
             
             # Step 2: Complete the MFA setup challenge to finalize authentication
             logger.info("Step 2: Completing MFA setup challenge")
@@ -1222,9 +1230,23 @@ def confirm_mfa_setup_endpoint():
                 logger.error(f"Unexpected response after MFA setup - no tokens found: {auth_result}")
                 return jsonify({"detail": "MFA setup verification succeeded but authentication failed"}), 500
             
+        except org_cognito_client.exceptions.EnableSoftwareTokenMFAException as mfa_error:
+            error_msg = str(mfa_error)
+            logger.error(f"MFA setup failed (EnableSoftwareTokenMFAException): {error_msg}")
+            if "Code mismatch" in error_msg:
+                return jsonify({"detail": "The MFA code you entered doesn't match. Please ensure you're using the correct code from your authenticator app and that your device's time is synchronized. TOTP codes change every 30 seconds."}), 400
+            else:
+                return jsonify({"detail": f"MFA setup failed: {error_msg}"}), 400
+        except org_cognito_client.exceptions.CodeMismatchException as code_error:
+            logger.error(f"MFA setup failed (CodeMismatchException): {code_error}")
+            return jsonify({"detail": "The MFA code you entered is incorrect or has expired. Please try again with a fresh code from your authenticator app."}), 400
         except Exception as setup_error:
-            logger.error(f"MFA setup failed: {setup_error}")
-            return jsonify({"detail": str(setup_error)}), 400
+            error_msg = str(setup_error)
+            logger.error(f"MFA setup failed: {error_msg}")
+            # Provide more helpful error message
+            if "Code mismatch" in error_msg or "Invalid code" in error_msg:
+                return jsonify({"detail": "The MFA code doesn't match. Please check that: 1) Your device time is correct, 2) You're entering the code from the correct account, 3) The code hasn't expired (codes change every 30 seconds)."}), 400
+            return jsonify({"detail": f"MFA setup failed: {error_msg}"}), 400
             
     except Exception as e:
         logger.error(f"Error in MFA setup confirmation endpoint: {e}")
