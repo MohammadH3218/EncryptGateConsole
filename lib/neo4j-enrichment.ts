@@ -40,6 +40,17 @@ export interface EmailEnrichmentData {
   final_level?: string;
   is_phishing?: boolean;
   model_version?: string;
+  // URL scan results (from VirusTotal)
+  url_scan_results?: Array<{
+    url: string;
+    verdict: string;
+    stats?: {
+      malicious: number;
+      suspicious: number;
+      harmless: number;
+      undetected: number;
+    };
+  }>;
 }
 
 /**
@@ -158,7 +169,18 @@ export async function enrichEmailNode(data: EmailEnrichmentData): Promise<void> 
       });
     }
 
-    // Create URL nodes and relationships
+    // Create URL nodes and relationships with VirusTotal scan results
+    // Create a map of URL -> scan result for quick lookup
+    const urlScanMap = new Map<string, { verdict: string; stats?: any }>();
+    if (data.url_scan_results) {
+      for (const scanResult of data.url_scan_results) {
+        urlScanMap.set(scanResult.url, {
+          verdict: scanResult.verdict,
+          stats: scanResult.stats,
+        });
+      }
+    }
+
     for (const url of data.urls) {
       // Extract domain from URL
       let urlDomain = 'unknown';
@@ -169,38 +191,61 @@ export async function enrichEmailNode(data: EmailEnrichmentData): Promise<void> 
         console.warn(`[Neo4j] Invalid URL: ${url}`);
       }
 
-      // Create URL node
+      // Get VirusTotal scan result for this URL
+      const scanResult = urlScanMap.get(url);
+      const vtVerdict = scanResult?.verdict || null;
+      const vtScore = scanResult?.stats
+        ? (scanResult.stats.malicious > 0
+            ? 1.0
+            : scanResult.stats.suspicious > 0
+            ? 0.7
+            : scanResult.stats.harmless > 0
+            ? 0.0
+            : 0.2)
+        : null;
+      const isMalicious = vtVerdict === 'MALICIOUS' || vtVerdict === 'SUSPICIOUS';
+
+      // Create URL node with VirusTotal scan results
       const urlQuery = `
         MERGE (url:URL {url: $url})
         SET url.domain = $domain,
+            url.vt_verdict = $vt_verdict,
+            url.vtScore = $vt_score,
+            url.isMalicious = $is_malicious,
             url.updatedAt = datetime()
         SET url.createdAt = coalesce(url.createdAt, datetime())
         RETURN url.url as url
       `;
 
-      await session.run(urlQuery, { url, domain: urlDomain });
+      await session.run(urlQuery, {
+        url,
+        domain: urlDomain,
+        vt_verdict: vtVerdict,
+        vt_score: vtScore,
+        is_malicious: isMalicious,
+      });
 
       // Create Domain node for URL
       await session.run(domainQuery, { name: urlDomain });
 
-      // Create relationship: (Email)-[:MENTIONS_URL]->(URL)
-      const mentionsUrlQuery = `
+      // Create relationship: (Email)-[:CONTAINS_URL]->(URL) (consistent with rest of codebase)
+      const containsUrlQuery = `
         MATCH (email:Email {messageId: $messageId})
         MATCH (url:URL {url: $url})
-        MERGE (email)-[r:MENTIONS_URL]->(url)
+        MERGE (email)-[r:CONTAINS_URL]->(url)
         RETURN r
       `;
 
-      await session.run(mentionsUrlQuery, {
+      await session.run(containsUrlQuery, {
         messageId: data.messageId,
         url: url,
       });
 
-      // Create relationship: (URL)-[:HAS_DOMAIN]->(Domain)
+      // Create relationship: (URL)-[:BELONGS_TO_DOMAIN]->(Domain) (consistent with RAG assistant)
       const urlDomainQuery = `
         MATCH (url:URL {url: $url})
         MATCH (domain:Domain {name: $domainName})
-        MERGE (url)-[r:HAS_DOMAIN]->(domain)
+        MERGE (url)-[r:BELONGS_TO_DOMAIN]->(domain)
         RETURN r
       `;
 
@@ -478,7 +523,7 @@ export async function getEmailURLs(messageId: string): Promise<string[]> {
 
   try {
     const query = `
-      MATCH (email:Email {messageId: $messageId})-[:MENTIONS_URL]->(url:URL)
+      MATCH (email:Email {messageId: $messageId})-[:CONTAINS_URL]->(url:URL)
       RETURN url.url as url
     `;
 

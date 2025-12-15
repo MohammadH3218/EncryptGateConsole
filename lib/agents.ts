@@ -14,6 +14,7 @@ import { getConfig } from './config';
 import {
   scanFile,
   scanMultipleFiles,
+  scanURL,
   verdictToScore,
   aggregateVerdicts,
   analyzeSender,
@@ -23,7 +24,9 @@ import {
   type VTVerdict,
   type VTDomainResult,
   type VTIPResult,
+  type VTURLResult,
 } from './virustotal';
+import { getCachedURLReport } from './virustotal-cache';
 import {
   getGraphContext,
   enrichEmailNode,
@@ -139,6 +142,9 @@ export interface VTAgentResult {
   sender_domain_result: VTDomainResult | null;
   url_domain_results: VTDomainResult[];
 
+  // URL scanning (actual URLs, not just domains)
+  url_scan_results: VTURLResult[];
+
   // IP analysis
   sender_ip_result: VTIPResult | null;
 
@@ -154,6 +160,7 @@ export interface VTAgentResult {
  * Comprehensive VirusTotal analysis:
  * - Scans email attachments (hash-first with upload fallback)
  * - Checks sender domain reputation
+ * - Scans actual URLs (not just domains) for malicious content
  * - Checks URL domain reputations
  * - Checks sender IP address (if provided)
  */
@@ -166,11 +173,11 @@ export async function runVirusTotalAgent(
   try {
     console.log(`[Agent 2] Running VirusTotal comprehensive analysis...`);
     console.log(`[Agent 2] - Attachments: ${attachments.length}`);
-    console.log(`[Agent 2] - URLs to check: ${urls.length}`);
+    console.log(`[Agent 2] - URLs to scan: ${urls.length}`);
     console.log(`[Agent 2] - Sender IP: ${senderIP || 'Not provided'}`);
 
     // Run all checks in parallel for performance
-    const [attachmentResults, senderAnalysis, urlDomainResults] = await Promise.all([
+    const [attachmentResults, senderAnalysis, urlScanResults, urlDomainResults] = await Promise.all([
       // 1. Scan attachments
       attachments.length > 0
         ? scanMultipleFiles(attachments)
@@ -179,7 +186,13 @@ export async function runVirusTotalAgent(
       // 2. Analyze sender (domain + optional IP)
       analyzeSender(senderEmail, senderIP),
 
-      // 3. Scan URL domains
+      // 3. Scan actual URLs (NEW - this was missing!)
+      // Use cached URL reports for performance
+      urls.length > 0
+        ? Promise.all(urls.map(url => getCachedURLReport(url)))
+        : Promise.resolve([]),
+
+      // 4. Scan URL domains (for additional context)
       urls.length > 0
         ? scanMultipleDomains(urls.map(url => extractDomain(url)).filter(Boolean) as string[])
         : Promise.resolve([]),
@@ -202,6 +215,10 @@ export async function runVirusTotalAgent(
       allVerdicts.push(senderAnalysis.ip.verdict);
     }
 
+    // URL scan verdicts (NEW - actual URL scans)
+    const urlScanVerdicts = urlScanResults.map(r => r.verdict);
+    allVerdicts.push(...urlScanVerdicts);
+
     // URL domain verdicts
     const urlDomainVerdicts = urlDomainResults.map(r => r.verdict);
     allVerdicts.push(...urlDomainVerdicts);
@@ -219,7 +236,7 @@ export async function runVirusTotalAgent(
       `[Agent 2] VT analysis complete - Verdict: ${aggregateVerdict} | ` +
       `Score: ${vtScore.toFixed(2)} | ` +
       `${maliciousCount} malicious, ${suspiciousCount} suspicious ` +
-      `(${attachmentResults.length} files, ${urlDomainResults.length} domains, ` +
+      `(${attachmentResults.length} files, ${urlScanResults.length} URLs scanned, ${urlDomainResults.length} domains, ` +
       `${senderAnalysis.domain ? '1 sender domain' : '0 sender'}, ` +
       `${senderAnalysis.ip ? '1 IP' : '0 IP'})`
     );
@@ -233,6 +250,9 @@ export async function runVirusTotalAgent(
       // Domain results
       sender_domain_result: senderAnalysis.domain,
       url_domain_results: urlDomainResults,
+
+      // URL scan results (NEW)
+      url_scan_results: urlScanResults,
 
       // IP results
       sender_ip_result: senderAnalysis.ip,
@@ -252,6 +272,7 @@ export async function runVirusTotalAgent(
       attachment_scan_results: [],
       sender_domain_result: null,
       url_domain_results: [],
+      url_scan_results: [],
       sender_ip_result: null,
       aggregate_verdict: 'ERROR',
       vt_score: 0.2, // Uncertainty penalty
@@ -640,6 +661,12 @@ export async function runMultiAgentThreatDetection(
       filename: a.filename,
       sha256: 'pending', // Will be computed by VirusTotal
       mimeType: a.mimeType,
+    })),
+    // Pass URL scan results to store in Neo4j
+    url_scan_results: vtResult.url_scan_results.map(result => ({
+      url: result.url,
+      verdict: result.verdict,
+      stats: result.stats,
     })),
   }).catch(error => {
     console.error('[Agents] Error enriching Neo4j:', error);

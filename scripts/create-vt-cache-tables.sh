@@ -2,9 +2,10 @@
 #
 # Create DynamoDB tables for VirusTotal result caching
 #
-# This script creates two DynamoDB tables to cache VT scan results:
+# This script creates three DynamoDB tables to cache VT scan results:
 # - VirusTotal_DomainCache (7 day TTL)
 # - VirusTotal_FileCache (30 day TTL)
+# - VirusTotal_URLCache (3 day TTL)
 #
 # NOTE: IP caching is NOT included as IPs change frequently for legitimate users
 # (traveling, different networks, VPNs, mobile data)
@@ -55,10 +56,29 @@ aws dynamodb create-table \
 echo "✓ VirusTotal_FileCache created"
 echo ""
 
+# 3. Create URL Cache Table
+echo "Creating VirusTotal_URLCache table..."
+aws dynamodb create-table \
+  --table-name VirusTotal_URLCache \
+  --attribute-definitions \
+    AttributeName=urlKey,AttributeType=S \
+  --key-schema \
+    AttributeName=urlKey,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST \
+  --region "$REGION" \
+  --tags \
+    Key=Application,Value=EncryptGate \
+    Key=Component,Value=VirusTotalCache \
+    Key=CacheType,Value=URL
+
+echo "✓ VirusTotal_URLCache created"
+echo ""
+
 # Wait for tables to become active
 echo "Waiting for tables to become active..."
 aws dynamodb wait table-exists --table-name VirusTotal_DomainCache --region "$REGION"
 aws dynamodb wait table-exists --table-name VirusTotal_FileCache --region "$REGION"
+aws dynamodb wait table-exists --table-name VirusTotal_URLCache --region "$REGION"
 
 echo "✓ All tables are active"
 echo ""
@@ -79,6 +99,13 @@ aws dynamodb update-time-to-live \
   --region "$REGION"
 
 echo "✓ TTL enabled on VirusTotal_FileCache"
+
+aws dynamodb update-time-to-live \
+  --table-name VirusTotal_URLCache \
+  --time-to-live-specification "Enabled=true,AttributeName=expiresAt" \
+  --region "$REGION"
+
+echo "✓ TTL enabled on VirusTotal_URLCache"
 echo ""
 
 # Display table information
@@ -92,11 +119,16 @@ echo "File Cache:"
 aws dynamodb describe-table --table-name VirusTotal_FileCache --region "$REGION" --query 'Table.[TableName,TableStatus,ItemCount]' --output table
 
 echo ""
+echo "URL Cache:"
+aws dynamodb describe-table --table-name VirusTotal_URLCache --region "$REGION" --query 'Table.[TableName,TableStatus,ItemCount]' --output table
+
+echo ""
 echo "✅ VirusTotal cache tables created successfully!"
 echo ""
 echo "Cache TTLs:"
 echo "  - Domains: 7 days (reputation changes slowly)"
 echo "  - Files: 30 days (file hashes never change)"
+echo "  - URLs: 3 days (URLs can change but scan results are relatively stable)"
 echo ""
 echo "NOTE: IP caching is NOT used as IPs change frequently for legitimate users"
 echo "      (traveling, different networks, VPNs, mobile data)"
