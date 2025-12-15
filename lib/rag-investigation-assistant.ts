@@ -25,13 +25,68 @@ interface Citation {
 }
 
 /**
+ * Fetch email data from DynamoDB to supplement Neo4j data
+ * Uses direct DynamoDB access instead of HTTP calls for server-side efficiency
+ */
+async function fetchEmailFromDynamoDB(messageId: string): Promise<any> {
+  try {
+    const { findEmailByMessageId } = await import('./email-helpers');
+    const { GetItemCommand } = await import('@aws-sdk/client-dynamodb');
+    const { ddb, TABLES } = await import('./aws');
+    
+    // Find email by messageId
+    const emailKey = await findEmailByMessageId(messageId);
+    if (!emailKey) {
+      console.log('⚠️ Email not found in DynamoDB:', messageId);
+      return null;
+    }
+    
+    // Get email item from DynamoDB
+    const result = await ddb.send(new GetItemCommand({
+      TableName: TABLES.EMAILS,
+      Key: {
+        userId: { S: emailKey.userId },
+        receivedAt: { S: emailKey.receivedAt },
+      },
+    }));
+    
+    if (!result.Item) {
+      return null;
+    }
+    
+    // Convert DynamoDB format to plain object
+    const item = result.Item;
+    return {
+      messageId: item.messageId?.S || messageId,
+      threatScore: item.threatScore?.N ? Number(item.threatScore.N) : 
+                   item.final_score?.N ? Number(item.final_score.N) :
+                   item.riskScore?.N ? Number(item.riskScore.N) : undefined,
+      threatLevel: item.threatLevel?.S,
+      vt_verdict: item.vt_verdict?.S,
+      vt_score: item.vt_score?.N ? Number(item.vt_score.N) : undefined,
+      distilbert_score: item.distilbert_score?.N ? Number(item.distilbert_score.N) : undefined,
+      context_score: item.context_score?.N ? Number(item.context_score.N) : undefined,
+      isPhishing: item.isPhishing?.BOOL || false,
+    };
+  } catch (error: any) {
+    console.warn('⚠️ Could not fetch email from DynamoDB:', error.message);
+    return null;
+  }
+}
+
+/**
  * Gather comprehensive evidence from Neo4j for a given email
+ * Also supplements with data from DynamoDB if needed
  */
 export async function gatherEvidence(messageId: string): Promise<EvidenceContext> {
   const driver = await getDriver()
 
   try {
     console.log(`📊 Gathering evidence for ${messageId}`)
+
+    // First, try to get email data from DynamoDB to supplement Neo4j
+    const dynamoEmail = await fetchEmailFromDynamoDB(messageId);
+    console.log(`📊 DynamoDB email data:`, dynamoEmail ? 'Found' : 'Not found');
 
     // 1. Get email details with sender and recipients
     const emailQuery = `
@@ -51,7 +106,7 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
              collect(DISTINCT {id: det.id, type: det.type, severity: det.severity, confidence: det.confidence}) as detections
     `
 
-    // 2. Get sender history (other emails from same sender)
+    // 2. Get sender history (other emails from same sender) - FIXED to use sentDate
     const senderHistoryQuery = `
       MATCH (e:Email {messageId: $messageId})
       MATCH (s:User)-[:WAS_SENT]->(e)
@@ -60,27 +115,29 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
       OPTIONAL MATCH (otherEmails)-[:TRIGGERED_DETECTION]->(det:Detection)
       RETURN otherEmails.messageId as messageId,
              otherEmails.subject as subject,
-             otherEmails.timestamp as timestamp,
+             otherEmails.sentDate as timestamp,
              otherEmails.threatLevel as threatLevel,
              otherEmails.status as status,
              collect(det.type) as detectionTypes
-      ORDER BY otherEmails.timestamp DESC
+      ORDER BY otherEmails.sentDate DESC
       LIMIT 10
     `
 
-    // 3. Get related emails (same domain in URLs)
+    // 3. Get related emails (same domain in URLs) - FIXED to include sender
     const relatedEmailsQuery = `
       MATCH (e:Email {messageId: $messageId})
       MATCH (e)-[:CONTAINS_URL]->(url:URL)-[:BELONGS_TO_DOMAIN]->(d:Domain)
       MATCH (d)<-[:BELONGS_TO_DOMAIN]-(otherUrl:URL)<-[:CONTAINS_URL]-(similar:Email)
       WHERE similar.messageId <> $messageId
+      OPTIONAL MATCH (similarSender:User)-[:WAS_SENT]->(similar)
       RETURN similar.messageId as messageId,
              similar.subject as subject,
-             similar.timestamp as timestamp,
+             similar.sentDate as timestamp,
              similar.threatLevel as threatLevel,
+             similarSender.email as sender,
              d.name as sharedDomain,
              count(*) as urlCount
-      ORDER BY urlCount DESC, similar.timestamp DESC
+      ORDER BY urlCount DESC, similar.sentDate DESC
       LIMIT 5
     `
 
@@ -158,8 +215,33 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
 
     const emailRecord = emailResult.records[0]?.toObject()
 
+    // Merge DynamoDB data with Neo4j data to get complete picture
+    let enrichedEmailDetails = emailRecord || {};
+    if (dynamoEmail) {
+      // Enhance email details with DynamoDB data
+      const emailProps = emailRecord?.e?.properties || {};
+      enrichedEmailDetails = {
+        ...emailRecord,
+        e: {
+          ...emailRecord?.e,
+          properties: {
+            ...emailProps,
+            // Add DynamoDB threat analysis data if not in Neo4j
+            threatScore: emailProps.threatScore || dynamoEmail.threatScore || dynamoEmail.final_score || dynamoEmail.riskScore,
+            threatLevel: emailProps.threatLevel || dynamoEmail.threatLevel || 'none',
+            vt_verdict: emailProps.vt_verdict || dynamoEmail.vt_verdict || 'UNKNOWN',
+            vt_score: emailProps.vt_score || dynamoEmail.vt_score,
+            distilbert_score: emailProps.distilbert_score || dynamoEmail.distilbert_score,
+            context_score: emailProps.context_score || dynamoEmail.context_score,
+            isPhishing: emailProps.isPhishing !== undefined ? emailProps.isPhishing : dynamoEmail.isPhishing,
+            is_phishing: emailProps.is_phishing !== undefined ? emailProps.is_phishing : dynamoEmail.isPhishing,
+          }
+        }
+      };
+    }
+
     return {
-      emailDetails: emailRecord || {},
+      emailDetails: enrichedEmailDetails,
       senderHistory: senderHistory.records.map(r => r.toObject()),
       relatedEmails: relatedEmails.records.map(r => r.toObject()),
       domainReputation: domainRep.records.map(r => r.toObject()),
@@ -176,7 +258,7 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
 /**
  * Format evidence into a readable context for the LLM
  */
-function formatEvidenceContext(evidence: EvidenceContext): string {
+export function formatEvidenceContext(evidence: EvidenceContext): string {
   const sections: string[] = []
 
   // Email Details
@@ -222,8 +304,11 @@ ${threatScore >= 50 ? `\n⚠️ WARNING: Threat score of ${threatScore}/100 indi
   if (evidence.relatedEmails.length > 0) {
     sections.push(`RELATED EMAILS (${evidence.relatedEmails.length} emails with similar patterns):`)
     evidence.relatedEmails.forEach((email, i) => {
-      sections.push(`${i + 1}. "${email.subject}" - ${email.timestamp}`)
-      sections.push(`   Shared domain: ${email.sharedDomain} - Threat: ${email.threatLevel || 'none'}`)
+      sections.push(`${i + 1}. "${email.subject || 'No Subject'}"`)
+      sections.push(`   Message ID: ${email.messageId}`)
+      sections.push(`   Sender: ${email.sender || 'Unknown'}`)
+      sections.push(`   Timestamp: ${email.timestamp || 'Unknown'}`)
+      sections.push(`   Shared domain: ${email.sharedDomain || 'N/A'} - Threat: ${email.threatLevel || 'none'}`)
     })
     sections.push('')
   }

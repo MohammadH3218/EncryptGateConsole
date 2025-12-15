@@ -388,7 +388,27 @@ export default function AdminAllEmailsPage() {
   ]);
 
   // Badge renderers
-  const getFlaggedBadge = (category: string, severity?: string) => {
+  const getFlaggedBadge = (category: string, severity?: string, detectionId?: string) => {
+    // If email has a detectionId, it should be shown as flagged even if category is 'clean'
+    // This handles the case where an email was flagged but threat analysis later marked it as clean
+    if (detectionId && (category === 'clean' || category === 'none')) {
+      // Check if it was originally AI-flagged by checking if there's a severity
+      // If severity exists, it was likely AI-flagged, otherwise treat as manual
+      if (severity) {
+        return (
+          <Badge variant="destructive" className="bg-purple-600">
+            AI
+          </Badge>
+        );
+      } else {
+        return (
+          <Badge variant="destructive" className="bg-orange-600">
+            Manual
+          </Badge>
+        );
+      }
+    }
+    
     switch (category) {
       case "manual":
         return (
@@ -1030,7 +1050,7 @@ export default function AdminAllEmailsPage() {
                           </div>
                         </TableCell>
                         <TableCell>
-                          {getFlaggedBadge(email.flaggedCategory, email.flaggedSeverity)}
+                          {getFlaggedBadge(email.flaggedCategory, email.flaggedSeverity, email.detectionId)}
                         </TableCell>
                         <TableCell>
                           {getInvestigationBadge(email.investigationStatus)}
@@ -1280,7 +1300,7 @@ export default function AdminAllEmailsPage() {
                         </div>
                         <div>
                           <label className="text-sm font-medium text-gray-400">Flagged Status</label>
-                          <div className="mt-1">{getFlaggedBadge(selectedEmail.flaggedCategory, selectedEmail.flaggedSeverity)}</div>
+                          <div className="mt-1">{getFlaggedBadge(selectedEmail.flaggedCategory, selectedEmail.flaggedSeverity, selectedEmail.detectionId)}</div>
                         </div>
                         {selectedEmail.investigationStatus && (
                           <div>
