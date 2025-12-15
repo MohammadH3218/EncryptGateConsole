@@ -29,7 +29,6 @@ interface Citation {
  */
 export async function gatherEvidence(messageId: string): Promise<EvidenceContext> {
   const driver = await getDriver()
-  const session = driver.session()
 
   try {
     console.log(`📊 Gathering evidence for ${messageId}`)
@@ -113,16 +112,49 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
              count(other) as relatedEmails
     `
 
-    // Execute all queries in parallel
+    // Execute all queries in parallel using separate sessions to avoid transaction conflicts
     const [emailResult, senderHistory, relatedEmails, domainRep, campaigns] = await Promise.all([
-      session.run(emailQuery, { messageId }),
-      session.run(senderHistoryQuery, { messageId }),
-      session.run(relatedEmailsQuery, { messageId }),
-      session.run(domainReputationQuery, { messageId }),
-      session.run(campaignQuery, { messageId })
+      (async () => {
+        const s = driver.session();
+        try {
+          return await s.run(emailQuery, { messageId });
+        } finally {
+          await s.close();
+        }
+      })(),
+      (async () => {
+        const s = driver.session();
+        try {
+          return await s.run(senderHistoryQuery, { messageId });
+        } finally {
+          await s.close();
+        }
+      })(),
+      (async () => {
+        const s = driver.session();
+        try {
+          return await s.run(relatedEmailsQuery, { messageId });
+        } finally {
+          await s.close();
+        }
+      })(),
+      (async () => {
+        const s = driver.session();
+        try {
+          return await s.run(domainReputationQuery, { messageId });
+        } finally {
+          await s.close();
+        }
+      })(),
+      (async () => {
+        const s = driver.session();
+        try {
+          return await s.run(campaignQuery, { messageId });
+        } finally {
+          await s.close();
+        }
+      })()
     ])
-
-    await session.close()
 
     const emailRecord = emailResult.records[0]?.toObject()
 
@@ -137,7 +169,6 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
     }
   } catch (error) {
     console.error('❌ Error gathering evidence:', error)
-    await session.close()
     throw error
   }
 }
