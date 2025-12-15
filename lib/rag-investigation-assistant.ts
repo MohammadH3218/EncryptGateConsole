@@ -47,7 +47,7 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
              s.firstSeen as senderFirstSeen,
              s.emailCount as senderEmailCount,
              collect(DISTINCT r.email) as recipients,
-             collect(DISTINCT {url: url.url, domain: d.name, vtScore: url.vtScore, isMalicious: url.isMalicious}) as urls,
+             collect(DISTINCT {url: url.url, domain: d.name, vtScore: url.vtScore, isMalicious: url.isMalicious, vt_verdict: url.vt_verdict}) as urls,
              collect(DISTINCT {id: det.id, type: det.type, severity: det.severity, confidence: det.confidence}) as detections
     `
 
@@ -248,11 +248,17 @@ ${threatScore >= 50 ? `\n⚠️ WARNING: Threat score of ${threatScore}/100 indi
       if (url.url) {
         sections.push(`${i + 1}. ${url.url}`)
         sections.push(`   Domain: ${url.domain || 'Unknown'}`)
-        sections.push(`   VT Score: ${url.vtScore !== null ? url.vtScore : 'Not scanned'}`)
-        sections.push(`   Malicious: ${url.isMalicious ? 'YES' : 'No'}`)
+        // Show VirusTotal verdict if available
+        if (url.vt_verdict) {
+          sections.push(`   VirusTotal Verdict: ${url.vt_verdict}${url.vt_verdict === 'MALICIOUS' || url.vt_verdict === 'SUSPICIOUS' ? ' ⚠️' : ''}`)
+        }
+        sections.push(`   VT Score: ${url.vtScore !== null && url.vtScore !== undefined ? url.vtScore : 'Not scanned'}`)
+        sections.push(`   Malicious: ${url.isMalicious ? 'YES ⚠️' : 'No'}`)
       }
     })
     sections.push('')
+  } else {
+    sections.push('URL ANALYSIS: No URLs found in this email\n')
   }
 
   // Campaigns
@@ -333,13 +339,18 @@ CRITICAL INSTRUCTIONS:
 3. If VirusTotal verdict is MALICIOUS, you MUST state that the email was flagged because VirusTotal detected malicious content
 4. If threat score is 50 or higher, you MUST mention this as a reason for flagging
 5. If evidence shows malicious URLs or domains, you MUST mention these as threat indicators
-6. If evidence is missing to answer the question, explicitly state what information is not available
-7. Be concise but thorough
-8. Include confidence levels in your assessments (e.g., "high confidence", "medium confidence", "low confidence")
-9. If patterns suggest a threat, explain which specific evidence points support this
-10. Format your response in clear sections with bullet points where appropriate
-11. Do NOT make assumptions beyond what the evidence shows
-12. NEVER say an email was "not flagged" if the evidence shows VirusTotal: MALICIOUS, threat score >= 50, or malicious URLs/domains
+6. When asked about URLs:
+   - If URLs have VirusTotal scan results (vt_verdict, vtScore, isMalicious), report those results accurately
+   - If a URL shows "Not scanned" or null values, it means VirusTotal did not scan that URL yet (or scan results are not available)
+   - DO NOT say "VirusTotal didn't scan it" if the URL actually has scan results (vt_verdict is present)
+   - If vt_verdict is present, the URL WAS scanned by VirusTotal - report the verdict (MALICIOUS, SUSPICIOUS, CLEAN, UNKNOWN)
+7. If evidence is missing to answer the question, explicitly state what information is not available
+8. Be concise but thorough
+9. Include confidence levels in your assessments (e.g., "high confidence", "medium confidence", "low confidence")
+10. If patterns suggest a threat, explain which specific evidence points support this
+11. Format your response in clear sections with bullet points where appropriate
+12. Do NOT make assumptions beyond what the evidence shows
+13. NEVER say an email was "not flagged" if the evidence shows VirusTotal: MALICIOUS, threat score >= 50, or malicious URLs/domains
 
 RESPONSE FORMAT:
 - Start with a direct answer to the question

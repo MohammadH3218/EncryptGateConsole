@@ -8,19 +8,23 @@ import { DynamoDBClient, GetItemCommand, PutItemCommand } from '@aws-sdk/client-
 import {
   getDomainReport,
   getFileReport,
+  scanURL,
   type VTDomainResult,
-  type VTFileResult
+  type VTFileResult,
+  type VTURLResult
 } from './virustotal';
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
 const VT_DOMAIN_CACHE_TABLE = process.env.VT_DOMAIN_CACHE_TABLE || 'VirusTotal_DomainCache';
 const VT_FILE_CACHE_TABLE = process.env.VT_FILE_CACHE_TABLE || 'VirusTotal_FileCache';
+const VT_URL_CACHE_TABLE = process.env.VT_URL_CACHE_TABLE || 'VirusTotal_URLCache';
 
 const ddb = new DynamoDBClient({ region: REGION });
 
 // Cache TTLs
 const DOMAIN_CACHE_TTL = 7 * 24 * 60 * 60; // 7 days
 const FILE_CACHE_TTL = 30 * 24 * 60 * 60; // 30 days (file hashes don't change)
+const URL_CACHE_TTL = 3 * 24 * 60 * 60; // 3 days (URLs can change, but scan results are relatively stable)
 
 // NOTE: IP caching removed - IPs change frequently for legitimate users
 // (traveling, different networks, VPNs, mobile). Caching could cause false positives.
@@ -180,17 +184,108 @@ async function storeFileInCache(sha256: string, result: VTFileResult): Promise<v
 }
 
 /**
+ * Get cached URL scan result or fetch from VirusTotal
+ */
+export async function getCachedURLReport(url: string): Promise<VTURLResult> {
+  try {
+    // Create a normalized URL key (base64 encoded for DynamoDB key)
+    const urlKey = Buffer.from(url).toString('base64').replace(/[+/=]/g, (m) => {
+      return { '+': '-', '/': '_', '=': '' }[m] || m;
+    });
+
+    // Try to get from cache
+    const cacheResult = await ddb.send(new GetItemCommand({
+      TableName: VT_URL_CACHE_TABLE,
+      Key: {
+        urlKey: { S: urlKey }
+      }
+    }));
+
+    if (cacheResult.Item) {
+      const expiresAt = parseInt(cacheResult.Item.expiresAt?.N || '0');
+      const now = Math.floor(Date.now() / 1000);
+
+      // Check if cache is still valid
+      if (expiresAt > now) {
+        console.log(`[VT Cache] URL cache HIT: ${url.substring(0, 50)}...`);
+
+        return {
+          verdict: cacheResult.Item.verdict?.S as any,
+          stats: JSON.parse(cacheResult.Item.stats?.S || '{}'),
+          permalink: cacheResult.Item.permalink?.S || '',
+          url: url,
+          analysis_id: cacheResult.Item.analysisId?.S,
+        };
+      } else {
+        console.log(`[VT Cache] URL cache EXPIRED: ${url.substring(0, 50)}...`);
+      }
+    } else {
+      console.log(`[VT Cache] URL cache MISS: ${url.substring(0, 50)}...`);
+    }
+
+    // Cache miss or expired - fetch from VirusTotal
+    const result = await scanURL(url);
+
+    // Store in cache (async, don't wait)
+    storeURLInCache(url, result).catch(err =>
+      console.error('[VT Cache] Error storing URL in cache:', err)
+    );
+
+    return result;
+
+  } catch (error) {
+    console.error('[VT Cache] Error getting cached URL:', error);
+    // Fallback to direct VT call
+    return scanURL(url);
+  }
+}
+
+/**
+ * Store URL scan result in cache
+ */
+async function storeURLInCache(url: string, result: VTURLResult): Promise<void> {
+  try {
+    const urlKey = Buffer.from(url).toString('base64').replace(/[+/=]/g, (m) => {
+      return { '+': '-', '/': '_', '=': '' }[m] || m;
+    });
+
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = now + URL_CACHE_TTL;
+
+    await ddb.send(new PutItemCommand({
+      TableName: VT_URL_CACHE_TABLE,
+      Item: {
+        urlKey: { S: urlKey },
+        url: { S: url },
+        verdict: { S: result.verdict },
+        stats: { S: JSON.stringify(result.stats) },
+        permalink: { S: result.permalink },
+        analysisId: { S: result.analysis_id || '' },
+        scannedAt: { S: new Date().toISOString() },
+        expiresAt: { N: expiresAt.toString() }
+      }
+    }));
+
+    console.log(`[VT Cache] Stored URL in cache: ${url.substring(0, 50)}... (expires in ${URL_CACHE_TTL}s)`);
+  } catch (error) {
+    console.error('[VT Cache] Error storing URL in cache:', error);
+  }
+}
+
+/**
  * Cache statistics for monitoring
  */
 export async function getVTCacheStats(): Promise<{
   domains: { hits: number; misses: number };
   files: { hits: number; misses: number };
+  urls: { hits: number; misses: number };
 }> {
   // This would require additional tracking
   // Could be implemented with DynamoDB streams + Lambda
   // Or by incrementing counters in a separate stats table
   return {
     domains: { hits: 0, misses: 0 },
-    files: { hits: 0, misses: 0 }
+    files: { hits: 0, misses: 0 },
+    urls: { hits: 0, misses: 0 }
   };
 }
