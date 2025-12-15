@@ -4,36 +4,113 @@ import { ddb } from './aws';
 
 const EMAILS_TABLE = process.env.EMAILS_TABLE_NAME || 'Emails';
 
-// Helper function to find email by messageId
+// Helper function to normalize messageId (remove angle brackets if present)
+function normalizeMessageId(messageId: string): string {
+  return messageId.replace(/^<|>$/g, '');
+}
+
+// Helper function to try multiple messageId variations (handles encoding issues)
+function getMessageIdVariations(messageId: string): string[] {
+  const variations: string[] = [messageId];
+  
+  // Try with spaces replaced by underscores (common encoding issue)
+  if (messageId.includes(' ')) {
+    variations.push(messageId.replace(/ /g, '_'));
+  }
+  
+  // Try with underscores replaced by spaces
+  if (messageId.includes('_')) {
+    variations.push(messageId.replace(/_/g, ' '));
+  }
+  
+  // Try with plus signs replaced by underscores
+  if (messageId.includes('+')) {
+    variations.push(messageId.replace(/\+/g, '_'));
+  }
+  
+  // Try with underscores replaced by plus signs
+  if (messageId.includes('_')) {
+    variations.push(messageId.replace(/_/g, '+'));
+  }
+  
+  // Remove duplicates
+  return [...new Set(variations)];
+}
+
+// Helper function to find email by messageId (tries multiple variations)
 export async function findEmailByMessageId(messageId: string): Promise<{userId: string, receivedAt: string} | null> {
   try {
     console.log('🔍 Finding email by messageId:', messageId);
     
-    const scanCommand = new ScanCommand({
-      TableName: EMAILS_TABLE,
-      FilterExpression: 'messageId = :messageId',
-      ExpressionAttributeValues: {
-        ':messageId': { S: messageId }
-      },
-      ProjectionExpression: 'userId, receivedAt'
-    });
-
-    const result = await ddb.send(scanCommand);
+    // Get all variations to try (handles encoding issues and angle brackets)
+    const variations: string[] = [];
     
-    if (result.Items && result.Items.length > 0) {
-      const item = result.Items[0];
-      console.log('✅ Found email:', {
-        userId: item.userId?.S,
-        receivedAt: item.receivedAt?.S
-      });
-      
-      return {
-        userId: item.userId?.S || '',
-        receivedAt: item.receivedAt?.S || ''
-      };
+    // Add original first
+    variations.push(messageId);
+    
+    // Normalize (remove angle brackets)
+    const normalizedId = normalizeMessageId(messageId);
+    if (normalizedId !== messageId) {
+      variations.push(normalizedId);
     }
     
-    console.log('❌ Email not found:', messageId);
+    // Try with angle brackets if not already there
+    if (!messageId.startsWith('<')) {
+      variations.push(`<${messageId}>`);
+    }
+    if (!normalizedId.startsWith('<')) {
+      variations.push(`<${normalizedId}>`);
+    }
+    
+    // Try encoding variations
+    const encodingVariations = getMessageIdVariations(messageId);
+    variations.push(...encodingVariations);
+    
+    // Also try encoding variations of normalized version
+    const normalizedEncodingVariations = getMessageIdVariations(normalizedId);
+    normalizedEncodingVariations.forEach(v => {
+      if (!variations.includes(v)) variations.push(v);
+    });
+    
+    // Remove duplicates
+    const uniqueVariations = [...new Set(variations)];
+    
+    console.log(`🔍 Will try ${uniqueVariations.length} messageId variations:`, uniqueVariations.slice(0, 5).map(v => v.substring(0, 50) + '...'));
+    
+    // Try each variation until we find a match
+    for (const variant of uniqueVariations) {
+      try {
+        const scanCommand = new ScanCommand({
+          TableName: EMAILS_TABLE,
+          FilterExpression: 'messageId = :messageId',
+          ExpressionAttributeValues: {
+            ':messageId': { S: variant }
+          },
+          ProjectionExpression: 'userId, receivedAt',
+          Limit: 1
+        });
+
+        const result = await ddb.send(scanCommand);
+        
+        if (result.Items && result.Items.length > 0) {
+          const item = result.Items[0];
+          console.log('✅ Found email with messageId variant:', variant.substring(0, 50) + '...', {
+            userId: item.userId?.S,
+            receivedAt: item.receivedAt?.S
+          });
+          
+          return {
+            userId: item.userId?.S || '',
+            receivedAt: item.receivedAt?.S || ''
+          };
+        }
+      } catch (variantError) {
+        // Continue to next variation
+        console.warn(`⚠️ Error trying variant ${variant.substring(0, 50)}:`, variantError);
+      }
+    }
+    
+    console.log('❌ Email not found after trying', uniqueVariations.length, 'variations');
     return null;
   } catch (error) {
     console.error('❌ Error finding email by messageId:', error);
