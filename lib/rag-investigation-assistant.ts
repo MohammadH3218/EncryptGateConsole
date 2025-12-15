@@ -47,7 +47,14 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
              s.firstSeen as senderFirstSeen,
              s.emailCount as senderEmailCount,
              collect(DISTINCT r.email) as recipients,
-             collect(DISTINCT {url: url.url, domain: d.name, vtScore: url.vtScore, isMalicious: url.isMalicious}) as urls,
+             collect(DISTINCT {
+               url: url.url, 
+               domain: d.name, 
+               vtScore: url.vtScore, 
+               isMalicious: url.isMalicious,
+               vtVerdict: url.vtVerdict,
+               scanned: url.scanned OR url.vtScore IS NOT NULL OR url.vtVerdict IS NOT NULL
+             }) as urls,
              collect(DISTINCT {id: det.id, type: det.type, severity: det.severity, confidence: det.confidence}) as detections
     `
 
@@ -68,20 +75,53 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
       LIMIT 10
     `
 
-    // 3. Get related emails (same domain in URLs)
+    // 3. Get related emails (same exact URL or same domain in URLs)
     const relatedEmailsQuery = `
       MATCH (e:Email {messageId: $messageId})
-      MATCH (e)-[:CONTAINS_URL]->(url:URL)-[:BELONGS_TO_DOMAIN]->(d:Domain)
-      MATCH (d)<-[:BELONGS_TO_DOMAIN]-(otherUrl:URL)<-[:CONTAINS_URL]-(similar:Email)
-      WHERE similar.messageId <> $messageId
-      RETURN similar.messageId as messageId,
-             similar.subject as subject,
-             similar.timestamp as timestamp,
-             similar.threatLevel as threatLevel,
-             d.name as sharedDomain,
-             count(*) as urlCount
-      ORDER BY urlCount DESC, similar.timestamp DESC
-      LIMIT 5
+      OPTIONAL MATCH (e)-[:CONTAINS_URL]->(url:URL)
+      WITH e, collect(DISTINCT url.url) as emailUrls
+      
+      // Find emails with same exact URLs (highest priority)
+      OPTIONAL MATCH (sameUrlEmail:Email)-[:CONTAINS_URL]->(sameUrl:URL)
+      WHERE sameUrlEmail.messageId <> $messageId 
+        AND sameUrl.url IN emailUrls
+      WITH e, emailUrls, collect(DISTINCT {
+        messageId: sameUrlEmail.messageId,
+        subject: sameUrlEmail.subject,
+        timestamp: sameUrlEmail.timestamp,
+        threatLevel: sameUrlEmail.threatLevel,
+        sharedUrl: sameUrl.url,
+        matchType: 'exact_url'
+      }) as exactMatches
+      
+      // Also find emails with same domain (if domain exists)
+      OPTIONAL MATCH (e)-[:CONTAINS_URL]->(url2:URL)-[:BELONGS_TO_DOMAIN]->(d:Domain)
+      OPTIONAL MATCH (d)<-[:BELONGS_TO_DOMAIN]-(otherUrl:URL)<-[:CONTAINS_URL]-(domainEmail:Email)
+      WHERE domainEmail.messageId <> $messageId
+        AND NOT domainEmail.messageId IN [m IN exactMatches WHERE m.messageId IS NOT NULL | m.messageId]
+      
+      WITH exactMatches, collect(DISTINCT {
+        messageId: domainEmail.messageId,
+        subject: domainEmail.subject,
+        timestamp: domainEmail.timestamp,
+        threatLevel: domainEmail.threatLevel,
+        sharedDomain: d.name,
+        matchType: 'same_domain'
+      }) as domainMatches
+      
+      UNWIND (exactMatches + domainMatches) as match
+      WHERE match.messageId IS NOT NULL
+      RETURN match.messageId as messageId,
+             match.subject as subject,
+             match.timestamp as timestamp,
+             match.threatLevel as threatLevel,
+             match.sharedUrl as sharedUrl,
+             match.sharedDomain as sharedDomain,
+             match.matchType as matchType
+      ORDER BY 
+        CASE WHEN match.matchType = 'exact_url' THEN 0 ELSE 1 END,
+        match.timestamp DESC
+      LIMIT 10
     `
 
     // 4. Get domain reputation
@@ -222,10 +262,17 @@ ${threatScore >= 50 ? `\n⚠️ WARNING: Threat score of ${threatScore}/100 indi
   if (evidence.relatedEmails.length > 0) {
     sections.push(`RELATED EMAILS (${evidence.relatedEmails.length} emails with similar patterns):`)
     evidence.relatedEmails.forEach((email, i) => {
-      sections.push(`${i + 1}. "${email.subject}" - ${email.timestamp}`)
-      sections.push(`   Shared domain: ${email.sharedDomain} - Threat: ${email.threatLevel || 'none'}`)
+      sections.push(`${i + 1}. "${email.subject || 'No subject'}" - ${email.timestamp || 'Unknown date'}`)
+      if (email.sharedUrl) {
+        sections.push(`   Shared URL: ${email.sharedUrl} (exact match)`)
+      } else if (email.sharedDomain) {
+        sections.push(`   Shared domain: ${email.sharedDomain}`)
+      }
+      sections.push(`   Match type: ${email.matchType || 'unknown'} - Threat: ${email.threatLevel || 'none'}`)
     })
     sections.push('')
+  } else {
+    sections.push('RELATED EMAILS: No similar emails found (no shared URLs or domains)\n')
   }
 
   // Domain Reputation
@@ -248,8 +295,16 @@ ${threatScore >= 50 ? `\n⚠️ WARNING: Threat score of ${threatScore}/100 indi
       if (url.url) {
         sections.push(`${i + 1}. ${url.url}`)
         sections.push(`   Domain: ${url.domain || 'Unknown'}`)
-        sections.push(`   VT Score: ${url.vtScore !== null ? url.vtScore : 'Not scanned'}`)
-        sections.push(`   Malicious: ${url.isMalicious ? 'YES' : 'No'}`)
+        const scanned = url.scanned || url.vtScore !== null || url.vtVerdict !== null
+        if (scanned) {
+          sections.push(`   VirusTotal Verdict: ${url.vtVerdict || 'UNKNOWN'}`)
+          sections.push(`   VT Score: ${url.vtScore !== null && url.vtScore !== undefined ? url.vtScore : 'N/A'}`)
+          sections.push(`   Malicious: ${url.isMalicious ? 'YES ⚠️' : url.vtVerdict === 'MALICIOUS' ? 'YES ⚠️ (VirusTotal)' : 'No'}`)
+        } else {
+          sections.push(`   VirusTotal Status: Not scanned`)
+          sections.push(`   VT Score: Not scanned`)
+          sections.push(`   Malicious: Unknown (not scanned)`)
+        }
       }
     })
     sections.push('')
