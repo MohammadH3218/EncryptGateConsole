@@ -203,8 +203,7 @@ export async function POST(request: Request) {
           MERGE (email)-[:WAS_SENT_TO]->(r)
         WITH email
         UNWIND $urls AS urlVal
-          MERGE (u:URL {url:urlVal})
-          ON CREATE SET u.value = urlVal
+          MERGE (u:URL {value:urlVal})
           MERGE (email)-[:CONTAINS_URL]->(u)
         RETURN email
         `,

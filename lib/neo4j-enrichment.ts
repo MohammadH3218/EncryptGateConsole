@@ -25,15 +25,6 @@ export interface EmailEnrichmentData {
   sender: string;
   recipients: string[];
   urls: string[];
-  url_scan_results?: Array<{
-    url: string;
-    verdict: string;
-    stats?: {
-      malicious: number;
-      suspicious: number;
-      harmless: number;
-    };
-  }>;
   attachments?: Array<{
     filename: string;
     sha256: string;
@@ -178,37 +169,16 @@ export async function enrichEmailNode(data: EmailEnrichmentData): Promise<void> 
         console.warn(`[Neo4j] Invalid URL: ${url}`);
       }
 
-      // Find URL scan result if available
-      const urlScanResult = data.url_scan_results?.find(r => r.url === url);
-      const vtVerdict = urlScanResult?.verdict || null;
-      const vtScore = urlScanResult?.stats 
-        ? (urlScanResult.stats.malicious > 0 ? 100 : 
-           urlScanResult.stats.suspicious > 0 ? 50 : 0)
-        : null;
-      const isMalicious = vtVerdict === 'MALICIOUS' || vtVerdict === 'SUSPICIOUS';
-      const scanned = urlScanResult !== undefined;
-
-      // Create URL node with VirusTotal data
+      // Create URL node
       const urlQuery = `
         MERGE (url:URL {url: $url})
         SET url.domain = $domain,
-            url.updatedAt = datetime(),
-            url.vtVerdict = $vtVerdict,
-            url.vtScore = $vtScore,
-            url.isMalicious = $isMalicious,
-            url.scanned = $scanned
+            url.updatedAt = datetime()
         SET url.createdAt = coalesce(url.createdAt, datetime())
         RETURN url.url as url
       `;
 
-      await session.run(urlQuery, { 
-        url, 
-        domain: urlDomain,
-        vtVerdict,
-        vtScore,
-        isMalicious,
-        scanned
-      });
+      await session.run(urlQuery, { url, domain: urlDomain });
 
       // Create Domain node for URL
       await session.run(domainQuery, { name: urlDomain });
@@ -226,11 +196,11 @@ export async function enrichEmailNode(data: EmailEnrichmentData): Promise<void> 
         url: url,
       });
 
-      // Create relationship: (URL)-[:BELONGS_TO_DOMAIN]->(Domain) (using standard relationship name)
+      // Create relationship: (URL)-[:HAS_DOMAIN]->(Domain)
       const urlDomainQuery = `
         MATCH (url:URL {url: $url})
         MATCH (domain:Domain {name: $domainName})
-        MERGE (url)-[r:BELONGS_TO_DOMAIN]->(domain)
+        MERGE (url)-[r:HAS_DOMAIN]->(domain)
         RETURN r
       `;
 
