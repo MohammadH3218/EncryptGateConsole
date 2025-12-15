@@ -182,16 +182,25 @@ function formatEvidenceContext(evidence: EvidenceContext): string {
   // Email Details
   if (evidence.emailDetails && evidence.emailDetails.e) {
     const email = evidence.emailDetails.e.properties
+    const threatScore = email.threatScore || email.final_score || email.riskScore || 0
+    const threatLevel = email.threatLevel || email.final_level || 'none'
+    const vtVerdict = email.vt_verdict || 'UNKNOWN'
+    const isPhishing = email.is_phishing || false
+    
     sections.push(`EMAIL DETAILS:
 - Message ID: ${email.messageId || 'N/A'}
 - Subject: ${email.subject || 'N/A'}
 - Sender: ${evidence.emailDetails.sender || 'N/A'}
 - Recipients: ${evidence.emailDetails.recipients?.join(', ') || 'N/A'}
-- Timestamp: ${email.timestamp || 'N/A'}
-- Threat Score: ${email.threatScore || 0}/100
-- Threat Level: ${email.threatLevel || 'none'}
+- Timestamp: ${email.timestamp || email.sentDate || 'N/A'}
+- Threat Score: ${threatScore}/100
+- Threat Level: ${threatLevel}
 - Status: ${email.status || 'unknown'}
+- VirusTotal Verdict: ${vtVerdict}${vtVerdict === 'MALICIOUS' ? ' ⚠️ MALICIOUS' : ''}
 - DistilBERT Score: ${email.distilbert_score ? (email.distilbert_score * 100).toFixed(1) + '%' : 'N/A'}
+- Phishing Detected: ${isPhishing ? 'YES ⚠️' : 'No'}
+${vtVerdict === 'MALICIOUS' ? '\n⚠️ CRITICAL: VirusTotal has flagged this email as MALICIOUS. This is a strong indicator of threat.' : ''}
+${threatScore >= 50 ? `\n⚠️ WARNING: Threat score of ${threatScore}/100 indicates ${threatLevel} risk level.` : ''}
 `)
   }
 
@@ -291,24 +300,50 @@ export async function askInvestigationAssistantWithRAG(
     const evidenceContext = formatEvidenceContext(evidence)
 
     // 3. Build system prompt with evidence
+    // Extract email properties - handle both e.properties structure and direct properties
+    const emailProps = evidence.emailDetails?.e?.properties || evidence.emailDetails || {}
+    const vtVerdict = emailProps.vt_verdict || 'UNKNOWN'
+    const threatScore = emailProps.threatScore || emailProps.final_score || emailProps.riskScore || 0
+    const threatLevel = emailProps.threatLevel || emailProps.final_level || 'none'
+    
+    // Build threat emphasis based on evidence
+    let threatEmphasis = ''
+    if (vtVerdict === 'MALICIOUS') {
+      threatEmphasis = `\n\n⚠️ CRITICAL THREAT INDICATOR: VirusTotal verdict is MALICIOUS. This is a definitive threat indicator that MUST be mentioned when explaining why the email was flagged.`
+    }
+    if (threatScore >= 50) {
+      threatEmphasis += `\n⚠️ HIGH THREAT SCORE: The email has a threat score of ${threatScore}/100 (${threatLevel} risk level). This indicates significant threat indicators were detected.`
+    }
+    if (evidence.urlAnalysis.some((u: any) => u.isMalicious)) {
+      threatEmphasis += `\n⚠️ MALICIOUS URLs: The email contains URLs flagged as malicious by VirusTotal.`
+    }
+    if (evidence.domainReputation.some((d: any) => d.isMalicious)) {
+      threatEmphasis += `\n⚠️ MALICIOUS DOMAINS: The email contains domains flagged as malicious.`
+    }
+    
     const systemPrompt = `You are an expert SOC analyst assistant for EncryptGate email security platform.
 
 Your job is to answer questions about email investigations using ONLY the evidence provided from the Neo4j graph database.
 
-${evidenceContext}
+${evidenceContext}${threatEmphasis}
 
 CRITICAL INSTRUCTIONS:
 1. Answer ONLY using the evidence provided above
 2. ALWAYS cite specific evidence when making claims (e.g., "According to sender history, ..." or "Based on domain reputation, ...")
-3. If evidence is missing to answer the question, explicitly state what information is not available
-4. Be concise but thorough
-5. Include confidence levels in your assessments (e.g., "high confidence", "medium confidence", "low confidence")
-6. If patterns suggest a threat, explain which specific evidence points support this
-7. Format your response in clear sections with bullet points where appropriate
-8. Do NOT make assumptions beyond what the evidence shows
+3. If VirusTotal verdict is MALICIOUS, you MUST state that the email was flagged because VirusTotal detected malicious content
+4. If threat score is 50 or higher, you MUST mention this as a reason for flagging
+5. If evidence shows malicious URLs or domains, you MUST mention these as threat indicators
+6. If evidence is missing to answer the question, explicitly state what information is not available
+7. Be concise but thorough
+8. Include confidence levels in your assessments (e.g., "high confidence", "medium confidence", "low confidence")
+9. If patterns suggest a threat, explain which specific evidence points support this
+10. Format your response in clear sections with bullet points where appropriate
+11. Do NOT make assumptions beyond what the evidence shows
+12. NEVER say an email was "not flagged" if the evidence shows VirusTotal: MALICIOUS, threat score >= 50, or malicious URLs/domains
 
 RESPONSE FORMAT:
 - Start with a direct answer to the question
+- If asked "Why was this flagged?", prioritize: VirusTotal verdict, threat score, malicious URLs/domains, then other indicators
 - Provide supporting evidence with specific citations
 - End with a confidence assessment and any caveats
 `.trim()
