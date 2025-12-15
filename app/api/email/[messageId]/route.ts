@@ -239,6 +239,54 @@ export async function GET(
       );
     }
 
+    // Get threat score from email record (check multiple possible field names)
+    let threatScore = item.threatScore?.N ? Number(item.threatScore.N) : 
+                     item.final_score?.N ? Number(item.final_score.N) :
+                     item.riskScore?.N ? Number(item.riskScore.N) : undefined;
+
+    // If threat score is missing and email has a detectionId, try to get it from the detection record
+    const detectionId = item.detectionId?.S;
+    if ((!threatScore || threatScore === 0) && detectionId) {
+      try {
+        console.log(`🔍 Threat score missing from email, checking detection record: ${detectionId}`);
+        const detectionsTable = TABLES.DETECTIONS;
+        const detectionScan = new ScanCommand({
+          TableName: detectionsTable,
+          FilterExpression: 'detectionId = :detectionId',
+          ExpressionAttributeValues: {
+            ':detectionId': { S: detectionId }
+          },
+          Limit: 1
+        });
+        
+        const detectionResult = await ddb.send(detectionScan);
+        if (detectionResult.Items && detectionResult.Items.length > 0) {
+          const detectionItem = detectionResult.Items[0];
+          const detectionThreatScore = detectionItem.threatScore?.N ? Number(detectionItem.threatScore.N) : undefined;
+          if (detectionThreatScore && detectionThreatScore > 0) {
+            console.log(`✅ Found threat score in detection record: ${detectionThreatScore}`);
+            threatScore = detectionThreatScore;
+            
+            // Also update threat level if missing
+            if (!item.threatLevel?.S && detectionItem.severity?.S) {
+              // Map severity to threat level
+              const severityMap: Record<string, string> = {
+                'critical': 'critical',
+                'high': 'high',
+                'medium': 'medium',
+                'low': 'low'
+              };
+              const mappedThreatLevel = severityMap[detectionItem.severity.S] || 'medium';
+              item.threatLevel = { S: mappedThreatLevel };
+            }
+          }
+        }
+      } catch (detectionError) {
+        console.warn('⚠️ Could not retrieve threat score from detection record:', detectionError);
+        // Continue without detection data
+      }
+    }
+
     const email = {
       messageId: item.messageId?.S || messageId,
       subject:
@@ -265,13 +313,11 @@ export async function GET(
       flaggedBy: item.flaggedBy?.S,
       investigationNotes: item.investigationNotes?.S,
       flaggedAt: item.flaggedAt?.S,
-      detectionId: item.detectionId?.S,
+      detectionId: detectionId,
       threatLevel: item.threatLevel?.S,
-      flagged: ["ai", "manual"].includes(item.flaggedCategory?.S || ""),
-      // Threat scoring data - check multiple possible field names
-      threatScore: item.threatScore?.N ? Number(item.threatScore.N) : 
-                   item.final_score?.N ? Number(item.final_score.N) :
-                   item.riskScore?.N ? Number(item.riskScore.N) : undefined,
+      flagged: ["ai", "manual"].includes(item.flaggedCategory?.S || "") || !!detectionId,
+      // Threat scoring data - now includes detection fallback
+      threatScore: threatScore,
       // VirusTotal data
       vt_score: item.vt_score?.N ? Number(item.vt_score.N) : undefined,
       vt_verdict: item.vt_verdict?.S,

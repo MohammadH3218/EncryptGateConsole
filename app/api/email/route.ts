@@ -361,6 +361,10 @@ export async function GET(request: Request) {
         flaggedBy: item.flaggedBy?.S,
         investigationNotes: item.investigationNotes?.S,
         updatedAt: item.updatedAt?.S,
+        // Threat scoring data - check multiple possible field names
+        threatScore: item.threatScore?.N ? Number(item.threatScore.N) : 
+                     item.final_score?.N ? Number(item.final_score.N) :
+                     item.riskScore?.N ? Number(item.riskScore.N) : undefined,
         // VirusTotal data
         vt_score: item.vt_score?.N ? Number(item.vt_score.N) : undefined,
         vt_verdict: item.vt_verdict?.S,
