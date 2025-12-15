@@ -48,7 +48,7 @@ export async function gatherEvidence(messageId: string): Promise<EvidenceContext
              s.emailCount as senderEmailCount,
              collect(DISTINCT r.email) as recipients,
              collect(DISTINCT {
-               url: url.url, 
+               url: coalesce(url.url, url.value), 
                domain: d.name, 
                vtScore: url.vtScore, 
                isMalicious: url.isMalicious,
