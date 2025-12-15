@@ -174,8 +174,118 @@ export async function runVirusTotalAgent(
     console.log(`[Agent 2] - URLs to check: ${urls.length}`);
     console.log(`[Agent 2] - Sender IP: ${senderIP || 'Not provided'}`);
 
+    // Always re-scan URLs for security (URLs can change, redirect, or hide malicious content)
+    // But use cached results as fallback if scan fails or times out
+    let urlScanResults: VTURLResult[] = [];
+    if (urls.length > 0) {
+      try {
+        const { getDriver } = await import('./neo4j');
+        const driver = await getDriver();
+        const session = driver.session();
+        
+        // Get cached results as fallback (but we'll still re-scan)
+        const cachedResults = new Map<string, VTURLResult>();
+        
+        for (const url of urls) {
+          try {
+            const checkQuery = `
+              MATCH (urlNode:URL)
+              WHERE (urlNode.url = $url OR urlNode.value = $url)
+                AND (urlNode.scanned = true OR urlNode.vtVerdict IS NOT NULL OR urlNode.isMalicious = true)
+              RETURN urlNode.vtVerdict as verdict, 
+                     urlNode.vtScore as score, 
+                     urlNode.isMalicious as isMalicious,
+                     urlNode.updatedAt as lastScanned
+              LIMIT 1
+            `;
+            const result = await session.run(checkQuery, { url });
+            
+            if (result.records.length > 0) {
+              const record = result.records[0];
+              let verdict = record.get('verdict') as string | null;
+              const score = record.get('score') as number | null;
+              const isMalicious = record.get('isMalicious') as boolean | null;
+              
+              if (!verdict && isMalicious) {
+                verdict = 'MALICIOUS';
+              } else if (!verdict) {
+                verdict = 'UNKNOWN';
+              }
+              
+              cachedResults.set(url, {
+                url,
+                verdict: verdict as VTVerdict,
+                stats: {
+                  malicious: (isMalicious || verdict === 'MALICIOUS') ? 1 : 0,
+                  suspicious: verdict === 'SUSPICIOUS' ? 1 : 0,
+                  harmless: verdict === 'CLEAN' ? 1 : 0,
+                  undetected: 0,
+                  timeout: 0,
+                },
+                permalink: '',
+              });
+            }
+          } catch (checkError) {
+            // Continue - we'll scan anyway
+            console.warn(`[Agent 2] Error checking Neo4j for URL ${url.substring(0, 50)}:`, checkError);
+          }
+        }
+        
+        await session.close();
+        
+        // Always re-scan all URLs (security best practice - URLs can change)
+        // Use cached results only as fallback if scan fails
+        console.log(`[Agent 2] Re-scanning ${urls.length} URLs with VirusTotal (security: URLs can change/redirect)...`);
+        const scanPromises = urls.map(async (url) => {
+          try {
+            // Scan with timeout (10 seconds per URL)
+            const scanResult = await Promise.race([
+              scanURL(url),
+              new Promise<VTURLResult>((_, reject) => 
+                setTimeout(() => reject(new Error('URL scan timeout')), 10000)
+              )
+            ]);
+            return scanResult;
+          } catch (error: any) {
+            console.warn(`[Agent 2] URL scan failed/timed out for ${url.substring(0, 50)}:`, error.message);
+            // Use cached result as fallback if available
+            if (cachedResults.has(url)) {
+              console.log(`[Agent 2] Using cached result as fallback for ${url.substring(0, 50)}...`);
+              return cachedResults.get(url)!;
+            }
+            // Return error result if no cache
+            return {
+              url,
+              verdict: 'ERROR' as VTVerdict,
+              stats: { harmless: 0, malicious: 0, suspicious: 0, undetected: 0, timeout: 0 },
+              permalink: '',
+              error: error.message || 'Unknown error',
+            };
+          }
+        });
+        
+        urlScanResults = await Promise.all(scanPromises);
+        console.log(`[Agent 2] URL scanning complete: ${urlScanResults.filter(r => r.verdict !== 'ERROR').length}/${urls.length} successful`);
+      } catch (neo4jError) {
+        console.warn(`[Agent 2] Error checking Neo4j, scanning all URLs:`, neo4jError);
+        // Fallback: scan all URLs
+        urlScanResults = await Promise.all(
+          urls.map(url => scanURL(url).catch(error => {
+            console.error(`[Agent 2] URL scan failed for ${url.substring(0, 50)}:`, error);
+            return {
+              url,
+              verdict: 'ERROR' as VTVerdict,
+              stats: { harmless: 0, malicious: 0, suspicious: 0, undetected: 0, timeout: 0 },
+              permalink: '',
+              error: error.message || 'Unknown error',
+            };
+          }))
+        );
+      }
+    }
+
     // Run all checks in parallel for performance
-    const [attachmentResults, senderAnalysis, urlDomainResults, urlScanResults] = await Promise.all([
+    const [attachmentResults, senderAnalysis, urlDomainResults] = await Promise.all([
       // 1. Scan attachments
       attachments.length > 0
         ? scanMultipleFiles(attachments)
@@ -594,14 +704,44 @@ export async function runMultiAgentThreatDetection(
     runGraphContextAgent(emailData.sender, emailData.recipients, emailData.messageId),
   ]);
 
+  // Check if any URLs are malicious - this should significantly boost threat score
+  const hasMaliciousUrl = vtResult.url_scan_results?.some(r => 
+    r.verdict === 'MALICIOUS' || r.verdict === 'SUSPICIOUS'
+  ) || false;
+  
   // Fuse risk scores
-  const { finalScore, threatLevel } = fuseRiskScores(
+  let { finalScore, threatLevel } = fuseRiskScores(
     distilbertResult.phish_score,
     vtResult.vt_score,
     graphResult.context_score
   );
 
-  const isPhishing = finalScore >= 50;
+  // If any URL is malicious, boost the threat score significantly
+  if (hasMaliciousUrl) {
+    const maliciousUrlCount = vtResult.url_scan_results?.filter(r => r.verdict === 'MALICIOUS').length || 0;
+    const suspiciousUrlCount = vtResult.url_scan_results?.filter(r => r.verdict === 'SUSPICIOUS').length || 0;
+    
+    // Boost score: +30 for malicious URLs, +15 for suspicious URLs
+    const urlBoost = (maliciousUrlCount * 30) + (suspiciousUrlCount * 15);
+    finalScore = Math.min(100, finalScore + urlBoost);
+    
+    // Update threat level based on boosted score
+    if (finalScore >= 85) {
+      threatLevel = 'critical';
+    } else if (finalScore >= 70) {
+      threatLevel = 'high';
+    } else if (finalScore >= 45) {
+      threatLevel = 'medium';
+    } else if (finalScore >= 20) {
+      threatLevel = 'low';
+    } else {
+      threatLevel = 'none';
+    }
+    
+    console.log(`[Multi-Agent] URL threat boost applied: +${urlBoost} points (${maliciousUrlCount} malicious, ${suspiciousUrlCount} suspicious URLs)`);
+  }
+
+  const isPhishing = finalScore >= 50 || hasMaliciousUrl;
 
   // Run Copilot agent for explanation (sequential, after fusion)
   const copilotResult = await runCopilotAgent(
