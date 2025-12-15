@@ -268,6 +268,10 @@ export async function GET(
       detectionId: item.detectionId?.S,
       threatLevel: item.threatLevel?.S,
       flagged: ["ai", "manual"].includes(item.flaggedCategory?.S || ""),
+      // Threat scoring data - check multiple possible field names
+      threatScore: item.threatScore?.N ? Number(item.threatScore.N) : 
+                   item.final_score?.N ? Number(item.final_score.N) :
+                   item.riskScore?.N ? Number(item.riskScore.N) : undefined,
       // VirusTotal data
       vt_score: item.vt_score?.N ? Number(item.vt_score.N) : undefined,
       vt_verdict: item.vt_verdict?.S,
