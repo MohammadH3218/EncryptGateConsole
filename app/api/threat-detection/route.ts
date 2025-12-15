@@ -214,33 +214,7 @@ async function analyzeWithMultiAgentSystem(emailData: ThreatRequest): Promise<Th
 
     // Add VirusTotal indicators
     if (result.vt_result.aggregate_verdict !== 'CLEAN' && result.vt_result.aggregate_verdict !== 'UNKNOWN') {
-      const urlCount = result.vt_result.url_scan_results?.length || 0;
-      const maliciousUrls = result.vt_result.url_scan_results?.filter(r => r.verdict === 'MALICIOUS').length || 0;
-      const suspiciousUrls = result.vt_result.url_scan_results?.filter(r => r.verdict === 'SUSPICIOUS').length || 0;
-      
-      let indicator = `VirusTotal: ${result.vt_result.aggregate_verdict}`;
-      if (result.vt_result.attachments_scanned > 0) {
-        indicator += ` (${result.vt_result.attachments_scanned} attachments)`;
-      }
-      if (maliciousUrls > 0) {
-        indicator += ` (${maliciousUrls} malicious URL${maliciousUrls > 1 ? 's' : ''})`;
-      } else if (suspiciousUrls > 0) {
-        indicator += ` (${suspiciousUrls} suspicious URL${suspiciousUrls > 1 ? 's' : ''})`;
-      } else if (urlCount > 0) {
-        indicator += ` (${urlCount} URL${urlCount > 1 ? 's' : ''} scanned)`;
-      }
-      indicators.push(indicator);
-    }
-    
-    // Add individual URL indicators for malicious/suspicious URLs
-    if (result.vt_result.url_scan_results) {
-      result.vt_result.url_scan_results.forEach(urlResult => {
-        if (urlResult.verdict === 'MALICIOUS') {
-          indicators.push(`Malicious URL detected: ${urlResult.url.substring(0, 50)}${urlResult.url.length > 50 ? '...' : ''}`);
-        } else if (urlResult.verdict === 'SUSPICIOUS') {
-          indicators.push(`Suspicious URL detected: ${urlResult.url.substring(0, 50)}${urlResult.url.length > 50 ? '...' : ''}`);
-        }
-      });
+      indicators.push(`VirusTotal: ${result.vt_result.aggregate_verdict} (${result.vt_result.attachments_scanned} attachments)`);
     }
 
     // Add graph context indicators
