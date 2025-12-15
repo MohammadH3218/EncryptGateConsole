@@ -14,12 +14,14 @@ import { getConfig } from './config';
 import {
   scanFile,
   scanMultipleFiles,
+  scanURL,
   verdictToScore,
   aggregateVerdicts,
   analyzeSender,
   scanMultipleDomains,
   extractDomain,
   type VTFileResult,
+  type VTURLResult,
   type VTVerdict,
   type VTDomainResult,
   type VTIPResult,
@@ -139,6 +141,9 @@ export interface VTAgentResult {
   sender_domain_result: VTDomainResult | null;
   url_domain_results: VTDomainResult[];
 
+  // URL scanning (individual URLs)
+  url_scan_results: VTURLResult[];
+
   // IP analysis
   sender_ip_result: VTIPResult | null;
 
@@ -170,7 +175,7 @@ export async function runVirusTotalAgent(
     console.log(`[Agent 2] - Sender IP: ${senderIP || 'Not provided'}`);
 
     // Run all checks in parallel for performance
-    const [attachmentResults, senderAnalysis, urlDomainResults] = await Promise.all([
+    const [attachmentResults, senderAnalysis, urlDomainResults, urlScanResults] = await Promise.all([
       // 1. Scan attachments
       attachments.length > 0
         ? scanMultipleFiles(attachments)
@@ -182,6 +187,11 @@ export async function runVirusTotalAgent(
       // 3. Scan URL domains
       urls.length > 0
         ? scanMultipleDomains(urls.map(url => extractDomain(url)).filter(Boolean) as string[])
+        : Promise.resolve([]),
+
+      // 4. Scan individual URLs
+      urls.length > 0
+        ? Promise.all(urls.map(url => scanURL(url)))
         : Promise.resolve([]),
     ]);
 
@@ -206,6 +216,10 @@ export async function runVirusTotalAgent(
     const urlDomainVerdicts = urlDomainResults.map(r => r.verdict);
     allVerdicts.push(...urlDomainVerdicts);
 
+    // Individual URL verdicts
+    const urlVerdicts = urlScanResults.map(r => r.verdict);
+    allVerdicts.push(...urlVerdicts);
+
     // Compute aggregate verdict and score
     const aggregateVerdict = allVerdicts.length > 0
       ? aggregateVerdicts(allVerdicts)
@@ -219,7 +233,7 @@ export async function runVirusTotalAgent(
       `[Agent 2] VT analysis complete - Verdict: ${aggregateVerdict} | ` +
       `Score: ${vtScore.toFixed(2)} | ` +
       `${maliciousCount} malicious, ${suspiciousCount} suspicious ` +
-      `(${attachmentResults.length} files, ${urlDomainResults.length} domains, ` +
+      `(${attachmentResults.length} files, ${urlScanResults.length} URLs, ${urlDomainResults.length} domains, ` +
       `${senderAnalysis.domain ? '1 sender domain' : '0 sender'}, ` +
       `${senderAnalysis.ip ? '1 IP' : '0 IP'})`
     );
@@ -227,6 +241,8 @@ export async function runVirusTotalAgent(
     return {
       // Attachment results
       attachments_scanned: attachments.length,
+      // URL scan results
+      url_scan_results: urlScanResults,
       attachment_verdicts: attachmentVerdicts,
       attachment_scan_results: attachmentResults,
 
@@ -627,6 +643,11 @@ export async function runMultiAgentThreatDetection(
     sender: emailData.sender,
     recipients: emailData.recipients,
     urls: emailData.urls,
+    url_scan_results: vtResult.url_scan_results?.map(r => ({
+      url: r.url,
+      verdict: r.verdict,
+      stats: r.stats,
+    })) || [],
     direction: emailData.direction,
     sentDate: emailData.sentDate,
     distilbert_score: distilbertResult.phish_score,
