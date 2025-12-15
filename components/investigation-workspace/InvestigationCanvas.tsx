@@ -92,10 +92,14 @@ export function InvestigationCanvas({ email, investigation }: InvestigationCanva
   const vtScore = email.vt_score !== undefined ? (email.vt_score * 100).toFixed(1) : "N/A"
   const contextScore = email.context_score !== undefined ? (email.context_score * 100).toFixed(1) : "N/A"
 
-  // Calculate threat score (use provided score, or calculate from available scores)
-  let calculatedThreatScore = email.threatScore || 0
+  // Calculate threat score - check multiple possible field names (same as copilot)
+  // Priority: threatScore > final_score > riskScore > distilbert_score
+  let calculatedThreatScore = email.threatScore || 
+                               (email as any).final_score || 
+                               (email as any).riskScore || 
+                               0
   if (calculatedThreatScore === 0 && email.distilbert_score !== undefined) {
-    // If no threat score but we have distilbert score, use it
+    // If no threat score but we have distilbert score, use it as fallback
     calculatedThreatScore = Math.round(email.distilbert_score * 100)
   }
   const threatScore = calculatedThreatScore
