@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { ddb, extractOrgId, TABLES } from '@/lib/aws';
-import { PutItemCommand } from '@aws-sdk/client-dynamodb';
+import { PutItemCommand, UpdateItemCommand, ScanCommand } from '@aws-sdk/client-dynamodb';
 import { getDriver } from '@/lib/neo4j';
 
 export const runtime = 'nodejs';
@@ -42,19 +42,32 @@ export async function POST(request: Request) {
 
     console.log(`📧 Ingesting email: ${validated.messageId} for org: ${emailOrgId}`);
 
-    // Store email in DynamoDB
+    // Determine userId for email storage (use first recipient for inbound emails)
+    const userId = validated.to && validated.to.length > 0 ? validated.to[0] : validated.from;
+    const receivedAt = validated.timestamp;
+
+    // Store email in DynamoDB with correct table structure (userId + receivedAt as keys)
     // Set initial flaggedCategory to 'clean' (will be updated after threat detection)
     const emailItem: Record<string, any> = {
+      userId: { S: userId }, // Partition key
+      receivedAt: { S: receivedAt }, // Sort key
       messageId: { S: validated.messageId },
       organizationId: { S: emailOrgId },
       emailId: { S: `email-${Date.now()}-${Math.random().toString(36).substr(2, 9)}` },
+      sender: { S: validated.from },
       from: { S: validated.from },
+      recipients: { SS: validated.to },
       to: { SS: validated.to },
       subject: { S: validated.subject },
       body: { S: validated.body || '' },
       htmlBody: { S: validated.htmlBody || '' },
       timestamp: { S: validated.timestamp },
+      direction: { S: 'inbound' },
+      status: { S: 'received' },
+      threatLevel: { S: 'none' },
+      isPhishing: { BOOL: false },
       createdAt: { S: new Date().toISOString() },
+      updatedAt: { S: new Date().toISOString() },
       flaggedCategory: { S: 'clean' }, // Set initial state to 'clean' (will be updated after analysis)
     };
 
@@ -72,6 +85,13 @@ export async function POST(request: Request) {
 
     if (validated.rawS3Key) {
       emailItem.rawS3Key = { S: validated.rawS3Key };
+    }
+
+    // Extract URLs from email body for storage
+    const emailBody = validated.body || validated.htmlBody || '';
+    const extractedUrls = extractURLs(emailBody);
+    if (extractedUrls.length > 0) {
+      emailItem.urls = { SS: extractedUrls };
     }
 
     const emailsTable = process.env.EMAILS_TABLE_NAME || 'Emails';
@@ -137,6 +157,78 @@ export async function POST(request: Request) {
 
         console.log(`✅ Threat detection completed: ${validated.messageId} - Level: ${severity}, Score: ${threatScore}, Flagged: ${flaggedCategory}`);
 
+        // CRITICAL FIX: Update the email's flaggedCategory in DynamoDB
+        // The email was stored with 'clean' initially, but now we know the actual status
+        // We can update directly using the keys we just stored (userId + receivedAt)
+        try {
+          const updateExpressions: string[] = ['flaggedCategory = :flaggedCategory', 'updatedAt = :updatedAt'];
+          const expressionValues: Record<string, any> = {
+            ':flaggedCategory': { S: flaggedCategory },
+            ':updatedAt': { S: new Date().toISOString() }
+          };
+
+          if (flaggedCategory === 'ai') {
+            updateExpressions.push('flaggedSeverity = :flaggedSeverity');
+            updateExpressions.push('investigationStatus = :investigationStatus');
+            expressionValues[':flaggedSeverity'] = { S: severity };
+            expressionValues[':investigationStatus'] = { S: 'new' };
+          }
+
+          // Also update threat analysis fields if available
+          if (analysis.threatScore !== undefined) {
+            updateExpressions.push('threatScore = :threatScore');
+            expressionValues[':threatScore'] = { N: analysis.threatScore.toString() };
+          }
+          if (analysis.threatLevel) {
+            updateExpressions.push('threatLevel = :threatLevel');
+            expressionValues[':threatLevel'] = { S: analysis.threatLevel };
+          }
+          if (analysis.distilbert_score !== undefined) {
+            updateExpressions.push('distilbert_score = :distilbert_score');
+            expressionValues[':distilbert_score'] = { N: analysis.distilbert_score.toString() };
+          }
+          if (analysis.vt_score !== undefined) {
+            updateExpressions.push('vt_score = :vt_score');
+            expressionValues[':vt_score'] = { N: analysis.vt_score.toString() };
+          }
+          if (analysis.context_score !== undefined) {
+            updateExpressions.push('context_score = :context_score');
+            expressionValues[':context_score'] = { N: analysis.context_score.toString() };
+          }
+          if (analysis.vt_verdict) {
+            updateExpressions.push('vt_verdict = :vt_verdict');
+            expressionValues[':vt_verdict'] = { S: analysis.vt_verdict };
+          }
+
+          const updateCommand = new UpdateItemCommand({
+            TableName: emailsTable,
+            Key: {
+              userId: { S: userId },
+              receivedAt: { S: receivedAt }
+            },
+            UpdateExpression: `SET ${updateExpressions.join(', ')}`,
+            ExpressionAttributeValues: expressionValues
+          });
+
+          await ddb.send(updateCommand);
+          console.log(`✅ Email flaggedCategory updated to '${flaggedCategory}' for ${validated.messageId}`);
+        } catch (updateError: any) {
+          console.error('❌ Error updating email flaggedCategory:', updateError.message);
+          // Try fallback using email-helpers
+          try {
+            const { updateEmailAttributes } = await import('@/lib/email-helpers');
+            await updateEmailAttributes(validated.messageId, {
+              flaggedCategory,
+              flaggedSeverity: flaggedCategory === 'ai' ? (severity as 'medium' | 'high' | 'critical') : undefined,
+              investigationStatus: flaggedCategory === 'ai' ? 'new' : undefined,
+            });
+            console.log(`✅ Email flaggedCategory updated via fallback method: ${flaggedCategory}`);
+          } catch (fallbackError: any) {
+            console.error('❌ Fallback update also failed:', fallbackError.message);
+            // Don't fail the entire ingestion if update fails
+          }
+        }
+
         // Create detection if threat found (only for medium+ threats)
         if (analysis.threatLevel === 'medium' || analysis.threatLevel === 'high' || analysis.threatLevel === 'critical') {
           detectionId = `det-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -171,6 +263,17 @@ export async function POST(request: Request) {
 
           detectionCreated = true;
           console.log(`🚨 Detection created: ${detectionId} (${severity})`);
+          
+          // Also link the detection to the email
+          try {
+            const { updateEmailAttributes: updateAttrs } = await import('@/lib/email-helpers');
+            await updateAttrs(validated.messageId, {
+              detectionId: detectionId,
+            });
+            console.log(`✅ Email linked to detection: ${detectionId}`);
+          } catch (linkError: any) {
+            console.warn('⚠️ Failed to link detection to email:', linkError.message);
+          }
         }
       } else {
         const errorText = await threatResponse.text();
